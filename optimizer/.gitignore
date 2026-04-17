@@ -1,0 +1,47 @@
+# Python environments
+.venv/
+venv/
+env/
+.python-version
+
+# Python cache and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.nox/
+.tox/
+.pyre/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Local logs
+*.log
+*.pid
+
+# Runtime strategy data
+data/strategy/archive/
+data/strategy/inbox/
+data/strategy/feeds.json
+data/strategy/reconciliation_reports.json
+data/strategy/scenarios.json
+data/strategy/*.tmp
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

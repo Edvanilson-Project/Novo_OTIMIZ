@@ -1,0 +1,19 @@
+--- backend/src/modules/optimization/optimization.service.ts
++++ backend/src/modules/optimization/optimization.service.ts
+@@ -10,2 +10,4 @@
+ import { AuthRequest } from '../auth/interfaces/auth-request.interface';
++import { plainToInstance } from 'class-transformer';
++import { validateOrReject } from 'class-validator';
++import { OptimizerPayloadDto } from './dto/optimizer-payload.dto';
+@@ -605,6 +607,17 @@
+ 
++        // VALIDAÇÃO BLINDADA DO PAYLOAD (DEFENSIVA) ANTES DO ENVIO
++        try {
++          const typedPayload = plainToInstance(OptimizerPayloadDto, optimizerPayload);
++          await validateOrReject(typedPayload);
++        } catch (validationErrors) {
++          this.logger.error(`Tentativa de envio de parâmetros inválidos para o Optimizer. Payload: ${JSON.stringify(validationErrors)}`);
++          throw new Error('Falha de Segurança/Validação: Parâmetros mal formatados ou viagens vazias no payload do Otimizador.');
++        }
++
+         const budgetS = optimizerPayload.time_budget_s || 300;

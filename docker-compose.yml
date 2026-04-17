@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: otimiz-v2-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-otimiz_db}
+      POSTGRES_USER: ${DB_USER:-otimiz_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-otimiz_password}
+    ports:
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - otimiz-network
+
+  redis:
+    image: redis:alpine
+    container_name: otimiz-v2-redis
+    restart: always
+    ports:
+      - "6388:6379"
+    networks:
+      - otimiz-network
+
+networks:
+  otimiz-network:
+    driver: bridge
+
+volumes:
+  pgdata:

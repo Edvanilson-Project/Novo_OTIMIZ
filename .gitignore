@@ -1,0 +1,60 @@
+# Node / Next.js
+**/node_modules/
+**/.next/
+**/out/
+**/.pnp
+**/.pnp.*
+**/coverage/
+**/build/
+**/dist/
+**/.turbo/
+**/.vercel/
+**/*.tsbuildinfo
+frontend/next-env.d.ts
+
+# Python
+**/.venv/
+**/venv/
+**/env/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.hypothesis/
+**/.tox/
+**/.nox/
+**/*.egg-info/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+**/.python-version
+
+# Env files (example ones are committed)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs / PIDs / temp
+**/*.log
+**/*.pid
+**/*.tmp
+**/*.swp
+**/*.swo
+
+# Runtime strategy data
+**/data/strategy/archive/
+**/data/strategy/inbox/
+**/data/strategy/feeds.json
+**/data/strategy/reconciliation_reports.json
+**/data/strategy/scenarios.json
+**/data/strategy/*.tmp
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# IDE / Claude artifacts
+.claude/
+.vscode/
+.idea/
