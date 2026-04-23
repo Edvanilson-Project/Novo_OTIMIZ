@@ -106,46 +106,92 @@ async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
     if not body.trips:
         raise HTTPException(status_code=400, detail="trips list cannot be empty")
 
-    payload = {
-        "trips": [t.model_dump(mode="json") for t in body.trips],
-        "vehicle_types": [v.model_dump(mode="json") for v in body.vehicle_types],
-        "algorithm": body.algorithm.value if hasattr(body.algorithm, "value") else str(body.algorithm),
-        "depot_id": body.depot_id,
-        "time_budget_s": body.time_budget_s,
-        "line_id": body.line_id,
-        "company_id": body.company_id,
-        "run_id": body.run_id,
-        "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True) if body.cct_params else {},
-        "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
-        "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
-    }
+    # Validação básica dos parâmetros
+    if not isinstance(body.trips, list) or len(body.trips) == 0:
+        raise HTTPException(status_code=400, detail="Lista de viagens inválida ou vazia")
+    
+    if not isinstance(body.vehicle_types, list) or len(body.vehicle_types) == 0:
+        raise HTTPException(status_code=400, detail="Lista de tipos de veículo inválida ou vazia")
+    
+    if body.time_budget_s is not None and (body.time_budget_s <= 0 or body.time_budget_s > 3600):
+        raise HTTPException(status_code=400, detail="time_budget_s deve estar entre 1 e 3600 segundos")
 
-    # Calcula Fingerprint Determinístico para o Smart Cache
-    payload_str = json.dumps(payload, sort_keys=True)
-    fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
-    cache_key = f"optimizer:cache:{fingerprint}"
+    # Construir payload com validação adicional
+    try:
+        payload = {
+            "trips": [t.model_dump(mode="json") for t in body.trips],
+            "vehicle_types": [v.model_dump(mode="json") for v in body.vehicle_types],
+            "algorithm": body.algorithm.value if hasattr(body.algorithm, "value") else str(body.algorithm),
+            "depot_id": body.depot_id,
+            "time_budget_s": body.time_budget_s,
+            "line_id": body.line_id,
+            "company_id": body.company_id,
+            "run_id": body.run_id,
+            "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True) if body.cct_params else {},
+            "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
+            "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
+            "version": "v2.0",  # Adicionar versionamento explícito
+            "timestamp": int(time.time())  # Para evitar cache de execuções antigas
+        }
+    except Exception as e:
+        logger.error(f"Erro ao construir payload: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Erro ao processar parâmetros: {str(e)}")
+
+    # Calcula Fingerprint Determinístico para o Smart Cache com versionamento
+    try:
+        # Incluir versão e timestamp no cálculo do fingerprint
+        cache_payload = {
+            **payload,
+            "cache_version": "v2.0",
+            "timestamp": int(time.time() // 3600)  # Muda a cada hora
+        }
+        payload_str = json.dumps(cache_payload, sort_keys=True)
+        fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+        cache_key = f"optimizer:cache:v2.0:{fingerprint}"
+    except Exception as e:
+        logger.error(f"Erro ao calcular fingerprint do cache: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao processar requisição: {str(e)}"
+        )
 
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
 
     try:
         cached_task_id = await redis_client.get(cache_key)
         if cached_task_id:
-            # Garante que a task ainda existe e não falhou
+            # Verificar estado da task e validar timestamp
             task_state = AsyncResult(cached_task_id).state
-            if task_state in ("PENDING", "STARTED", "SUCCESS"):
-                logger.info("optimization_cache_hit: task_id=%s fingerprint=%s", cached_task_id, fingerprint)
+            task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
+            
+            # Validação adicional: garantir que a task não é muito antiga
+            if task_timestamp and int(time.time()) - int(task_timestamp) > 43200:  # 12 horas
+                logger.info(f"Cache expirado para task {cached_task_id}")
+                await redis_client.delete(cache_key)
+            elif task_state in ("PENDING", "STARTED", "SUCCESS"):
+                logger.info(
+                    "optimization_cache_hit: task_id=%s fingerprint=%s state=%s",
+                    cached_task_id, fingerprint, task_state
+                )
                 await redis_client.aclose()
                 return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
     except Exception as exc:
-        logger.warning("Falha ao ler cache do Redis (ignorando): %s", exc)
+        logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
+        # Continuar sem cache em caso de erro
 
     try:
         task = run_optimization_task.delay(payload)
         try:
-            # Retenção do cache por 12 horas (43200s)
+            # Retenção do cache por 12 horas (43200s) com timestamp
             await redis_client.setex(cache_key, 43200, task.id)
+            await redis_client.setex(
+                f"optimizer:task_timestamp:{task.id}", 
+                43200, 
+                int(time.time())
+            )
         except Exception as exc:
-            logger.warning("Falha ao salvar cache no Redis (ignorando): %s", exc)
+            logger.error(f"Falha ao salvar cache no Redis: {str(exc)}", exc_info=True)
+            # Continuar sem cache em caso de erro
     except Exception as exc:
         logger.exception("Falha ao enfileirar tarefa no Celery")
         await redis_client.aclose()
