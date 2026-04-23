@@ -578,6 +578,51 @@ def joint_duty_vehicle_swap(
         best_candidate: Optional[Dict[str, Any]] = None
         evaluated_signatures = {_vsp_signature(vsp_sol)}
 
+        # ── Fase 3: Large Neighborhood Search (LNS) ──────────────────────────
+        lns_enabled = bool(vsp_params.get("enable_lns_postopt", True))
+        if lns_enabled and len(best_vsp.blocks) > 2:
+            import random
+            lns_vsp = copy.deepcopy(best_vsp)
+            # 1. Destroy: Seleciona aleatoriamente 20% dos blocos para destruir
+            num_destroy = max(2, int(len(lns_vsp.blocks) * 0.2))
+            destroy_indices = random.sample(range(len(lns_vsp.blocks)), num_destroy)
+            
+            unassigned = []
+            for idx in sorted(destroy_indices, reverse=True):
+                unassigned.extend(lns_vsp.blocks[idx].trips)
+                lns_vsp.blocks.pop(idx)
+                
+            unassigned.sort(key=lambda t: t.start_time)
+            
+            # 2. Repair: Reinsere as viagens usando heurística gulosa com ruído
+            new_blocks = []
+            current_block = []
+            for t in unassigned:
+                if not current_block:
+                    current_block.append(t)
+                else:
+                    last_t = current_block[-1]
+                    gap = t.start_time - last_t.end_time
+                    deadhead = int(last_t.deadhead_times.get(t.origin_id, 0))
+                    needed = max(min_layover, deadhead)
+                    
+                    if gap >= needed and gap < max_unpaid_break + random.randint(0, 30):
+                        current_block.append(t)
+                    else:
+                        new_blocks.append(Block(id=0, trips=current_block, vehicle_type_id=lns_vsp.blocks[0].vehicle_type_id if lns_vsp.blocks else 1))
+                        current_block = [t]
+            if current_block:
+                new_blocks.append(Block(id=0, trips=current_block, vehicle_type_id=lns_vsp.blocks[0].vehicle_type_id if lns_vsp.blocks else 1))
+                
+            lns_vsp.blocks.extend(new_blocks)
+            lns_vsp.blocks = _renumber_blocks(lns_vsp.blocks)
+            
+            candidate_vsps.append({
+                "phase": "large_neighborhood_search",
+                "vsp": lns_vsp,
+                "details": {"destroyed_blocks": num_destroy}
+            })
+
         for candidate in candidate_vsps:
             candidate_vsp = candidate["vsp"]
             signature = _vsp_signature(candidate_vsp)
