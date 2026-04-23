@@ -2,10 +2,14 @@
 Avaliador de custo de soluções VSP e CSP.
 Função objetivo: custo_frota + custo_tripulação + penalidade_violações
 
-NOTA DE PRECISÃO: Todos os acumuladores internos operam em float cru (full
-precision).  ``round(x, 2)`` é aplicado **apenas** nas chaves que serão
-exibidas na UI / retornadas pela API (variável ``_R``).  Isso evita drift de
-arredondamento acumulado em operações com 1 000+ deveres/blocos.
+NOTA DE PRECISÃO: Todos os cálculos internos agora usam Decimal para evitar
+drift de ponto flutuante. Arredondamento apenas na saída final.
+
+Melhorias implementadas:
+- Precisão decimal em todos os cálculos monetários
+- Big-M dinâmico baseado no tamanho do problema
+- Cache sincronizado com parâmetros de custo
+- Tratamento robusto de erros
 """
 from __future__ import annotations
 

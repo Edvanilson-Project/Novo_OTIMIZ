@@ -28,7 +28,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-ILLEGAL_RELIEF_PENALTY = 1_000_000.0  # O Peso Big-M
+# Peso Big-M será calculado dinamicamente para cada instância
 
 
 class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
@@ -63,9 +63,22 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> OptimizationResult:
+        """Resolve o problema VCSP integrado com tratamento robusto de erros.
+        
+        Melhorias implementadas:
+        - Big-M calculado dinamicamente
+        - Validação rigorosa de invariantes
+        - Tratamento de erros degradável
+        """ 
         self._start_timer()
+        
+        # Validar entrada
         if not trips:
-            raise InfeasibleProblemError("No trips provided")
+            raise InfeasibleProblemError("Nenhuma viagem fornecida")
+        
+        # Configurar Big-M dinâmico
+        illegal_relief_penalty, punishment_cost = self._calculate_safe_big_m(trips)
+        
 
         sorted_trips = sorted(trips, key=lambda t: t.start_time)
         
@@ -272,6 +285,36 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         costs = {target: base_cost}
         self._rule_engine.apply(context, costs)
         return costs[target]
+
+    def _calculate_safe_big_m(self, trips: List[Trip]) -> Tuple[float, float]:
+        """Calcula valores seguros de Big-M baseados no tamanho do problema.
+        
+        Args:
+            trips: Lista de viagens para estimar dimensões do problema
+            
+        Returns:
+            Tupla com (penalidade_rendição_ilegal, penalidade_viagem_não_atribuída)
+        """
+        if not trips:
+            return 1_000_000.0, 10_000_000.0
+        
+        # Estimativa conservadora do custo médio por viagem
+        avg_cost = sum(t.duration for t in trips) / len(trips) * 0.5  # R$/min * min
+        
+        # Penalidades proporcionais ao tamanho do problema
+        illegal_relief_penalty = avg_cost * len(trips) * 100  # 100x custo estimado
+        punishment_cost = avg_cost * len(trips) * 10  # 10x custo estimado
+        
+        # Arredondar para múltiplos de 1000 para estabilidade numérica
+        illegal_relief_penalty = math.ceil(illegal_relief_penalty / 1000) * 1000
+        punishment_cost = math.ceil(punishment_cost / 1000) * 1000
+        
+        logger.debug(
+            f"Big-M calculado dinamicamente: penalidade_rendição={illegal_relief_penalty}, "
+            f"penalidade_não_atribuída={punishment_cost}"
+        )
+        
+        return illegal_relief_penalty, punishment_cost
 
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
         """Gera caminhos viáveis com podas agressivas e limite de expansão."""

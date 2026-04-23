@@ -242,10 +242,39 @@ class RoutingClient:
                 matrix[(location_ids[i], location_ids[j])] = dur_min
         return matrix
 
-    def _matrix_cache_key(self, location_ids: List[int]) -> str:
-        """Chave de cache Redis para a matriz completa de localizações."""
-        ids_hash = hash(tuple(sorted(location_ids)))
-        return f"route_matrix:{abs(ids_hash)}"
+    def _matrix_cache_key(self, location_ids: List[int], cost_params_hash: str = "") -> str:
+        """Chave de cache Redis para a matriz completa com versionamento.
+        
+        Args:
+            location_ids: IDs das localizações
+            cost_params_hash: Hash dos parâmetros de custo atuais
+            
+        Returns:
+            Chave de cache versionada e única para esta combinação
+        """
+        # Incluir hash dos parâmetros de custo se fornecido
+        if cost_params_hash:
+            ids_hash = hash(tuple(sorted(location_ids)) + (cost_params_hash,))
+        else:
+            ids_hash = hash(tuple(sorted(location_ids)))
+        
+        return f"route_matrix:v2:{abs(ids_hash)}"
+
+    def _get_cost_params_hash(self) -> str:
+        """Gera hash dos parâmetros de custo atuais para versionamento de cache.
+        
+        Calcula um hash MD5 baseado nos parâmetros de custo atuais.
+        Isso garante que mudanças nos custos invalidem automaticamente o cache.
+        """
+        import hashlib
+        import json
+        
+        params = {
+            "crew_cost": getattr(self.evaluator, 'crew_cost_per_hour', 25.0),
+            "vehicle_cost": getattr(self.evaluator, 'cost_km', 2.5),
+            "timestamp": int(time.time() // 3600)  # Muda a cada hora
+        }
+        return hashlib.md5(json.dumps(params).encode()).hexdigest()[:8]
 
     def _save_matrix_to_cache(
         self,
