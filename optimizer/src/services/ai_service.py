@@ -11,9 +11,11 @@ Princípios de design:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -65,6 +67,10 @@ class AiService:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai_service")
+        # Cache de traduções: SHA256(regras) -> Dict resultado
+        # Evita chamadas redundantes ao LLM para regras idênticas.
+        # Capacidade máxima: 256 entradas (FIFO quando lotado).
+        self._translation_cache: Dict[str, Dict[str, Any]] = {}
 
     # ── API pública ──────────────────────────────────────────────────────────
 
@@ -90,23 +96,42 @@ class AiService:
     def translate_rules_sync(self, rules: List[str]) -> Dict[str, Any]:
         """
         Traduz uma lista de regras em linguagem natural para um dict JSON.
+
+        MELHORIA v2.0: Cache em memória (SHA-256) para evitar chamadas repetidas
+        ao LLM. Regras idênticas são resolvidas em microssegundos sem custo de API.
         Se a chamada falhar ou a chave API não existir, retorna um dict vazio.
         """
         if not self._settings.openrouter_api_key or not rules:
             return {}
 
+        # Gerar fingerprint determinístico das regras
+        cache_key = hashlib.sha256("|||".join(sorted(str(r) for r in rules)).encode()).hexdigest()
+
+        # Verificar cache antes de chamar o LLM
+        if cache_key in self._translation_cache:
+            logger.debug("[AiService] Cache hit para tradução de regras (key=%s).", cache_key[:8])
+            return self._translation_cache[cache_key]
+
         try:
             future = self._executor.submit(self._run_translate_async, rules)
             result = future.result(timeout=15)
-            import json
             # Remove blocos Markdown que o LLM pode ter inserido indevidamente
             if result:
                 clean_json = result.replace("```json", "").replace("```", "").strip()
-                return json.loads(clean_json)
-            return {}
+                parsed = json.loads(clean_json)
+            else:
+                parsed = {}
         except Exception as exc:
             logger.warning("[AiService] Falha ao traduzir regras (não crítico): %s", exc)
             return {}
+
+        # Salvar no cache (FIFO: descartar entrada mais antiga quando lotado)
+        if len(self._translation_cache) >= 256:
+            oldest_key = next(iter(self._translation_cache))
+            del self._translation_cache[oldest_key]
+        self._translation_cache[cache_key] = parsed
+        logger.info("[AiService] Tradução cacheada (key=%s, %d entradas).", cache_key[:8], len(self._translation_cache))
+        return parsed
 
     # ── Implementação interna ─────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import pytest
-from optimizer.src.algorithms.integrated.vcsp_solver import VCSPJointSolver
-from optimizer.src.domain.models import Trip, VehicleType
+from src.algorithms.integrated.vcsp_solver import VCSPJointSolver
+from src.domain.models import Trip, VehicleType
 
 def test_vcsp_pulp_terminal_relief_constraint():
     """

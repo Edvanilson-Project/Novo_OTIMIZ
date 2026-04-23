@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from optimizer.src.infrastructure.routing_client import RoutingClient
+from src.infrastructure.routing_client import RoutingClient
 
 @pytest.fixture
 def mock_redis():

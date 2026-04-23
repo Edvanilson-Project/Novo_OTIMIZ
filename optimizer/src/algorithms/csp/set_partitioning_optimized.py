@@ -709,18 +709,41 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         for index in range(len(combo) - 1):
             passive += max(0, self.greedy._transfer_needed(combo[index], combo[index + 1]) - self.greedy.min_layover)
 
-        cost = 50.0 + work / 60.0 * _DEFAULT_CREW_COST_PER_HOUR + sum(gaps) * 0.1 + passive * self.goal_weights.get("passive_transfer", 0.25)
+        # Converter tudo para Decimal
+        from decimal import Decimal
+        work_dec = Decimal(str(work))
+        spread_dec = Decimal(str(spread))
+        gaps_sum = Decimal(str(sum(gaps)))
+        passive_dec = Decimal(str(passive))
+        
+        # Custos base
+        cost = Decimal('50.0')  # custo fixo por jornada
+        cost += (work_dec / Decimal('60.0')) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
+        cost += gaps_sum * Decimal('0.1')
+        cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))
+        
+        # Desvios de metas
         target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
         target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
+        
         overtime_dev = self.greedy._regular_overtime_minutes(work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)
-        cost += overtime_dev * self.goal_weights.get("overtime", 0.8)
-        cost += underwork_dev * self.goal_weights.get("min_work", 0.2)
-        cost += spread_dev * self.goal_weights.get("spread", 0.15)
-        cost += fairness_dev * self.goal_weights.get("fairness", 0.05)
-        return cost
+        
+        # Converter desvios para Decimal
+        overtime_dev_dec = Decimal(str(overtime_dev))
+        underwork_dev_dec = Decimal(str(underwork_dev))
+        spread_dev_dec = Decimal(str(spread_dev))
+        fairness_dev_dec = Decimal(str(fairness_dev))
+        
+        # Adicionar penalidades de desvio
+        cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 0.8)))
+        cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.2)))
+        cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.15)))
+        cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.05)))
+        
+        return float(cost)
 
     def _spprc_pricing(
         self,
@@ -777,7 +800,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         Rótulos dominados são descartados imediatamente (poda Pareto).
         """
-        CREW_COST_PER_MIN = _DEFAULT_CREW_COST_PER_HOUR / 60.0
+        CREW_COST_PER_MIN = float(_DEFAULT_CREW_COST_PER_HOUR) / 60.0
         FIXED_DUTY_COST = 50.0
         GAP_WEIGHT = 0.1
         PASSIVE_WEIGHT = float(self.goal_weights.get("passive_transfer", 0.25))

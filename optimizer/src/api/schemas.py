@@ -215,14 +215,15 @@ class VspParamsInput(BaseModel):
 
 
 class OptimizeRequest(BaseModel):
-    trips: List[TripInput]
-    vehicle_types: List[VehicleTypeInput] = Field(default_factory=list)
-    algorithm: AlgorithmType = AlgorithmType.HYBRID_PIPELINE
-    depot_id: Optional[int] = None
-    time_budget_s: Optional[float] = None
+    run_id: Optional[int] = Field(None, description="ID único desta execução para rastreabilidade")
     line_id: Optional[int] = None
     company_id: Optional[int] = None
-    run_id: Optional[int] = None
+    algorithm: AlgorithmType = AlgorithmType.HYBRID_PIPELINE
+    depot_id: Optional[int] = None
+    time_budget_s: Optional[float] = Field(None, ge=1, le=3600)
+    wait_for_completion: bool = Field(False, description="Se True, a requisição aguarda o resultado e o retorna diretamente")
+    trips: List[TripInput]
+    vehicle_types: List[VehicleTypeInput]
     cct_params: Optional[CctParamsInput] = None
     vsp_params: Optional[VspParamsInput] = None
     optimization_params: Optional[OptimizationParametersDTO] = None
@@ -324,6 +325,10 @@ class TaskStatusResponse(BaseModel):
     task_id: str
     result: Optional[OptimizeResponse] = None
     error: Optional[Dict[str, Any]] = None
+    # Campos de progresso em tempo real (presentes quando status="processing" e Celery reporta PROGRESS)
+    phase: Optional[str] = None            # Ex: "vsp", "csp", "finalizing"
+    phase_label: Optional[str] = None     # Ex: "Otimizando alocação de veículos (VSP)..."
+    progress_pct: Optional[int] = None    # 0–100
 
 
 class MacroEstimateRequest(BaseModel):

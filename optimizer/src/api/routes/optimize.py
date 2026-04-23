@@ -94,12 +94,12 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
 
 @router.post(
     "/",
-    response_model=TaskSubmittedResponse,
+    response_model=Union[TaskSubmittedResponse, OptimizeResponse],
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
     tags=["optimization"],
     summary="Enfileira otimização VSP+CSP no worker Celery",
 )
-async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
+async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, OptimizeResponse]:
     """
     Valida o payload, verifica se há cache da execução (Smart Caching de 12 horas)
     e enfileira no Celery caso seja um cenário inédito.
@@ -161,8 +161,13 @@ async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
     try:
         cached_task_id = await redis_client.get(cache_key)
         if cached_task_id:
-            # Verificar estado da task e validar timestamp
-            task_state = AsyncResult(cached_task_id).state
+            # Verificar estado da task com segurança (evita erro se backend estiver desabilitado)
+            task_state = "UNKNOWN"
+            try:
+                task_state = AsyncResult(cached_task_id).state
+            except Exception as e:
+                logger.warning(f"Não foi possível verificar estado da task {cached_task_id}: {str(e)}")
+
             task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
             
             # Validação adicional: garantir que a task não é muito antiga
@@ -179,6 +184,25 @@ async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
     except Exception as exc:
         logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
         # Continuar sem cache em caso de erro
+
+    if body.wait_for_completion:
+        try:
+            # Execução síncrona direta (ignora fila Celery para resposta imediata)
+            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos
+            result_raw = run_optimization_task(payload)
+            
+            if isinstance(result_raw, dict) and result_raw.get("_is_error"):
+                 err = result_raw.get("error_payload", {})
+                 raise HTTPException(status_code=400, detail=err.get("message", "Erro na execução da otimização"))
+            
+            # Ajuste: A task retorna {"_is_error": False, "result": {...}}
+            final_result = result_raw.get("result", result_raw)
+            return _build_optimize_response(final_result, len(body.trips))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Erro na execução síncrona: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Erro ao processar otimização síncrona: {str(e)}")
 
     try:
         task = run_optimization_task.delay(payload)
@@ -202,6 +226,7 @@ async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
         ) from exc
 
     await redis_client.aclose()
+    
     logger.info(
         "optimization_queued: task_id=%s run_id=%s trips=%d",
         task.id,

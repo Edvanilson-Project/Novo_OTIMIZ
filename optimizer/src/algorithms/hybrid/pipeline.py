@@ -47,6 +47,8 @@ class HybridPipeline(BaseAlgorithm):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> OptimizationResult:
+        best_vsp = None
+        self._start_timer()
         # Early stopping por qualidade se atingir 80% do tempo
         if self._elapsed_ms() > 0.8 * self.time_budget_s * 1000:
             if hasattr(self, '_early_stop_count'):
@@ -181,7 +183,12 @@ class HybridPipeline(BaseAlgorithm):
 
     def _finalize(self, vsp_sol, trips, vehicle_types, phase_timings_ms=None) -> OptimizationResult:
         import time
+        from ...domain.models import VSPSolution
         phase_timings_ms = dict(phase_timings_ms or {})
+        
+        if vsp_sol is None:
+            vsp_sol = VSPSolution(algorithm=self.name, meta={})
+            
         vsp_sol.meta.setdefault(
             "objective",
             {

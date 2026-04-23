@@ -645,9 +645,14 @@ def joint_duty_vehicle_swap(
             vsp_sol.meta = {**(vsp_sol.meta or {}), "post_optimization": post_opt_meta}
             return csp_sol, vsp_sol
 
+        # ── Parâmetros globais ───────────────────────────────────────────────
         vsp_params = dict(kwargs.get("vsp_params", {})) if kwargs.get("vsp_params") else (dict(vsp_sol.meta) if vsp_sol.meta else {})
         solver_kwargs = {key: value for key, value in kwargs.items() if key != "vsp_params"}
         min_work = int(solver_kwargs.get("min_work_minutes", cct_params.get("min_work_minutes", 0)) or 0)
+        min_layover = int(vsp_params.get("min_layover_minutes", 8))
+        max_unpaid_break = int(cct_params.get("max_unpaid_break_minutes", cct_params.get("max_unpaid_break", 180)))
+        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
+
         original_vehicles = len(vsp_sol.blocks)
         original_crew = csp_sol.num_crew
         baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, min_work)
@@ -657,8 +662,6 @@ def joint_duty_vehicle_swap(
         vsp_changed = len(merged_vsp.blocks) < original_vehicles
 
         # ── Fase 2: Swap de trips entre blocos (multi-pass) ──────────────────
-        max_unpaid_break = int(cct_params.get("max_unpaid_break_minutes", cct_params.get("max_unpaid_break", 180)))
-        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
 
         swap_vsp = copy.deepcopy(merged_vsp)
         blocks = swap_vsp.blocks

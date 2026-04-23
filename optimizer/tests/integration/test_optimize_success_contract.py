@@ -1,5 +1,9 @@
+import os
+import sys
 import pytest
 from fastapi.testclient import TestClient
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from main import app
 
@@ -56,9 +60,10 @@ def test_optimize_success_response_exposes_audit_contract():
             "random_seed": 123,
             "preserve_preferred_pairs": True,
         },
+        "wait_for_completion": True,
     }
 
-    response = client.post("/optimize/", json=payload)
+    response = client.post("/optimize/", json=payload, headers={"X-Internal-Key": "internal-key-123456"})
 
     assert response.status_code == 200, response.text
     data = response.json()

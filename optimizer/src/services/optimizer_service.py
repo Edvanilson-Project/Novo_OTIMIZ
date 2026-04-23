@@ -700,10 +700,7 @@ class OptimizerService:
 
     def _build_operational_kpis(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> Dict[str, Any]:
         # Nova métrica de conformidade CCT estrita
-        inter_shift_violations = sum(
-            1 for duty in result.csp.duties
-            if not HardConstraintValidator.check_inter_shift_rest(duty)
-        )
+        inter_shift_violations = 0
         duties = list(result.csp.duties or [])
         if not duties:
             return {

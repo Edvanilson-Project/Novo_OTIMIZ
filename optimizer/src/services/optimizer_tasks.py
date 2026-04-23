@@ -136,6 +136,20 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 algorithm_str,
             )
 
+        def _update_progress(phase: str, label: str, pct: int):
+            """Atualiza o estado do Celery apenas se estiver rodando em contexto de worker."""
+            if self.request.id:
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "phase": phase,
+                        "phase_label": label,
+                        "progress_pct": pct,
+                        "run_id": run_id,
+                        "trips_count": len(trips),
+                    },
+                )
+
         logger.info(
             "[CeleryTask] Iniciando run_id=%s, trips=%d, algorithm=%s",
             run_id,
@@ -143,7 +157,13 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             algorithm_str,
         )
 
-        # ── Execução do pipeline matemático (NUNCA alterado) ────────────────
+        # ── Fase 1/4: Pré-processamento ────────────────────────────────────────
+        _update_progress("preprocessing", "Pré-processando viagens e regras...", 10)
+
+        # ── Fase 2/4: VSP (Alocação de Veículos) ──────────────────────────────
+        _update_progress("vsp", "Otimizando frota de veículos (VSP)...", 30)
+
+        # ── Execução do pipeline matemático ──────────────────────────────────
         result = _service.run(
             trips=trips,
             vehicle_types=vehicle_types,
@@ -155,7 +175,14 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             optimization_params=optimization_params,
         )
 
+        # ── Fase 3/4: CSP (Escalonamento de Tripulação) ────────────────────────
+        _update_progress("csp", "Otimizando escala de tripulantes (CSP)...", 60)
+
+        # ── Fase 4/4: Consolidação dos resultados ─────────────────────────────
+        _update_progress("finalizing", "Finalizando e auditando resultados...", 90)
+
         raw = result.as_dict()
+
 
         # Enriquecer com metadados da requisição original
         meta = raw.get("meta") or {}

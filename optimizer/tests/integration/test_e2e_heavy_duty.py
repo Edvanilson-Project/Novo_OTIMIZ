@@ -1,5 +1,10 @@
+import os
+import sys
 import pytest
 from fastapi.testclient import TestClient
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from main import app
 
 client = TestClient(app)
@@ -42,6 +47,16 @@ def test_e2e_heavy_duty_charter_api_load():
         "algorithm": "hybrid_pipeline",
         "time_budget_s": 5.0,
         "trips": trips,
+        "vehicle_types": [
+            {
+                "id": 1,
+                "name": "Standard",
+                "passenger_capacity": 40,
+                "cost_per_km": 3.0,
+                "cost_per_hour": 60.0,
+                "fixed_cost": 1000.0,
+            }
+        ],
         "cct_params": {
             "max_shift_minutes": 900,
             "max_work_minutes": 600,
@@ -59,10 +74,11 @@ def test_e2e_heavy_duty_charter_api_load():
             "pricing_enabled": True,
             "use_set_covering": True,
             "strict_hard_validation": True
-        }
+        },
+        "wait_for_completion": True
     }
 
-    response = client.post("/optimize/", json=payload)
+    response = client.post("/optimize/", json=payload, headers={"X-Internal-Key": "internal-key-123456"})
     
     assert response.status_code == 200, f"A API colapsou sob carga: {response.text}"
     
