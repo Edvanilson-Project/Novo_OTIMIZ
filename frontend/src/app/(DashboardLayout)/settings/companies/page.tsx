@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/app/hooks/useAuth';
 import {
   Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
   Grid, IconButton, MenuItem, Select, Snackbar, Alert, Stack,
-  TextField, Tooltip, Typography, InputLabel, FormControl,
+  TextField, Tooltip, InputLabel, FormControl,
 } from '@mui/material';
 import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
 import {
@@ -40,13 +41,15 @@ const EMPTY_FORM: FormState = {
 };
 
 // ─── Formatadores ─────────────────────────────────────────────────────────────
-function fmtCnpj(v: string) {
+function fmtCnpj(v: string | null | undefined) {
+  if (!v) return '';
   const d = v.replace(/\D/g, '').slice(0, 14);
   return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 export default function CompaniesPage() {
+  const { checked } = useAuth('super_admin');
   const [rows, setRows] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -146,6 +149,8 @@ export default function CompaniesPage() {
     </Tooltip>
   );
 
+  if (!checked) return null;
+
   return (
     <Box sx={{ p: 3 }}>
       <DashboardCard
@@ -215,7 +220,7 @@ export default function CompaniesPage() {
               {field('city', 'Cidade', 'Município onde a garagem está localizada.')}
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
-              {field('state', 'UF', 'Sigla do estado (ex: SP, RJ, MG).', { inputProps: { maxLength: 2 } })}
+              {field('state', 'UF', 'Sigla do estado (ex: SP, RJ, MG).', { slotProps: { htmlInput: { maxLength: 2 } } })}
             </Grid>
           </Grid>
         </DialogContent>

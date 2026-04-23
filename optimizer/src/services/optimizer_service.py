@@ -18,6 +18,7 @@ from ..algorithms.csp.set_partitioning_optimized import SetPartitioningOptimized
 from ..algorithms.evaluator import CostEvaluator
 from ..algorithms.hybrid.pipeline import HybridPipeline
 from ..algorithms.integrated.joint_solver import JointSolver
+from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
 from ..algorithms.vsp.genetic import GeneticVSP
 from ..algorithms.vsp.greedy import GreedyVSP
 from ..algorithms.vsp.mcnf import MCNFVSP
@@ -45,6 +46,7 @@ class OptimizerService:
             AlgorithmType.MCNF: self._run_mcnf,
             AlgorithmType.JOINT_SOLVER: self._run_joint,
             AlgorithmType.HYBRID_PIPELINE: self._run_hybrid,
+            AlgorithmType.VCSP_PULP: self._run_vcsp_pulp,
         }
 
     def run(
@@ -840,6 +842,10 @@ class OptimizerService:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
         return HybridPipeline(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
 
+    def _run_vcsp_pulp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+        return VCSPJointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+
     def _as_dict(self, params: Any) -> Dict[str, Any]:
         if params is None:
             return {}
@@ -869,10 +875,19 @@ class OptimizerService:
                 pass
 
         rules = normalized.get("natural_language_rules") or []
-        for rule in rules:
-            parsed = self._parse_rule(rule)
-            for key, value in parsed.items():
-                normalized.setdefault(key, value)
+        if rules:
+            ai_parsed = AiService().translate_rules_sync(rules)
+            if ai_parsed:
+                # Merge the LLM results
+                for key, value in ai_parsed.items():
+                    normalized.setdefault(key, value)
+            else:
+                # Fallback to Regex if LLM fails or is unavailable
+                for rule in rules:
+                    parsed = self._parse_rule(rule)
+                    for key, value in parsed.items():
+                        normalized.setdefault(key, value)
+
         return normalized
 
     def _inject_trip_group_constraints(

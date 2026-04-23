@@ -14,11 +14,17 @@ from typing import Any, Dict, List, Optional
 import pulp
 
 from ...core.exceptions import InfeasibleProblemError
+from ...core.rule_engine import DynamicRuleEngine
 from ...domain.interfaces import IIntegratedSolver
 from ...domain.models import Block, CSPSolution, Duty, DutySegment, OptimizationResult, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from ..evaluator import CostEvaluator
-from ...infrastructure.routing_client import RoutingClient
+try:
+    from ...infrastructure.routing_client import RoutingClient as _RoutingClient
+    _HAS_ROUTING = True
+except ImportError:
+    _HAS_ROUTING = False
+    _RoutingClient = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +48,13 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         self.cct_params = dict(cct_params or {})
         self.vsp_params = dict(vsp_params or {})
         self.evaluator = CostEvaluator()
-        self.routing = RoutingClient()
+        self.routing = _RoutingClient() if _HAS_ROUTING else None
 
         self.max_shift_minutes = self.cct_params.get("max_shift_minutes", 720)
         self.max_work_minutes = self.cct_params.get("max_work_minutes", 480)
         self.meal_break_minutes = self.cct_params.get("meal_break_minutes", 60)
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
+        self._rule_engine = DynamicRuleEngine(self.cct_params.get("dynamic_rules") or [])
 
     def solve(
         self,
@@ -201,10 +208,26 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                             logger.error(f"Coordenadas ausentes para trips {t1.id} e {t2.id}. Inviabilizando conexão.")
                             t1.deadhead_times[t2.origin_id] = 999999 
 
+    def _apply_dynamic_rules(self, base_cost: float, target: str, context: Dict[str, Any]) -> float:
+        """Aplica regras dinâmicas de custo sobre um valor base. Fallback para base_cost se nenhuma regra se aplicar."""
+        costs = {target: base_cost}
+        self._rule_engine.apply(context, costs)
+        return costs[target]
+
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
         """Gera caminhos válidos (Constrained DFS) com podas de segurança para evitar OOM."""
         paths = []
-        max_idle_gap = self.meal_break_minutes + 180
+        # Comportamento do intervalo ocioso do veículo (vsp_params)
+        _behavior = self.vsp_params.get("vehicle_idle_gap_behavior", "solver_decides")
+        _threshold = self.vsp_params.get("vehicle_idle_gap_threshold_minutes")
+        if _behavior == "stay_at_terminal":
+            max_idle_gap = 9999  # sem limite — veículo permanece no terminal
+        elif _behavior == "return_to_garage" and _threshold:
+            max_idle_gap = int(_threshold)  # gap acima disso força novo bloco (recolhimento+soltura)
+        elif _threshold:
+            max_idle_gap = int(_threshold)
+        else:
+            max_idle_gap = self.meal_break_minutes + 180  # comportamento padrão do solver
         
         def dfs(current_path, current_time, last_trip, current_work):
             if current_path:
@@ -279,10 +302,22 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         work_time = trips_work_time + deadhead_work_time
         spread_time = path[-1].end_time - path[0].start_time
 
+        # Contexto para o motor de regras dinâmicas
+        path_context = {
+            "is_holiday": any(getattr(t, "is_holiday", False) for t in path),
+            "is_sunday": False,
+            "work_time": work_time,
+            "start_hour": path[0].start_time // 60 if path else 0,
+        }
+
         crew_base_direct = self.evaluator.crew_cost_per_hour * 4  # Mínimo pago 4h
         extra_work = max(0, work_time - self.max_work_minutes)
-        overtime_cost = (extra_work / 60) * self.evaluator.crew_cost_per_hour * 1.5
-        cost_single = vehicle_cost + crew_base_direct + overtime_cost + (work_time/60) * self.evaluator.crew_cost_per_hour
+        # 1.5x é o padrão CCT brasileiro — sobrescrito por dynamic_rules se configurado
+        base_overtime = (extra_work / 60) * self.evaluator.crew_cost_per_hour * 1.5
+        overtime_cost = self._apply_dynamic_rules(base_overtime, "overtime_cost", path_context)
+        base_work_cost = (work_time / 60) * self.evaluator.crew_cost_per_hour
+        work_cost = self._apply_dynamic_rules(base_work_cost, "work_cost", path_context)
+        cost_single = vehicle_cost + crew_base_direct + overtime_cost + work_cost
         
         illegal_relief_single = False
         if spread_time > self.max_shift_minutes:

@@ -15,6 +15,11 @@ services:
       - pgdata:/var/lib/postgresql/data
     networks:
       - otimiz-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-otimiz_admin} -d ${DB_NAME:-otimiz_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:alpine
@@ -24,6 +29,48 @@ services:
       - "6388:6379"
     networks:
       - otimiz-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: otimiz-v2-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-otimiz_admin}
+      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_NAME=${DB_NAME:-otimiz_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-otimiz-dev-jwt-secret-change-in-production}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1d}
+      - OPTIMIZER_URL=http://host.docker.internal:8000
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+    ports:
+      - "3001:3001"
+    networks:
+      - otimiz-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/api/v1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 networks:
   otimiz-network:

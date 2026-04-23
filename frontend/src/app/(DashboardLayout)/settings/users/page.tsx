@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/app/hooks/useAuth';
 import {
   Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
   Grid, IconButton, MenuItem, Select, Snackbar, Alert, Stack,
@@ -64,6 +65,8 @@ function fmtDate(iso?: string) {
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 export default function UsersPage() {
+  const { checked, hasRole } = useAuth('company_admin');
+  const [mounted, setMounted] = useState(false);
   const [rows, setRows] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,7 +94,12 @@ export default function UsersPage() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    setMounted(true);
+    fetchData();
+  }, [fetchData]);
+
+  if (!checked || !mounted) return null;
 
   const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowPwd(false); setOpen(true); };
   const openEdit = (row: User) => {

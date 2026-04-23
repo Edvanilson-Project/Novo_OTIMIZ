@@ -9,11 +9,18 @@ import config from '@/app/context/config'
 
 import Scrollbar from "@/app/components/custom-scroll/Scrollbar";
 import { Profile } from "./SidebarProfile/Profile";
-import { useContext } from "react";
+import { useContext, useState, useEffect } from "react";
 
 
 const Sidebar = () => {
-  const lgUp = useMediaQuery((theme) => theme.breakpoints.down("lg"));
+  const lgUp = useMediaQuery((theme) => theme.breakpoints.up("lg"));
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+
   const {
     isCollapse,
     isSidebarHover,
@@ -41,9 +48,11 @@ const Sidebar = () => {
   };
 
 
+  if (!mounted) return null;
+
   return (
     <>
-      {!lgUp ? (
+      {lgUp ? (
         <Box
           sx={{
             zIndex: 100,

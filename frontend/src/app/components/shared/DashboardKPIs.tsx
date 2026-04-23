@@ -16,6 +16,7 @@ import {
   IconClock,
   IconCurrencyDollar,
   IconAlertTriangle,
+  IconRoute,
 } from "@tabler/icons-react";
 
 const pulseGlow = keyframes`
@@ -102,8 +103,12 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
   const cctViolations = schedule?.cctViolations || 0;
 
   let totalMinutes = 0;
+  let totalTrips = 0;
   schedule?.blocks?.forEach((b: any) => {
-    b.metadata?.trips?.forEach((t: any) => {
+    // Suporta tanto b.trips (hidratado) quanto b.metadata?.trips (legado)
+    const trips = b.trips || b.metadata?.trips || [];
+    totalTrips += trips.length;
+    trips.forEach((t: any) => {
       const start = t.start_time ?? t.startTime ?? 0;
       const end = t.end_time ?? t.endTime ?? 0;
       totalMinutes += end - start;
@@ -120,10 +125,19 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <KPICard
           title="Frota Utilizada"
-          value={`${numVehicles} Veiculos`}
+          value={`${numVehicles} Veículos`}
           changeKey={`vehicles-${numVehicles}-${scheduleVersion}`}
           icon={<IconBus size="24" />}
           color={theme.palette.primary.main}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+        <KPICard
+          title="Total de Viagens"
+          value={`${totalTrips} Viagens`}
+          changeKey={`trips-${totalTrips}-${scheduleVersion}`}
+          icon={<IconRoute size="24" />}
+          color={theme.palette.secondary.main}
         />
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -137,7 +151,7 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <KPICard
-          title="Horas de Conducao"
+          title="Horas de Condução"
           value={`${totalHours}h`}
           changeKey={`hours-${totalHours}-${scheduleVersion}`}
           icon={<IconClock size="24" />}
@@ -146,8 +160,8 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <KPICard
-          title="Violacoes CCT"
-          value={`${cctViolations} Alertas`}
+          title="Violações CCT"
+          value={`${cctViolations} Alerta${cctViolations !== 1 ? 's' : ''}`}
           changeKey={`violations-${cctViolations}-${scheduleVersion}`}
           icon={<IconAlertTriangle size="24" />}
           color={cctViolations > 0 ? theme.palette.error.main : theme.palette.text.secondary}

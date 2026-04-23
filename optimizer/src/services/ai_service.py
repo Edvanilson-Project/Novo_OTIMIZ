@@ -26,14 +26,12 @@ _OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Modelos gratuitos em ordem de preferência (fallback automático pelo OpenRouter)
 _FREE_MODELS = [
+    "deepseek/deepseek-r1:free",
     "google/gemini-2.5-flash:free",
     "meta-llama/llama-3-8b-instruct:free",
-    "qwen/qwen-2.5-72b-instruct:free",
 ]
 
 # System prompt: instrui o LLM a agir como Diretor de Operações de Transporte
-# e a responder EXCLUSIVAMENTE em texto plano (sem Markdown) para evitar que
-# asteriscos e hashes apareçam crus no React.
 _SYSTEM_PROMPT = (
     "Voce e um Diretor de Operacoes de Transporte Publico experiente. "
     "Analise o resumo JSON de resultados de frota e tripulacao fornecido. "
@@ -44,6 +42,20 @@ _SYSTEM_PROMPT = (
     "Linha 2: identifique onde se esta perdendo dinheiro (ex: deadhead alto, tempo ocioso, horas extras). "
     "Linha 3: sugira UM parametro especifico que o operador pode alterar na proxima otimizacao. "
     "Seja direto, objetivo e pratico. Responda em Portugues do Brasil."
+)
+
+_TRANSLATE_PROMPT = (
+    "Você é um parser inteligente para um sistema de roteirização de ônibus. "
+    "Sua função é traduzir regras de negócio escritas em linguagem natural "
+    "para um objeto JSON simples de configuração."
+    "\n\nRegras de mapeamento:"
+    "\n- Jornada máxima (em horas ou min) -> max_shift_minutes (int)"
+    "\n- Pausa ou descanso obrigatório (em min ou horas) -> min_break_minutes (int)"
+    "\n- Direção contínua (ex: dirigir máx 4h) -> max_driving_minutes (int)"
+    "\n- Intervalo interjornada (ex: descanso entre dias de 11h) -> inter_shift_rest_minutes (int)"
+    "\n- Limite semanal -> weekly_driving_limit_minutes (int) ou weekly_rest_minutes (int)"
+    "\n\nInstrução Crítica: Retorne APENAS um objeto JSON válido, sem nenhum texto ao redor, "
+    "sem marcação ```json, apenas as chaves e valores numéricos em minutos."
 )
 
 
@@ -75,6 +87,27 @@ class AiService:
             logger.warning("[AiService] Falha ao gerar insight (não crítico): %s", exc)
             return None
 
+    def translate_rules_sync(self, rules: List[str]) -> Dict[str, Any]:
+        """
+        Traduz uma lista de regras em linguagem natural para um dict JSON.
+        Se a chamada falhar ou a chave API não existir, retorna um dict vazio.
+        """
+        if not self._settings.openrouter_api_key or not rules:
+            return {}
+
+        try:
+            future = self._executor.submit(self._run_translate_async, rules)
+            result = future.result(timeout=15)
+            import json
+            # Remove blocos Markdown que o LLM pode ter inserido indevidamente
+            if result:
+                clean_json = result.replace("```json", "").replace("```", "").strip()
+                return json.loads(clean_json)
+            return {}
+        except Exception as exc:
+            logger.warning("[AiService] Falha ao traduzir regras (não crítico): %s", exc)
+            return {}
+
     # ── Implementação interna ─────────────────────────────────────────────────
 
     def _run_async(self, metrics: Dict[str, Any]) -> Optional[str]:
@@ -84,6 +117,48 @@ class AiService:
             return loop.run_until_complete(self._call_openrouter(metrics))
         finally:
             loop.close()
+
+    def _run_translate_async(self, rules: List[str]) -> Optional[str]:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self._call_openrouter_translate(rules))
+        finally:
+            loop.close()
+
+    async def _call_openrouter_translate(self, rules: List[str]) -> Optional[str]:
+        api_key = self._settings.openrouter_api_key
+        if not api_key:
+            return None
+
+        user_message = "Traduza as seguintes regras:\n" + "\n".join(f"- {r}" for r in rules)
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "OTIMIZ Optimizer",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "models": _FREE_MODELS,
+            "messages": [
+                {"role": "system", "content": _TRANSLATE_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            "max_tokens": 150,
+            "temperature": 0.1,  # Baixíssima temperatura para evitar alucinações no JSON
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(_OPENROUTER_API_URL, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                return content.strip() if content else None
+        except Exception as exc:
+            logger.warning("[AiService] Erro na API OpenRouter (Translate): %s", repr(exc))
+            return None
 
     async def _call_openrouter(self, metrics: Dict[str, Any]) -> Optional[str]:
         """Chamada assíncrona à API do OpenRouter com fallback de modelos e timeout rigoroso."""

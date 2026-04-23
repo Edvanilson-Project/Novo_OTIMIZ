@@ -8,6 +8,7 @@ pydantic-settings==2.7.0
 numpy>=1.26.0
 scipy>=1.13.0
 networkx>=3.3           # Grafo de compatibilidade VSP
+numba>=0.59.0           # JIT compilation for performance (Optibus level)
 
 # ── ILP / Set Partitioning (CSP) ─────────────────────────────────────────────
 pulp>=2.9.0             # Linear Programming solver

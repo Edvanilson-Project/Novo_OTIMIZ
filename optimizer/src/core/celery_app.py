@@ -27,20 +27,22 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    # Serialização
+    # Serialização e Compressão (GZIP previne OOM no Redis em grandes payloads)
     task_serializer="json",
     result_serializer="json",
-    accept_content=["json"],
+    accept_content=["json", "application/json"],
+    task_compression="gzip",
+    result_compression="gzip",
     # Performance para CPU-bound
     worker_prefetch_multiplier=1,   # 1 tarefa por worker de cada vez
     task_acks_late=True,            # ACK apenas após conclusão (não perder tarefas em crash)
-    # Resultados
-    result_expires=3600,            # 1 hora de retenção no Redis
+    # Resultados e Caching
+    result_expires=43200,           # 12 horas de retenção no Redis para habilitar Smart Caching
     result_extended=True,           # Guarda traceback e estado estendido
     # Timezone
     timezone="America/Sao_Paulo",
     enable_utc=True,
-    # Nome da fila padrão (opcional, mas bom pra clareza)
+    # Nome da fila padrão
     task_default_queue="optimizer",
 )
 

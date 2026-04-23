@@ -11,12 +11,16 @@ TRATAMENTO DE ERROS (Ajuste 1):
   com {"_is_error": True, "error_payload": {...}} para preservar os diagnósticos ricos
   (hints, codes, recommendations) que o frontend exibe ao utilizador.
 """
+import hashlib
+import json
 import logging
 from typing import Union
 
+import redis.asyncio as aioredis
 from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException
 
+from ...core.config import get_settings
 from ...core.exceptions import OptimizerError
 from ...domain.models import VehicleType
 from ...services.optimizer_tasks import run_optimization_task
@@ -33,7 +37,7 @@ from ..schemas import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
+settings = get_settings()
 
 def _to_vt(v) -> VehicleType:
     return VehicleType(
@@ -96,13 +100,12 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
 )
 async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
     """
-    Valida o payload, converte para dict JSON-safe e enfileira no Celery.
-    Retorna imediatamente com {status: "processing", task_id: "..."}.
+    Valida o payload, verifica se há cache da execução (Smart Caching de 12 horas)
+    e enfileira no Celery caso seja um cenário inédito.
     """
     if not body.trips:
         raise HTTPException(status_code=400, detail="trips list cannot be empty")
 
-    # Serializar para dict JSON-safe (sem objetos Pydantic — fronteira do Celery)
     payload = {
         "trips": [t.model_dump(mode="json") for t in body.trips],
         "vehicle_types": [v.model_dump(mode="json") for v in body.vehicle_types],
@@ -117,15 +120,41 @@ async def optimize(body: OptimizeRequest) -> TaskSubmittedResponse:
         "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
     }
 
+    # Calcula Fingerprint Determinístico para o Smart Cache
+    payload_str = json.dumps(payload, sort_keys=True)
+    fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+    cache_key = f"optimizer:cache:{fingerprint}"
+
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    try:
+        cached_task_id = await redis_client.get(cache_key)
+        if cached_task_id:
+            # Garante que a task ainda existe e não falhou
+            task_state = AsyncResult(cached_task_id).state
+            if task_state in ("PENDING", "STARTED", "SUCCESS"):
+                logger.info("optimization_cache_hit: task_id=%s fingerprint=%s", cached_task_id, fingerprint)
+                await redis_client.aclose()
+                return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
+    except Exception as exc:
+        logger.warning("Falha ao ler cache do Redis (ignorando): %s", exc)
+
     try:
         task = run_optimization_task.delay(payload)
+        try:
+            # Retenção do cache por 12 horas (43200s)
+            await redis_client.setex(cache_key, 43200, task.id)
+        except Exception as exc:
+            logger.warning("Falha ao salvar cache no Redis (ignorando): %s", exc)
     except Exception as exc:
         logger.exception("Falha ao enfileirar tarefa no Celery")
+        await redis_client.aclose()
         raise HTTPException(
             status_code=503,
             detail=f"Fila de tarefas indisponível (Redis/Celery): {exc}",
         ) from exc
 
+    await redis_client.aclose()
     logger.info(
         "optimization_queued: task_id=%s run_id=%s trips=%d",
         task.id,

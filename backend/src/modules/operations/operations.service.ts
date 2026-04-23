@@ -1,8 +1,64 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import * as XLSX from 'xlsx';
 import { TripRepository } from '../database/repositories/operations.repository';
 import { DriverRepository } from '../database/repositories/operations.repository';
 import { TenantContext } from '../../common/context/tenant-context';
+
+// ─── Mapa de nomes de coluna aceitos → canônico camelCase ────────────────────
+const TRIP_COL_MAP: Record<string, string> = {
+  trip_id: 'tripId', tripid: 'tripId', id_viagem: 'tripId', viagem: 'tripId',
+  line_id: 'lineCode', lineid: 'lineCode', linha: 'lineCode', id_linha: 'lineCode',
+  line_code: 'lineCode', linecode: 'lineCode', codigo_linha: 'lineCode',
+  pair_id: 'pairId', pairid: 'pairId', id_par: 'pairId', par: 'pairId',
+  start_time: 'startTime', starttime: 'startTime', inicio: 'startTime',
+  hora_inicio: 'startTime', partida: 'startTime', saida: 'startTime',
+  end_time: 'endTime', endtime: 'endTime', fim: 'endTime',
+  hora_fim: 'endTime', chegada: 'endTime', termino: 'endTime',
+  origin_id: 'originId', originid: 'originId', origem: 'originId', id_origem: 'originId',
+  destination_id: 'destinationId', destinationid: 'destinationId',
+  destino: 'destinationId', id_destino: 'destinationId',
+  distance_km: 'distanceKm', distancekm: 'distanceKm', distancia: 'distanceKm',
+  duration: 'duration', duracao: 'duration',
+  direction: 'direction', direcao: 'direction', sentido: 'direction',
+};
+
+const DRIVER_COL_MAP: Record<string, string> = {
+  driver_id: 'driverId', driverid: 'driverId', matricula: 'driverId', id_motorista: 'driverId',
+  name: 'name', nome: 'name',
+  role: 'role', funcao: 'role', cargo: 'role',
+  max_hours_per_day: 'maxHoursPerDay', maxhoursperday: 'maxHoursPerDay', max_horas: 'maxHoursPerDay',
+  last_shift_end: 'lastShiftEnd', lastshiftend: 'lastShiftEnd',
+};
+
+function normalizeRow(raw: Record<string, any>, colMap: Record<string, string>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(raw)) {
+    const k = key.trim().toLowerCase().replace(/\s+/g, '_');
+    result[colMap[k] ?? key] = typeof val === 'string' ? val.trim() : val;
+  }
+  return result;
+}
+
+function parseMinutes(val: any): number | null {
+  if (val === undefined || val === null || val === '') return null;
+  const s = String(val).trim();
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
+    const parts = s.split(':').map(Number);
+    return parts[0] * 60 + parts[1];
+  }
+  const n = Number(s.replace(',', '.'));
+  return isNaN(n) ? null : Math.round(n);
+}
+
+function safeInt(val: any, fallback = 0): number {
+  const n = Number(val);
+  return isNaN(n) || !isFinite(n) ? fallback : Math.round(n);
+}
+
+function safeFloat(val: any, fallback = 0): number {
+  const n = Number(String(val ?? '').replace(',', '.'));
+  return isNaN(n) || !isFinite(n) ? fallback : n;
+}
 
 @Injectable()
 export class OperationsService {
@@ -12,100 +68,276 @@ export class OperationsService {
     private readonly tenantContext: TenantContext,
   ) {}
 
-  private parseCsvText(buffer: Buffer): any[] {
-    const text = buffer.toString('utf-8');
-    const lines = text.trim().split('\n');
+  private parseCsvBuffer(buffer: Buffer): any[] {
+    const text = buffer.toString('utf-8').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = text.trim().split('\n').filter(l => l.trim());
     if (lines.length < 2) return [];
 
-    const headers = lines[0].split(',').map(h => h.trim());
+    // Detecta delimitador: ponto-e-vírgula ou vírgula
+    const delim = lines[0].includes(';') ? ';' : ',';
+    const headers = lines[0].split(delim).map(h => h.trim().replace(/^"|"$/g, ''));
+
     return lines.slice(1).map(line => {
-      const values = line.split(',').map(v => v.trim());
-      const obj: any = {};
-      headers.forEach((header, index) => {
-        obj[header] = values[index];
-      });
+      const values = line.split(delim).map(v => v.trim().replace(/^"|"$/g, ''));
+      const obj: Record<string, string> = {};
+      headers.forEach((h, i) => { if (h) obj[h] = values[i] ?? ''; });
       return obj;
-    });
+    }).filter(row => Object.values(row).some(v => v !== ''));
   }
 
   async processUpload(fileBuffer: Buffer, type: 'trips' | 'drivers') {
-    let data: any[];
-
-    const text = fileBuffer.toString('utf-8').trim();
-    if (text.includes(',') && !text.includes('\t') && !text.includes('<?xml')) {
-      data = this.parseCsvText(fileBuffer);
-    } else {
-      const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-      const sheetName = workbook.SheetNames[0];
-      data = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    }
-
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Tenant não identificado');
 
-    if (type === 'trips') {
-      return this.processTrips(data, companyId);
+    let rawData: any[];
+    const header4 = fileBuffer.slice(0, 4).toString('hex');
+    const isProbablyXlsx = header4 === '504b0304' || header4.startsWith('d0cf');
+
+    if (isProbablyXlsx) {
+      const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      rawData = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     } else {
-      return this.processDrivers(data, companyId);
+      rawData = this.parseCsvBuffer(fileBuffer);
     }
+
+    if (rawData.length === 0) throw new BadRequestException('Arquivo vazio ou sem dados válidos');
+
+    if (type === 'trips') return this.processTrips(rawData, companyId);
+    return this.processDrivers(rawData, companyId);
   }
 
-  private async processTrips(data: any[], companyId: number) {
-    const tripsToSave = data.map((item) => {
-      // Validação básica conforme diretrizes do Módulo 4
-      if (!item.tripId || item.startTime === undefined || item.endTime === undefined) {
-        throw new BadRequestException('Arquivo inválido: tripId, startTime e endTime são obrigatórios');
-      }
+  private async processTrips(rawData: any[], companyId: number) {
+    const errors: string[] = [];
+    const tripsToSave: any[] = [];
 
-      return this.tripRepository.create({
+    rawData.forEach((raw, idx) => {
+      const item = normalizeRow(raw, TRIP_COL_MAP);
+      const row = idx + 2;
+
+      const startTime = parseMinutes(item.startTime);
+      const endTime = parseMinutes(item.endTime);
+
+      if (startTime === null) { errors.push(`Linha ${row}: startTime inválido ("${item.startTime}")`); return; }
+      if (endTime === null) { errors.push(`Linha ${row}: endTime inválido ("${item.endTime}")`); return; }
+
+      const duration = item.duration
+        ? safeInt(item.duration)
+        : (endTime >= startTime ? endTime - startTime : 1440 + endTime - startTime);
+
+      tripsToSave.push(this.tripRepository.create({
         companyId,
-        tripId: Number(item.tripId),
-        lineId: Number(item.lineId || 0),
-        startTime: Number(item.startTime),
-        endTime: Number(item.endTime),
-        originId: Number(item.originId || 0),
-        destinationId: Number(item.destinationId || 0),
-        distanceKm: Number(item.distanceKm || 0),
-        duration: Number(item.duration || Number(item.endTime) - Number(item.startTime)),
-      });
+        tripId: item.tripId ? safeInt(item.tripId) : (tripsToSave.length + 1),
+        lineCode: item.lineCode ? String(item.lineCode) : undefined,
+        lineId: item.lineId ? safeInt(item.lineId) : undefined,
+        pairId: item.pairId ? String(item.pairId) : undefined,
+        startTime,
+        endTime,
+        originId: safeInt(item.originId),
+        destinationId: safeInt(item.destinationId),
+        distanceKm: safeFloat(item.distanceKm),
+        duration,
+        direction: item.direction || undefined,
+      }));
     });
 
-    // Limpeza opcional: O usuário pode querer resetar a escala antes de um novo upload
-    // Por enquanto, apenas adicionamos
-    return this.tripRepository.save(tripsToSave);
+    if (errors.length > 0 && tripsToSave.length === 0) {
+      throw new BadRequestException({ message: 'Arquivo inválido', errors });
+    }
+
+    const saved = await this.tripRepository.save(tripsToSave);
+    return {
+      inserted: saved.length,
+      skipped: errors.length,
+      errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
+    };
   }
 
-  private async processDrivers(data: any[], companyId: number) {
-    const driversToSave = data.map((item) => {
-      if (!item.driverId || !item.name) {
-        throw new BadRequestException('Arquivo inválido: driverId e name são obrigatórios');
-      }
+  private async processDrivers(rawData: any[], companyId: number) {
+    const errors: string[] = [];
+    const driversToSave: any[] = [];
 
-      return this.driverRepository.create({
+    rawData.forEach((raw, idx) => {
+      const item = normalizeRow(raw, DRIVER_COL_MAP);
+      const row = idx + 2;
+
+      if (!item.driverId) { errors.push(`Linha ${row}: driverId ausente`); return; }
+      if (!item.name) { errors.push(`Linha ${row}: name ausente`); return; }
+
+      driversToSave.push(this.driverRepository.create({
         companyId,
         driverId: String(item.driverId),
         name: String(item.name),
         role: String(item.role || 'Motorista'),
-        maxHoursPerDay: Number(item.maxHoursPerDay || 480),
-        lastShiftEnd: Number(item.lastShiftEnd || 0),
-        metadata: item.metadata || {},
-      });
+        maxHoursPerDay: safeInt(item.maxHoursPerDay, 480),
+        lastShiftEnd: safeInt(item.lastShiftEnd, 0),
+        metadata: {},
+      }));
     });
 
-    return this.driverRepository.save(driversToSave);
+    if (errors.length > 0 && driversToSave.length === 0) {
+      throw new BadRequestException({ message: 'Arquivo inválido', errors });
+    }
+
+    const saved = await this.driverRepository.save(driversToSave);
+    return {
+      inserted: saved.length,
+      skipped: errors.length,
+      errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
+    };
   }
 
-  async getTrips(page: number = 1, limit: number = 100) {
+  async getTrips(page: number = 1, limit: number = 100, companyId?: number) {
     return this.tripRepository.find({
+      where: companyId ? { companyId } : undefined,
       skip: (page - 1) * limit,
       take: limit,
       order: { startTime: 'ASC' },
     });
   }
 
-  async getDrivers() {
+  async getDrivers(companyId?: number) {
     return this.driverRepository.find({
-        order: { name: 'ASC' }
+      where: companyId ? { companyId } : undefined,
+      order: { name: 'ASC' },
     });
+  }
+
+  async createDriver(data: Record<string, any>, companyId: number) {
+    if (!data.driverId || !data.name) {
+      throw new BadRequestException('driverId e name são obrigatórios');
+    }
+    const driver = this.driverRepository.create({
+      companyId,
+      driverId: String(data.driverId),
+      name: String(data.name),
+      role: String(data.role || 'Motorista'),
+      maxHoursPerDay: Number(data.maxHoursPerDay || 480),
+      lastShiftEnd: Number(data.lastShiftEnd || 0),
+      metadata: data.metadata || {},
+    });
+    return this.driverRepository.save(driver);
+  }
+
+  async updateDriver(id: number, data: Record<string, any>, companyId: number) {
+    const driver = await this.driverRepository.findOne({ where: { id, companyId } });
+    if (!driver) throw new NotFoundException('Motorista não encontrado');
+    Object.assign(driver, {
+      driverId: data.driverId !== undefined ? String(data.driverId) : driver.driverId,
+      name: data.name !== undefined ? String(data.name) : driver.name,
+      role: data.role !== undefined ? String(data.role) : driver.role,
+      maxHoursPerDay: data.maxHoursPerDay !== undefined ? Number(data.maxHoursPerDay) : driver.maxHoursPerDay,
+      lastShiftEnd: data.lastShiftEnd !== undefined ? Number(data.lastShiftEnd) : driver.lastShiftEnd,
+    });
+    return this.driverRepository.save(driver);
+  }
+
+  async deleteDriver(id: number, companyId: number) {
+    const driver = await this.driverRepository.findOne({ where: { id, companyId } });
+    if (!driver) throw new NotFoundException('Motorista não encontrado');
+    await this.driverRepository.remove(driver);
+    return { deleted: true, id };
+  }
+
+  private async nextTripId(companyId: number): Promise<number> {
+    const last = await this.tripRepository.findOne({
+      where: { companyId },
+      order: { tripId: 'DESC' },
+    });
+    return (last?.tripId ?? 0) + 1;
+  }
+
+  async createTrip(data: Record<string, any>, companyId: number) {
+    if (data.startTime === undefined || data.endTime === undefined) {
+      throw new BadRequestException('startTime e endTime são obrigatórios');
+    }
+
+    const startTime = parseMinutes(data.startTime) ?? safeInt(data.startTime);
+    const endTime = parseMinutes(data.endTime) ?? safeInt(data.endTime);
+    // Correct midnight-crossing duration: if end < start, trip spans midnight
+    const calcDuration = endTime >= startTime ? endTime - startTime : 1440 + endTime - startTime;
+    const duration = data.duration ? safeInt(data.duration) : calcDuration;
+
+    const roundTrip = data.roundTrip === true || data.roundTrip === 'true';
+    const pairId = roundTrip ? `pair-${Date.now()}` : (data.pairId ?? null);
+
+    const baseId = await this.nextTripId(companyId);
+    const trip = this.tripRepository.create({
+      companyId,
+      tripId: baseId,
+      lineId: data.lineId ? safeInt(data.lineId) : undefined,
+      lineCode: data.lineCode ?? null,
+      pairId,
+      startTime,
+      endTime,
+      originId: safeInt(data.originId),
+      destinationId: safeInt(data.destinationId),
+      distanceKm: safeFloat(data.distanceKm),
+      duration,
+      direction: data.direction || 'IDA',
+    });
+    const saved = await this.tripRepository.save(trip);
+
+    if (roundTrip) {
+      // Support explicit return-trip fields from frontend
+      const retStart = data.returnStartTime !== undefined
+        ? (parseMinutes(data.returnStartTime) ?? safeInt(data.returnStartTime))
+        : endTime;
+      const retEnd = data.returnEndTime !== undefined
+        ? (parseMinutes(data.returnEndTime) ?? safeInt(data.returnEndTime))
+        : (endTime + duration) % 1440;
+      const retCalcDuration = retEnd >= retStart ? retEnd - retStart : 1440 + retEnd - retStart;
+      const retDuration = data.returnDuration ? safeInt(data.returnDuration) : retCalcDuration;
+
+      const returnId = await this.nextTripId(companyId);
+      const returnTrip = this.tripRepository.create({
+        companyId,
+        tripId: returnId,
+        lineId: trip.lineId,
+        lineCode: trip.lineCode,
+        pairId,
+        startTime: retStart,
+        endTime: retEnd,
+        originId: data.returnOriginId ? safeInt(data.returnOriginId) : safeInt(data.destinationId),
+        destinationId: data.returnDestinationId ? safeInt(data.returnDestinationId) : safeInt(data.originId),
+        distanceKm: data.returnDistanceKm ? safeFloat(data.returnDistanceKm) : trip.distanceKm,
+        duration: retDuration,
+        direction: 'VOLTA',
+      });
+      const returnSaved = await this.tripRepository.save(returnTrip);
+      return { trips: [saved, returnSaved], pairId };
+    }
+
+    return saved;
+  }
+
+  async updateTrip(id: number, data: Record<string, any>, companyId: number) {
+    const trip = await this.tripRepository.findOne({ where: { id, companyId } });
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
+    Object.assign(trip, {
+      lineId: data.lineId !== undefined ? (data.lineId ? safeInt(data.lineId) : null) : trip.lineId,
+      lineCode: data.lineCode !== undefined ? data.lineCode : trip.lineCode,
+      startTime: data.startTime !== undefined ? (parseMinutes(data.startTime) ?? safeInt(data.startTime)) : trip.startTime,
+      endTime: data.endTime !== undefined ? (parseMinutes(data.endTime) ?? safeInt(data.endTime)) : trip.endTime,
+      originId: data.originId !== undefined ? safeInt(data.originId) : trip.originId,
+      destinationId: data.destinationId !== undefined ? safeInt(data.destinationId) : trip.destinationId,
+      distanceKm: data.distanceKm !== undefined ? safeFloat(data.distanceKm) : trip.distanceKm,
+      duration: data.duration !== undefined ? safeInt(data.duration) : trip.duration,
+      direction: data.direction !== undefined ? data.direction : trip.direction,
+    });
+    return this.tripRepository.save(trip);
+  }
+
+  async deleteTrip(id: number, companyId: number) {
+    const trip = await this.tripRepository.findOne({ where: { id, companyId } });
+    if (!trip) throw new NotFoundException('Viagem não encontrada');
+    await this.tripRepository.remove(trip);
+    return { deleted: true, id };
+  }
+
+  async clearAllTrips(companyId: number) {
+    const trips = await this.tripRepository.find({ where: { companyId } });
+    await this.tripRepository.remove(trips);
+    return { deleted: trips.length };
   }
 }

@@ -58,9 +58,9 @@ class CostEvaluator(ICostEvaluator):
         self._dynamic_rules: list = []  # Populado externamente via set_dynamic_rules()
         
         # Pesos de custo dinâmicos
-        self.cost_vehicle = 1000.0
-        self.cost_km = 1.0
-        self.cost_duty = 500.0
+        self.cost_vehicle = float(settings.default_vehicle_fixed_cost)
+        self.cost_km = float(settings.default_cost_per_km)
+        self.cost_duty = 0.0  # Default 0 para compatibilidade; pode ser ativado via API/set_costs
 
     def set_costs(self, cost_vehicle: float = 1000.0, cost_km: float = 1.0, cost_duty: float = 500.0) -> None:
         """Define os pesos de custo dinâmicos recebidos via API."""

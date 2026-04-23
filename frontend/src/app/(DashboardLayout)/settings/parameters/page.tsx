@@ -19,6 +19,8 @@ import {
   Divider,
   Tooltip,
   InputAdornment,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import {
   IconChevronDown,
@@ -29,6 +31,7 @@ import {
   IconScale,
   IconSettings,
   IconRoute,
+  IconBolt,
 } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { parametersApi } from "@/lib/api";
@@ -44,6 +47,12 @@ interface CompanyParameters {
   // Flags
   force_round_trip: boolean;
   allow_vehicle_swap: boolean;
+  // Solver
+  time_budget_s: number | null;
+  preferred_pair_window_minutes: number | null;
+  preserve_preferred_pairs: boolean | null;
+  vehicle_idle_gap_behavior: string | null;
+  vehicle_idle_gap_threshold_minutes: number | null;
   // Jornada Base
   max_driving_time_minutes: number;
   meal_break_minutes: number;
@@ -111,6 +120,11 @@ const DEFAULTS: CompanyParameters = {
   cost_duty: 500.0,
   force_round_trip: true,
   allow_vehicle_swap: true,
+  time_budget_s: null,
+  preferred_pair_window_minutes: null,
+  preserve_preferred_pairs: null,
+  vehicle_idle_gap_behavior: 'solver_decides',
+  vehicle_idle_gap_threshold_minutes: null,
   max_driving_time_minutes: 480,
   meal_break_minutes: 60,
   max_shift_minutes: 720,
@@ -562,6 +576,68 @@ export default function ParametersPage() {
                   {boolField(params, setParams, "strict_union_rules", "Regras Sindicais Estritas", "Aplica regras sindicais em modo estrito")}
                 </Grid>
               </Grid>
+            </AccordionDetails>
+          </Accordion>
+
+          {/* ═══════════ SECAO 8: Motor do Solver ═══════════ */}
+          <Accordion defaultExpanded>
+            <AccordionSummary expandIcon={<IconChevronDown />}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                <IconBolt size={20} />
+                <Typography sx={{ fontWeight: 600 }}>Motor do Solver — Desempenho e Pareamento</Typography>
+              </Stack>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Stack spacing={2}>
+                <Alert severity="info" sx={{ mb: 1 }}>
+                  Esses parâmetros controlam diretamente o algoritmo de otimização. Valores maiores de orçamento de tempo produzem soluções melhores, mas demoram mais.
+                </Alert>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                    {numField(params, setParams, "time_budget_s", "Orçamento de Tempo (s)", "Tempo máximo em segundos que o solver pode rodar. Deixe vazio para usar o padrão do algoritmo. Recomendado: 60–300s para vcsp_pulp.", "s", true, "1")}
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                    {numField(params, setParams, "preferred_pair_window_minutes", "Janela de Pareamento (min)", "Intervalo máximo em minutos entre viagens para considerá-las um par preferencial (IDA+VOLTA). Clamped para [5, 90] pelo solver. Padrão: 30.", "min")}
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    {boolField(params, setParams, "preserve_preferred_pairs", "Preservar Pares Preferenciais", "Incentiva o solver a manter viagens IDA+VOLTA no mesmo bloco, reduzindo deadheads e melhorando a utilização dos veículos.")}
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    {boolField(params, setParams, "force_round_trip", "Forçar Viagem Ida e Volta (VSP)", "Obriga que cada bloco de veículo contenha viagens de ida e volta balanceadas.")}
+                  </Grid>
+
+                  {/* Comportamento do veículo em intervalos longos */}
+                  <Grid size={{ xs: 12 }}>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                      Comportamento do Veículo em Intervalos Longos
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                      Define o que acontece quando um veículo tem um intervalo longo entre viagens no mesmo bloco.
+                    </Typography>
+                    <ToggleButtonGroup
+                      exclusive
+                      size="small"
+                      value={params.vehicle_idle_gap_behavior ?? 'solver_decides'}
+                      onChange={(_, v) => { if (v) setParams(p => ({ ...p, vehicle_idle_gap_behavior: v })); }}
+                    >
+                      <ToggleButton value="solver_decides">Solver Decide</ToggleButton>
+                      <ToggleButton value="stay_at_terminal">Ficar no Terminal</ToggleButton>
+                      <ToggleButton value="return_to_garage">Recolher para Garagem</ToggleButton>
+                    </ToggleButtonGroup>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                      {params.vehicle_idle_gap_behavior === 'stay_at_terminal' && '→ Veículo permanece no terminal indefinidamente (sem limite de intervalo).'}
+                      {params.vehicle_idle_gap_behavior === 'return_to_garage' && '→ Acima do limite abaixo, o solver força um novo bloco (recolhimento + soltura).'}
+                      {(!params.vehicle_idle_gap_behavior || params.vehicle_idle_gap_behavior === 'solver_decides') && '→ O solver decide com base nos custos operacionais (padrão: refeição + 180 min).'}
+                    </Typography>
+                  </Grid>
+                  {params.vehicle_idle_gap_behavior === 'return_to_garage' && (
+                    <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                      {numField(params, setParams, "vehicle_idle_gap_threshold_minutes", "Limite de Intervalo (min)", "Intervalo acima deste valor força o veículo a recolher e sair novamente. Ex: 300 = 5 horas.", "min")}
+                    </Grid>
+                  )}
+                </Grid>
+              </Stack>
             </AccordionDetails>
           </Accordion>
 

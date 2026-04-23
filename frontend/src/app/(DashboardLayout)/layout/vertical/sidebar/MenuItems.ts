@@ -7,10 +7,12 @@ import {
   IconUpload,
   IconBuilding,
   IconHelp,
+  IconMapPin,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { uniqueId } from "lodash";
 
-interface MenuitemsType {
+export interface MenuitemsType {
   [x: string]: any;
   id?: string;
   navlabel?: boolean;
@@ -23,6 +25,8 @@ interface MenuitemsType {
   chipColor?: string;
   variant?: string;
   external?: boolean;
+  /** Roles mínimas para ver este item. Undefined = todos os usuários autenticados. */
+  allowedRoles?: string[];
 }
 
 const Menuitems: MenuitemsType[] = [
@@ -34,13 +38,25 @@ const Menuitems: MenuitemsType[] = [
     id: uniqueId(),
     title: "Dashboard",
     icon: IconAperture,
-    href: "/",
+    href: "/dashboard",
   },
   {
     id: uniqueId(),
     title: "Ingestão de Dados",
     icon: IconUpload,
     href: "/operations/data",
+  },
+  {
+    id: uniqueId(),
+    title: "Cadastro de Linhas",
+    icon: IconRoute,
+    href: "/operations/lines",
+  },
+  {
+    id: uniqueId(),
+    title: "Cadastro de Terminais",
+    icon: IconMapPin,
+    href: "/operations/terminals",
   },
   {
     id: uniqueId(),
@@ -63,12 +79,21 @@ const Menuitems: MenuitemsType[] = [
     title: "Empresas",
     icon: IconBuilding,
     href: "/settings/companies",
+    allowedRoles: ["super_admin"],
   },
   {
     id: uniqueId(),
     title: "Usuários",
     icon: IconUsers,
     href: "/settings/users",
+    allowedRoles: ["super_admin", "company_admin"],
+  },
+  {
+    id: uniqueId(),
+    title: "Controle de Acesso",
+    icon: IconShieldCheck,
+    href: "/settings/access",
+    allowedRoles: ["super_admin", "company_admin"],
   },
   {
     id: uniqueId(),

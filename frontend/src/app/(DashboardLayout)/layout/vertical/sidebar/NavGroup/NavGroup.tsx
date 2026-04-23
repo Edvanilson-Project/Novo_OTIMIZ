@@ -14,9 +14,10 @@ interface ItemType {
   hideMenu: string | boolean;
 }
 
-const ListSubheaderStyle = styled((props: any) => (
-  <ListSubheader disableSticky {...props} />
-))(({ theme, $hideMenu }: { theme: Theme, $hideMenu: boolean }) => ({
+const ListSubheaderStyle = styled(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  ({ $hideMenu, ...props }: any) => <ListSubheader disableSticky {...props} />,
+)(({ theme, $hideMenu }: { theme: Theme, $hideMenu: boolean }) => ({
   ...theme.typography.overline,
   fontWeight: '700',
   marginTop: theme.spacing(3),

@@ -189,6 +189,25 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('integer', { array: true, default: '{}' })
   terminal_location_ids: number[];
 
+  // ── Solver — Controle do Motor de Otimização ──
+  @Column('float', { nullable: true })
+  time_budget_s: number;
+
+  @Column('integer', { nullable: true })
+  preferred_pair_window_minutes: number;
+
+  @Column('boolean', { nullable: true })
+  preserve_preferred_pairs: boolean;
+
+  // Comportamento do veículo em intervalos longos:
+  // 'solver_decides' | 'stay_at_terminal' | 'return_to_garage'
+  @Column({ nullable: true, default: 'solver_decides' })
+  vehicle_idle_gap_behavior: string;
+
+  // Limite em minutos acima do qual aplica o behavior acima (null = padrão do solver)
+  @Column('integer', { nullable: true })
+  vehicle_idle_gap_threshold_minutes: number;
+
   // ── JSON Complexo ──
   @Column('jsonb', { nullable: true })
   goal_weights: Record<string, number>;

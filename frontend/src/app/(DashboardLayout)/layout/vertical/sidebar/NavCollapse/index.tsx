@@ -31,7 +31,9 @@ interface ListItemStyledProps {
   $hideMenu: boolean;
 }
 
-const ListItemStyled = styled(ListItemButton)<ListItemStyledProps>(({ theme, $level, $open, $isBorderRadius, $hideMenu }) => ({
+const ListItemStyled = styled(ListItemButton, {
+  shouldForwardProp: (prop) => !String(prop).startsWith('$'),
+})<ListItemStyledProps>(({ theme, $level, $open, $isBorderRadius, $hideMenu }) => ({
   marginBottom: "2px",
   padding: "8px 10px",
   paddingLeft: $hideMenu ? "10px" : $level > 2 ? `${$level * 15}px` : "10px",
@@ -67,6 +69,7 @@ export default function NavCollapse({
 
   const { isBorderRadius } = useContext(CustomizerContext);
   const Icon = menu?.icon;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const theme = useTheme();
   const pathname = usePathname();
   const { t } = useTranslation();

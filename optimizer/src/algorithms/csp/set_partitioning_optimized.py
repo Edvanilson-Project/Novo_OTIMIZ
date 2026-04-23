@@ -1128,7 +1128,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         ))
 
         # Custo Penalizador para variáveis Elásticas/Slack
-        BIG_M = 20000.0
+        BIG_M = 1000000.0
 
         for iteration in range(pricing_rounds):
             _log.debug(f"Pricing iteração {iteration + 1}/{pricing_rounds}")

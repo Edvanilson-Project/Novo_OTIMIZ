@@ -17,7 +17,7 @@ export class AuthService {
     // Busca usuário com a senha selecionada (select: false no entity)
     const user = await this.userRepository.findOne({
       where: { email },
-      select: ['id', 'email', 'passwordHash', 'companyId', 'name'],
+      select: ['id', 'email', 'passwordHash', 'companyId', 'name', 'role'],
     });
 
     const valid = user && await bcrypt.compare(pass, user.passwordHash);
@@ -25,10 +25,11 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    const payload = { 
-      sub: user.id, 
-      email: user.email, 
-      companyId: user.companyId 
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      companyId: user.companyId,
+      role: user.role,
     };
 
     return {
@@ -37,6 +38,7 @@ export class AuthService {
         id: user.id,
         name: user.name,
         companyId: user.companyId,
+        role: user.role,
       }
     };
   }

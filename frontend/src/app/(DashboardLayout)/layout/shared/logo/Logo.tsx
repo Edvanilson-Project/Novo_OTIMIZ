@@ -12,7 +12,9 @@ interface LinkStyledProps {
   $topbarHeight: number;
 }
 
-const LinkStyled = styled(Link)<LinkStyledProps>(({ $isCollapse, $isSidebarHover, $topbarHeight }) => ({
+const LinkStyled = styled(Link, {
+  shouldForwardProp: (prop) => prop !== '$isCollapse' && prop !== '$isSidebarHover' && prop !== '$topbarHeight',
+})<LinkStyledProps>(({ $isCollapse, $isSidebarHover, $topbarHeight }) => ({
   height: $topbarHeight,
   width: $isCollapse == "mini-sidebar" && !$isSidebarHover ? '40px' : '180px',
   overflow: "hidden",

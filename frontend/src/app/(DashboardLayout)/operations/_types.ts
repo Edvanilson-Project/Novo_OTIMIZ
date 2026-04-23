@@ -40,26 +40,30 @@ export interface Terminal {
 export interface Line {
   id: number;
   companyId: number;
-  code: string;
+  lineId: string;           // código alfanumérico (ex: "101-A")
   name: string;
-  originTerminalId: number;
-  destinationTerminalId: number;
-  originTerminal?: Terminal;
-  destinationTerminal?: Terminal;
+  description?: string;
+  isActive: boolean;
+
+  // Terminais operacionais — IDA; VOLTA inverte origin↔destination
+  originTerminalId?: number;
+  destinationTerminalId?: number;
+
+  // Distâncias e durações operacionais
   distanceKm?: number;
   returnDistanceKm?: number;
   avgTripDurationMinutes?: number;
-  status: 'active' | 'inactive';
-  colorHex?: string;
-  idleTerminalId?: number;
-  idleDistanceKm?: number;
-  idleReturnDistanceKm?: number;
+  avgReturnDurationMinutes?: number;
+
+  // Garagem / Soltura / Recolhimento
   garageTerminalId?: number;
-  garageDistanceKm?: number;
-  vehicleTypeId?: number;
-  operationMode?: 'roundtrip' | 'outbound_only' | 'return_only' | 'flexible';
-  createdAt: string;
-  updatedAt: string;
+  garageDistanceKm?: number;      // km garagem → primeiro terminal (soltura)
+  solturaMinutes?: number;         // min garagem → primeiro terminal
+  recolhimentoDistanceKm?: number; // km último terminal → garagem
+  recolhimentoMinutes?: number;    // min último terminal → garagem
+
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface VehicleType {
@@ -352,7 +356,7 @@ export interface OptimizationRunComparisonReproducibility {
 
 export interface OptimizationBlock {
   block_id: number;
-  trips: number[] | TripDetail[];
+  trips?: number[] | TripDetail[];
   trip_details?: TripDetail[];
   num_trips?: number;
   start_time?: number;
@@ -371,8 +375,8 @@ export interface OptimizationBlock {
 
 export interface OptimizationDuty {
   duty_id: number;
-  blocks: number[];
-  trip_ids: number[];
+  blocks?: number[];
+  trip_ids?: number[];
   trips?: TripDetail[];
   segments?: OptimizationDutySegment[];
   work_time: number;

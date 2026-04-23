@@ -1,7 +1,12 @@
 import { Module, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { RolesGuard } from './common/guards/roles.guard';
+import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
+import { AuditModule } from './modules/audit/audit.module';
+import { AuditInterceptor } from './modules/audit/audit.interceptor';
+import { AuditLog } from './modules/database/entities/audit-log.entity';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TenantMiddleware } from './common/middleware/tenant.middleware';
@@ -24,6 +29,7 @@ import { CompaniesModule } from './modules/companies/companies.module';
 import { UsersModule } from './modules/users/users.module';
 import { LinesModule } from './modules/lines/lines.module';
 import { TerminalsModule } from './modules/terminals/terminals.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { Line } from './modules/database/entities/line.entity';
 import { Terminal } from './modules/database/entities/terminal.entity';
 
@@ -40,7 +46,7 @@ import { Terminal } from './modules/database/entities/terminal.entity';
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal],
+        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog],
         synchronize: true, 
         logging: false,
       }),
@@ -53,6 +59,8 @@ import { Terminal } from './modules/database/entities/terminal.entity';
     UsersModule,
     LinesModule,
     TerminalsModule,
+    ReportsModule,
+    AuditModule,
     JwtModule.register({}),
 ],
   controllers: [AppController],
@@ -63,6 +71,18 @@ import { Terminal } from './modules/database/entities/terminal.entity';
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
     },
   ],
 })

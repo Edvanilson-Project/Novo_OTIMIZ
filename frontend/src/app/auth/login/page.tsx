@@ -25,7 +25,7 @@ export default function LoginPage() {
       const res = await authApi.login(email, password);
       const { access_token, user } = res.data;
       saveSession(access_token, user);
-      router.push('/');
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Credenciais inválidas. Tente novamente.');
     } finally {

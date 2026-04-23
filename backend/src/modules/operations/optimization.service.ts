@@ -1,6 +1,6 @@
 import { Injectable, Logger, InternalServerErrorException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Any, In } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import axios from 'axios';
 import { Trip } from '../database/entities/trip.entity';
 import { Driver } from '../database/entities/driver.entity';
@@ -29,7 +29,7 @@ export class OptimizationService {
     this.INTERNAL_KEY = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY') || 'internal-key-123456';
   }
 
-  async runOptimization(companyId: number) {
+  async runOptimization(companyId: number, algorithm?: string) {
     // 0. Tenant Lock: Verificar se já existe uma otimização em andamento
     const activeSchedule = await this.scheduleRepo.findOne({
       where: { companyId, status: ScheduleStatus.PROCESSING },
@@ -68,20 +68,25 @@ export class OptimizationService {
 
       // 3. Chamar API Python (FastAPI/Celery)
       const payload = {
-        trips: trips.map((t) => ({
-          id: t.tripId || t.id,
-          line_id: t.lineId,
-          start_time: t.startTime,
-          end_time: t.endTime,
-          origin_id: t.originId,
-          destination_id: t.destinationId,
-          origin_latitude: t.originLatitude,
-          origin_longitude: t.originLongitude,
-          destination_latitude: t.destinationLatitude,
-          destination_longitude: t.destinationLongitude,
-          duration: t.duration,
-          distance_km: t.distanceKm,
-        })),
+        trips: trips.map((t) => {
+          const st = Number(t.startTime);
+          // Normaliza virada de meia-noite: se end < start, soma 1440
+          const et = Number(t.endTime) < st ? Number(t.endTime) + 1440 : Number(t.endTime);
+          return {
+            id: t.id,                     // sempre DB id para que persistResults possa fazer lookup
+            line_id: Number(t.lineId) || 0,
+            start_time: st,
+            end_time: et,
+            origin_id: Number(t.originId),
+            destination_id: Number(t.destinationId),
+            origin_latitude: t.originLatitude ?? null,
+            origin_longitude: t.originLongitude ?? null,
+            destination_latitude: t.destinationLatitude ?? null,
+            destination_longitude: t.destinationLongitude ?? null,
+            duration: Number(t.duration ?? 0),
+            distance_km: Number(t.distanceKm ?? 0),
+          };
+        }),
         vehicle_types: [
           {
             id: 1,
@@ -98,7 +103,16 @@ export class OptimizationService {
           cost_km: params?.cost_km ?? 1.0,
           cost_duty: params?.cost_duty ?? 500.0,
         },
-        algorithm: 'vcsp_pulp',
+        vsp_params: {
+          force_round_trip: params?.force_round_trip ?? true,
+          allow_vehicle_swap: params?.allow_vehicle_swap ?? true,
+          preferred_pair_window_minutes: params?.preferred_pair_window_minutes ?? 30,
+          preserve_preferred_pairs: params?.preserve_preferred_pairs ?? true,
+          vehicle_idle_gap_behavior: params?.vehicle_idle_gap_behavior ?? 'solver_decides',
+          vehicle_idle_gap_threshold_minutes: params?.vehicle_idle_gap_threshold_minutes ?? null,
+        },
+        time_budget_s: params?.time_budget_s ?? null,
+        algorithm: algorithm || 'hybrid_pipeline',
         company_id: companyId,
         run_id: schedule.id,
       };
@@ -122,8 +136,10 @@ export class OptimizationService {
   private async pollOptimizerTask(taskId: string, scheduleId: number, companyId: number) {
     const maxAttempts = 60; // 5 minutos (5s * 60)
     let attempts = 0;
+    let done = false; // Evita duplo processamento em caso de sobreposição de ticks
 
     const interval = setInterval(async () => {
+      if (done) return;
       attempts++;
       try {
         const { data } = await axios.get(`${this.OPTIMIZER_URL}/optimize/status/${taskId}`, {
@@ -131,21 +147,25 @@ export class OptimizationService {
         });
 
         if (data.status === 'completed') {
+          done = true;
           clearInterval(interval);
           await this.persistResults(scheduleId, companyId, data.result);
           this.gateway.notifyOptimizationFinished(companyId, scheduleId, data.result);
         } else if (data.status === 'failed') {
+          done = true;
           clearInterval(interval);
+          const errMsg = data.error?.message || data.error?.error_message || 'Erro no motor de otimização.';
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
-          this.gateway.notifyOptimizationFailed(companyId, 'Erro no motor de otimização.');
-        }
-
-        if (attempts >= maxAttempts) {
+          this.gateway.notifyOptimizationFailed(companyId, errMsg);
+        } else if (attempts >= maxAttempts) {
+          done = true;
           clearInterval(interval);
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
           this.gateway.notifyOptimizationFailed(companyId, 'Timeout na otimização.');
         }
       } catch (error) {
+        if (done) return;
+        done = true;
         this.logger.error(`Erro no polling do task ${taskId}: ${error.message}`);
         clearInterval(interval);
         await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
@@ -155,30 +175,31 @@ export class OptimizationService {
   }
 
   private async persistResults(scheduleId: number, companyId: number, result: any) {
-    this.logger.log(`Persistindo resultados para Schedule ${scheduleId}`);
+    this.logger.log(`Persistindo resultados para Schedule ${scheduleId}. Blocks: ${(result.blocks||[]).length}, Duties: ${(result.duties||[]).length}`);
 
+    try {
     await this.dataSource.transaction(async (manager) => {
       // 1. Salvar Blocos (Veículos)
-      const blocks = result.blocks.map((b) =>
+      const blocks = (result.blocks || []).map((b: any) =>
         manager.create(BlockAssignment, {
           companyId,
           scheduleId,
-          blockId: b.id,
-          tripIds: b.trips,
-          cost: b.total_cost || 0,
+          blockId: b.block_id ?? b.id ?? 0,
+          tripIds: (b.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
+          cost: b.total_cost ?? b.activation_cost ?? 0,
           metadata: b,
         }),
       );
       await manager.save(BlockAssignment, blocks);
 
       // 2. Salvar Duties (Motoristas)
-      const duties = result.duties.map((d) =>
+      const duties = (result.duties || []).map((d: any) =>
         manager.create(DutyAssignment, {
           companyId,
           scheduleId,
-          dutyId: d.id,
-          tripIds: d.trips,
-          cost: d.total_cost || 0,
+          dutyId: d.duty_id ?? d.id ?? 0,
+          tripIds: (d.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
+          cost: d.total_cost ?? 0,
           metadata: d,
         }),
       );
@@ -187,23 +208,35 @@ export class OptimizationService {
       // 3. Atualizar Header do Schedule
       await manager.update(Schedule, scheduleId, {
         status: ScheduleStatus.COMPLETED,
-        totalCost: result.total_cost,
-        cctViolations: result.cct_violations,
+        totalCost: result.total_cost ?? 0,
+        cctViolations: result.cct_violations ?? 0,
         metadata: {
-          solver_explanation: result.solver_explanation,
-          unassigned_trips: result.unassigned_trips,
+          solver_explanation: result.solver_explanation ?? null,
+          unassigned_trips: result.unassigned_trips ?? 0,
+          cost_breakdown: result.cost_breakdown ?? {},
+          num_vehicles: result.vehicles ?? 0,
+          num_duties: result.crew ?? 0,
+          total_trips: result.total_trips ?? 0,
+          algorithm: result.vsp_algorithm ?? '',
         },
       });
     });
+    } catch (err: any) {
+      this.logger.error(`persistResults FALHOU para Schedule ${scheduleId}: ${err.message}`, err.stack);
+      throw err;
+    }
   }
 
   async reassignTrip(companyId: number, scheduleId: number, tripId: number, targetBlockId: number) {
     return this.dataSource.transaction(async (manager) => {
       // 1. Buscar a viagem e os blocos envolvidos
       const trip = await manager.findOne(Trip, { where: { id: tripId, companyId } });
-      const sourceBlock = await manager.findOne(BlockAssignment, {
-        where: { scheduleId, tripIds: Any([tripId]), companyId },
-      });
+      const sourceBlock = await manager
+        .createQueryBuilder(BlockAssignment, 'b')
+        .where('b.scheduleId = :scheduleId', { scheduleId })
+        .andWhere('b.companyId = :companyId', { companyId })
+        .andWhere(':tripId = ANY(b.tripIds)', { tripId })
+        .getOne();
       const targetBlock = await manager.findOne(BlockAssignment, {
         where: { id: targetBlockId, scheduleId, companyId },
       });
@@ -247,7 +280,7 @@ export class OptimizationService {
       };
 
       try {
-        const { data: whatIfResult } = await axios.post(`${this.OPTIMIZER_URL}/evaluate-delta`, whatIfPayload, {
+        const { data: whatIfResult } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-delta`, whatIfPayload, {
           headers: { 'X-Internal-Key': this.INTERNAL_KEY },
         });
         
@@ -303,8 +336,19 @@ export class OptimizationService {
     }
 
     const pythonBlocks = blocks.map((b: any) => ({
-      id: b.block_id ?? b.id,
-      trips: b.trips,
+      id: b.block_id ?? b.id,  // Python whatif.py lê 'id', não 'block_id'
+      trips: (b.trips || []).map((t: any) => ({
+        id: t.id ?? t.tripId,
+        start_time: t.start_time ?? t.startTime,
+        end_time: t.end_time ?? t.endTime,
+        line_id: t.line_id ?? t.lineId ?? 0,
+        origin_id: t.origin_id ?? t.originId ?? 0,
+        destination_id: t.destination_id ?? t.destinationId ?? 0,
+        duration: t.duration ?? 0,
+        distance_km: t.distance_km ?? t.distanceKm ?? 0,
+        trip_group_id: t.trip_group_id ?? null,
+        direction: t.direction ?? null,
+      })),
       vehicle_type_id: b.vehicle_type_id ?? null,
     }));
 
@@ -317,7 +361,7 @@ export class OptimizationService {
     };
 
     try {
-      const { data } = await axios.post(`${this.OPTIMIZER_URL}/evaluate-delta`, pythonPayload, {
+      const { data } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-delta`, pythonPayload, {
         headers: { 'X-Internal-Key': this.INTERNAL_KEY },
         timeout: 15000,
       });
@@ -331,6 +375,42 @@ export class OptimizationService {
     } catch (error: any) {
       const detail = error.response?.data?.detail || 'Movimento viola restrições operacionais';
       return { isValid: false, violations: [detail], blocks: [], totalCost: null, deltaCost: null };
+    }
+  }
+
+  async evaluateBaseline(frontendPayload: any) {
+    const { blocks } = frontendPayload;
+
+    const pythonBlocks = (blocks || []).map((b: any) => ({
+      id: b.block_id ?? b.id,
+      trips: (b.trips || []).map((t: any) => ({
+        id: t.id ?? t.tripId,
+        start_time: t.start_time ?? t.startTime,
+        end_time: t.end_time ?? t.endTime,
+        line_id: t.line_id ?? t.lineId ?? 0,
+        origin_id: t.origin_id ?? t.originId ?? 0,
+        destination_id: t.destination_id ?? t.destinationId ?? 0,
+        duration: t.duration ?? 0,
+        distance_km: t.distance_km ?? t.distanceKm ?? 0,
+        trip_group_id: t.trip_group_id ?? null,
+        direction: t.direction ?? null,
+      })),
+      vehicle_type_id: b.vehicle_type_id ?? null,
+    }));
+
+    try {
+      const { data } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-baseline`, { blocks: pythonBlocks }, {
+        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+        timeout: 15000,
+      });
+      return {
+        totalCost: data.cost_breakdown?.total ?? data.total_cost ?? 0,
+        costBreakdown: data.cost_breakdown ?? null,
+        blocks: data.blocks ?? [],
+      };
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || 'Erro ao calcular baseline';
+      return { totalCost: null, costBreakdown: null, blocks: [], error: detail };
     }
   }
 
@@ -381,10 +461,97 @@ export class OptimizationService {
   }
 
   async getLatestSchedule(companyId: number) {
-    return this.scheduleRepo.findOne({
+    const schedule = await this.scheduleRepo.findOne({
       where: { companyId, status: ScheduleStatus.COMPLETED },
       relations: ['blocks', 'duties'],
       order: { createdAt: 'DESC' },
     });
+
+    if (!schedule) return null;
+
+    // Hidratar trips completos dentro de cada block
+    const allTripIds = schedule.blocks.flatMap((b) => b.tripIds || []);
+    const uniqueTripIds = [...new Set(allTripIds)];
+    const tripMap = new Map<number, Trip>();
+
+    if (uniqueTripIds.length > 0) {
+      const trips = await this.tripRepo.find({ where: { id: In(uniqueTripIds) } });
+      trips.forEach((t) => tripMap.set(t.id, t));
+    }
+
+    const hydratedBlocks = schedule.blocks.map((block) => {
+      const meta = (block.metadata || {}) as any;
+      const st = meta.start_time ?? 0;
+      const et = meta.end_time ?? 0;
+      const hydratedTrips = (block.tripIds || [])
+        .map((id) => tripMap.get(id))
+        .filter((t): t is Trip => t !== undefined)
+        .map((t) => ({
+          id: t.id,
+          trip_id: t.tripId,
+          start_time: t.startTime,
+          // normaliza virada de meia-noite para o frontend (end sempre > start)
+          end_time: t.endTime < t.startTime ? t.endTime + 1440 : t.endTime,
+          line_id: t.lineId ?? null,
+          line_code: t.lineCode ?? null,
+          origin_id: t.originId,
+          destination_id: t.destinationId,
+          duration: t.duration,
+          distance_km: t.distanceKm,
+          direction: t.direction ?? null,
+          pair_id: t.pairId ?? null,
+        }))
+        .sort((a, b) => a.start_time - b.start_time);
+
+      return {
+        ...block,
+        block_id: block.blockId,
+        start_time: st,
+        end_time: et,
+        total_cost: block.cost,
+        trips: hydratedTrips,
+      };
+    }).sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
+
+    // Monta resultSummary a partir do metadata salvo
+    const meta = (schedule.metadata || {}) as any;
+    const resultSummary = {
+      num_vehicles: meta.num_vehicles ?? 0,
+      vehicles: meta.num_vehicles ?? 0,
+      num_crew: meta.num_duties ?? 0,
+      crew: meta.num_duties ?? 0,
+      total_cost: schedule.totalCost ?? meta.cost_breakdown?.total ?? 0,
+      totalCost: schedule.totalCost ?? 0,
+      cct_violations: schedule.cctViolations ?? 0,
+      cctViolations: schedule.cctViolations ?? 0,
+      total_trips: meta.total_trips ?? uniqueTripIds.length,
+      unassigned_trips: meta.unassigned_trips ?? [],
+      costBreakdown: meta.cost_breakdown ?? null,
+      solverExplanation: meta.solver_explanation ?? null,
+      blocks: hydratedBlocks,
+      duties: schedule.duties.map((d) => {
+        const dm = (d.metadata || {}) as any;
+        return {
+          duty_id: d.dutyId,
+          work_time: dm.work_time ?? 0,
+          spread_time: dm.spread_time ?? 0,
+          start_time: dm.start_time ?? 0,
+          end_time: dm.end_time ?? 0,
+          total_cost: d.cost ?? 0,
+          work_cost: dm.work_cost ?? 0,
+          overtime_cost: dm.overtime_cost ?? 0,
+          overtime_minutes: dm.overtime_minutes ?? 0,
+          shift_violations: dm.shift_violations ?? 0,
+          rest_violations: dm.rest_violations ?? 0,
+          trip_ids: d.tripIds ?? [],
+        };
+      }),
+    };
+
+    return {
+      ...schedule,
+      blocks: hydratedBlocks,
+      resultSummary,
+    };
   }
 }

@@ -3,12 +3,12 @@ import React, { useMemo, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, Box,
   Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, Paper, Alert, Divider, Grid, Card, CardContent,
+  TableRow, Paper, Alert, Divider,
   Menu, MenuItem,
 } from '@mui/material';
 import { IconAlertTriangle, IconX, IconBlockquote, IconDownload } from '@tabler/icons-react';
 import type { OptimizationResultSummary } from '../../_types';
-import { detectOperationalConflicts, type OperationalConflict } from '../_helpers/operational-conflicts';
+import { detectOperationalConflicts } from '../_helpers/operational-conflicts';
 import { exportConflicts, downloadExport } from '../_helpers/export-conflicts';
 
 export interface ConflictDetailsModalProps {
@@ -33,6 +33,18 @@ export function ConflictDetailsModal({ res, open, onClose }: ConflictDetailsModa
   const getBadgeColor = (severity: 'error' | 'warning') => {
     return severity === 'error' ? 'error' : 'warning';
   };
+
+  const conflictLabel: Record<string, string> = {
+    'overlap': 'Sobreposição',
+    'time-violation': 'Violação de Horário',
+    'no-return': 'Sem Retorno à Garagem',
+    'break-violation': 'Violação de Intervalo',
+    'unrealistic': 'Intervalo Irrealista',
+    'paired-orphan': 'Viagem Pareada Orphã',
+    'layover-violation': 'Layover Irregular',
+  };
+
+  const getConflictLabel = (type: string) => conflictLabel[type] ?? type.replace(/-/g, ' ').toUpperCase();
 
   if (!open || (conflicts.length === 0 && open)) {
     if (!open) return null;
@@ -121,7 +133,7 @@ export function ConflictDetailsModal({ res, open, onClose }: ConflictDetailsModa
               return (
                 <Chip
                   key={type}
-                  label={`${type.replace('-', ' ').toUpperCase()} (${count})`}
+                  label={`${getConflictLabel(type)} (${count})`}
                   onClick={() => setFilterType(isFiltered ? null : type)}
                   variant={isFiltered ? 'filled' : 'outlined'}
                   color={conflicts.find(c => c.type === type)?.severity === 'error' ? 'error' : 'warning'}
@@ -154,7 +166,7 @@ export function ConflictDetailsModal({ res, open, onClose }: ConflictDetailsModa
                   </TableCell>
                   <TableCell sx={{ fontSize: '0.875rem' }}>
                     <Chip
-                      label={c.type.replace('-', ' ').toUpperCase()}
+                      label={getConflictLabel(c.type)}
                       size="small"
                       variant="outlined"
                       sx={{ fontWeight: 700, fontSize: '0.7rem' }}

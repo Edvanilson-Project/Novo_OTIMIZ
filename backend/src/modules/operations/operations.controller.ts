@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Param, ParseIntPipe, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
@@ -15,10 +15,10 @@ export class OperationsController {
   ) {}
 
   @Post('optimize')
-  async runOptimization() {
+  async runOptimization(@Body('algorithm') algorithm?: string) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.optimizationService.runOptimization(companyId);
+    return this.optimizationService.runOptimization(companyId, algorithm);
   }
 
   @Patch('reassign-trip')
@@ -39,6 +39,13 @@ export class OperationsController {
     return this.optimizationService.evaluateDelta(body);
   }
 
+  @Post('evaluate-baseline')
+  async evaluateBaseline(@Body() body: Record<string, any>) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.optimizationService.evaluateBaseline(body);
+  }
+
   @Get('latest-schedule')
   async getLatestSchedule() {
     const companyId = this.tenantContext.getCompanyId();
@@ -49,7 +56,7 @@ export class OperationsController {
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string },
     @Body('type') type: 'trips' | 'drivers',
   ) {
     if (!file) throw new BadRequestException('Nenhum arquivo enviado');
@@ -60,11 +67,64 @@ export class OperationsController {
 
   @Get('trips')
   async getTrips(@Query('page') page: string, @Query('limit') limit: string) {
-    return this.operationsService.getTrips(parseInt(page || '1'), parseInt(limit || '100'));
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.getTrips(parseInt(page || '1'), parseInt(limit || '500'), companyId);
+  }
+
+  @Post('trips')
+  async createTrip(@Body() body: Record<string, any>) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.createTrip(body, companyId);
+  }
+
+  @Patch('trips/:id')
+  async updateTrip(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.updateTrip(id, body, companyId);
+  }
+
+  @Delete('trips/:id')
+  async deleteTrip(@Param('id', ParseIntPipe) id: number) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.deleteTrip(id, companyId);
+  }
+
+  @Delete('trips')
+  async clearAllTrips() {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.clearAllTrips(companyId);
   }
 
   @Get('drivers')
   async getDrivers() {
-    return this.operationsService.getDrivers();
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.getDrivers(companyId);
+  }
+
+  @Post('drivers')
+  async createDriver(@Body() body: Record<string, any>) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.createDriver(body, companyId);
+  }
+
+  @Patch('drivers/:id')
+  async updateDriver(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.updateDriver(id, body, companyId);
+  }
+
+  @Delete('drivers/:id')
+  async deleteDriver(@Param('id', ParseIntPipe) id: number) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.deleteDriver(id, companyId);
   }
 }

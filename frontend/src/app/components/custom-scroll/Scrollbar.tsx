@@ -1,7 +1,8 @@
+'use client';
 import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
 import Box from '@mui/material/Box'
-import { SxProps } from '@mui/system';
+import { type SxProps } from '@mui/material';
 import { styled } from '@mui/material/styles'
 import { useMediaQuery } from "@mui/material";
 

@@ -3,11 +3,17 @@ import { TenantBaseEntity } from '../../../common/entities/base.entity';
 
 @Entity('trips')
 export class Trip extends TenantBaseEntity {
-  @Column()
+  @Column({ nullable: true, type: 'integer' })
   tripId: number;
 
-  @Column()
+  @Column({ nullable: true, type: 'integer' })
   lineId: number;
+
+  @Column({ nullable: true })
+  lineCode: string;
+
+  @Column({ nullable: true })
+  pairId: string;
 
   @Column({ nullable: true })
   tripGroupId: number;

@@ -1,11 +1,13 @@
-import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Res } from '@nestjs/common';
 import * as express from 'express';
 import { AuthService } from './auth.service';
+import { Public } from '../../common/decorators/roles.decorator';
 
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Public()
   @Post('login')
   async login(@Body() body: any, @Res({ passthrough: true }) response: express.Response) {
     const result = await this.authService.login(body.email, body.password);
@@ -25,6 +27,7 @@ export class AuthController {
     };
   }
 
+  @Public()
   @Post('logout')
   async logout(@Res({ passthrough: true }) response: express.Response) {
     response.clearCookie('access_token');

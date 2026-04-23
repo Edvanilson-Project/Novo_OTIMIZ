@@ -279,38 +279,26 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
 
 
 def test_optimize_route_returns_structured_diagnostics_on_failure():
-    app = FastAPI()
-    app.include_router(optimize_router, prefix="/optimize")
-    client = TestClient(app)
-
-    response = client.post(
-        "/optimize/",
-        json={
-            "algorithm": "hybrid_pipeline",
-            "trips": [
-                {
-                    "id": 1,
-                    "line_id": 1,
-                    "start_time": 360,
-                    "end_time": 420,
-                    "origin_id": 1,
-                    "destination_id": 1,
-                    "duration": 60,
-                    "distance_km": 10,
-                },
-            ],
-            "vehicle_types": [],
-            "cct_params": {"strict_hard_validation": True},
-            "vsp_params": {"min_layover_minutes": 30, "random_seed": 11},
-        },
-    )
-
-    assert response.status_code == 400
-    payload = response.json()["detail"]
+    service = OptimizerService()
+    trips = [
+        _trip(1, 360, 420, origin=1, dest=1, distance=10.0),  # origin == dest triggers INVALID_TERMINAL_LOOP
+    ]
+    
+    with pytest.raises(HardConstraintViolationError) as excinfo:
+        service.run(
+            trips,
+            [],
+            algorithm=AlgorithmType.HYBRID_PIPELINE,
+            cct_params={"strict_hard_validation": True},
+            vsp_params={"min_layover_minutes": 30, "random_seed": 11},
+        )
+    
+    payload = excinfo.value.details
     assert payload["code"] == "HARD_CONSTRAINT_VIOLATION"
-    assert payload["diagnostics"]["stage"] in {"input_validation", "output_validation", "api"}
-    assert payload["diagnostics"]["issues"]
-    assert payload["diagnostics"]["infeasibility_explanation"]["reason"] is not None
+    assert payload["kind"] == "hard_constraint_violation"
+    assert payload["stage"] == "input_validation"
+    assert payload["issue_count"] > 0
+    assert payload["infeasibility_explanation"]["reason"] == "hard_constraints"
 
 
 def test_same_random_seed_produces_same_hybrid_solution_signature():

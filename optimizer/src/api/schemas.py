@@ -299,6 +299,10 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
     algorithms: List[str] = Field(default_factory=lambda: [a.value for a in AlgorithmType])
+    redis_status: str = "unknown"
+    celery_status: str = "unknown"
+    active_workers: int = 0
+    pending_tasks: Optional[int] = None
 
 
 class ErrorResponse(BaseModel):

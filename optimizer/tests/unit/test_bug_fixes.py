@@ -83,12 +83,12 @@ class TestBug3SaSplitOperator:
 
     def test_split_function_works(self):
         """_split deve dividir um bloco em dois."""
-        trips = make_trips(4, gap=30)
-        blocks = [Block(id=1, trips=trips)]
-        result = _split(blocks, next_id=100)
+        # Novo SA usa List[List[int]] (IDs das viagens) para performance
+        state = [[1, 2, 3, 4]]
+        result = _split(state)
         # _split pode retornar None se bloco tem < 2 viagens no ponto de corte
         if result is not None:
-            total_trips = sum(len(b.trips) for b in result)
+            total_trips = sum(len(b) for b in result)
             assert total_trips == 4
             assert len(result) >= 2
 

@@ -1,6 +1,5 @@
 "use client";
 import React, { useContext } from "react";
-import PropTypes from "prop-types";
 import { useTheme } from "@mui/material/styles";
 import { Card, CardHeader, Tooltip, Divider, IconButton } from "@mui/material";
 import { CustomizerContext } from '@/app/context/customizerContext';
@@ -38,10 +37,5 @@ const DownloadCard = ({ title, children, onDownload }: any) => {
       {children}
     </Card>
   );
-};
-DownloadCard.propTypes = {
-  title: PropTypes.string.isRequired,
-  children: PropTypes.node,
-  onDownload: PropTypes.func,
 };
 export default DownloadCard;

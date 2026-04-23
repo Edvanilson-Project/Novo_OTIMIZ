@@ -307,7 +307,8 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         best_state = _copy_state(current_state)
         best_cost = current_cost
 
-        min_temp = 0.1
+        min_temp = float(settings.sa_min_temp)
+        iterations_per_temp = int(settings.sa_iterations_per_temp)
         iteration = 0
         restarts = 0
 
@@ -317,7 +318,8 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
             if restarts > 0:
                 current_state = _copy_state(best_state)
                 current_cost = best_cost
-                for _ in range(min(5 + restarts, 20)):
+                # Perturbação mais agressiva para escapar de ótimos locais
+                for _ in range(min(10 + restarts * 2, 50)):
                     op = random.choice(_OPERATORS)
                     if op is _split:
                         perturbed = _split(current_state)
@@ -328,28 +330,31 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                         current_cost = cost_fn(current_state)
 
             while temp > min_temp and not self._check_timeout():
-                iteration += 1
+                # Executa um bloco de iterações na mesma temperatura (estabilização térmica)
+                for _ in range(iterations_per_temp):
+                    if self._check_timeout():
+                        break
+                    
+                    iteration += 1
+                    op = random.choice(_OPERATORS)
+                    if op is _split:
+                        candidate = _split(current_state)
+                    else:
+                        candidate = op(current_state, trip_map, min_gap)
 
-                op = random.choice(_OPERATORS)
-                if op is _split:
-                    candidate = _split(current_state)
-                else:
-                    candidate = op(current_state, trip_map, min_gap)
+                    if not candidate:
+                        continue
 
-                if not candidate:
-                    temp *= self.cooling_rate
-                    continue
+                    candidate_cost = cost_fn(candidate)
+                    delta = candidate_cost - current_cost
 
-                candidate_cost = cost_fn(candidate)
-                delta = candidate_cost - current_cost
+                    if delta < 0 or math.exp(-delta / temp) > random.random():
+                        current_state = candidate
+                        current_cost = candidate_cost
 
-                if delta < 0 or math.exp(-delta / temp) > random.random():
-                    current_state = candidate
-                    current_cost = candidate_cost
-
-                if current_cost < best_cost:
-                    best_state = _copy_state(current_state)
-                    best_cost = current_cost
+                    if current_cost < best_cost:
+                        best_state = _copy_state(current_state)
+                        best_cost = current_cost
 
                 temp *= self.cooling_rate
 

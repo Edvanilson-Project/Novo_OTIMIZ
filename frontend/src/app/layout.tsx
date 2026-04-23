@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import ThemeProviders from "./context/ThemeProviders";
+import EmotionRegistry from "./context/EmotionRegistry";
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -21,9 +22,11 @@ export default function RootLayout({
   return (
     <html lang="pt-br" suppressHydrationWarning>
       <body className={plusJakartaSans.variable}>
-        <ThemeProviders>
-          {children}
-        </ThemeProviders>
+        <EmotionRegistry>
+          <ThemeProviders>
+            {children}
+          </ThemeProviders>
+        </EmotionRegistry>
       </body>
     </html>
   );

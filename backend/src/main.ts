@@ -1,3 +1,9 @@
+// Polyfill global Web Crypto API in Node when missing (some libs call `crypto.randomUUID()`)
+import { webcrypto } from 'crypto';
+if (typeof (globalThis as any).crypto === 'undefined') {
+  (globalThis as any).crypto = webcrypto;
+}
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';

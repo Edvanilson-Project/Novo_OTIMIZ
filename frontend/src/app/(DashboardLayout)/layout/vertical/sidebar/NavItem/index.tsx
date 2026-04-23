@@ -40,13 +40,13 @@ export default function NavItem({
 
   return (
     <List component="li" disablePadding key={item?.id && item.title}>
-      <Link href={item.href || ""} passHref legacyBehavior>
-        <ListItemButton
-          component="a"
-          disabled={item?.disabled}
-          selected={isSelected}
-          onClick={lgDown ? onClick : undefined}
-          sx={{
+      <ListItemButton
+        component={Link}
+        href={item.href || ""}
+        disabled={item?.disabled}
+        selected={isSelected}
+        onClick={lgDown ? onClick : undefined}
+        sx={{
             whiteSpace: "nowrap",
             marginBottom: "2px",
             padding: "8px 10px",
@@ -114,8 +114,7 @@ export default function NavItem({
               label={item?.chip}
             />
           )}
-        </ListItemButton>
-      </Link>
+      </ListItemButton>
     </List>
   );
 }
