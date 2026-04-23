@@ -699,6 +699,11 @@ class OptimizerService:
         }
 
     def _build_operational_kpis(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> Dict[str, Any]:
+        # Nova métrica de conformidade CCT estrita
+        inter_shift_violations = sum(
+            1 for duty in result.csp.duties
+            if not HardConstraintValidator.check_inter_shift_rest(duty)
+        )
         duties = list(result.csp.duties or [])
         if not duties:
             return {
@@ -785,6 +790,13 @@ class OptimizerService:
         cct_params: Dict[str, Any],
         vsp_params: Dict[str, Any],
     ) -> OptimizationResult:
+        # Mapa de alocação de tempo otimizada
+        TIME_ALLOCATION = {
+            AlgorithmType.GENETIC: 0.4,
+            AlgorithmType.HYBRID_PIPELINE: 0.7, 
+            AlgorithmType.VCSP_PULP: 0.9
+        }
+        budget = TIME_ALLOCATION.get(algorithm, 1.0) * time_budget_s
         handler = self._solver_registry.get(algorithm)
         if not handler:
             raise InvalidAlgorithmError(str(algorithm))

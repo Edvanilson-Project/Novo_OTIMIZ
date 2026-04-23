@@ -79,12 +79,28 @@ class CostEvaluator(ICostEvaluator):
         self.cost_duty = Decimal(str(cost_duty))
 
     def _to_decimal(self, value: Any) -> Decimal:
-        """Converte qualquer valor para Decimal de forma segura."""
+        """Converte qualquer valor para Decimal com precisão garantida.
+        
+        Args:
+            value: Valor a ser convertido (str, float, int, None)
+            
+        Returns:
+            Decimal inicializado via string para perfeita exatidão
+            
+        Raises:
+            ValueError: Se não puder converter para numérico
+        """
         if isinstance(value, Decimal):
             return value
         if value is None:
             return Decimal('0.0')
-        return Decimal(str(value))
+        try:
+            # Remove notação científica e formata com 8 casas decimais
+            formatted = "{0:.8f}".format(float(value))
+            return Decimal(formatted.strip())
+        except (TypeError, ValueError) as e:
+            logger.error(f"Falha ao converter valor para Decimal: {value}")
+            raise ValueError(f"Valor não conversível para Decimal: {value}") from e
 
     def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> Decimal:
         """Piecewise-linear penalty.

@@ -296,6 +296,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         return costs[target]
 
     def _calculate_safe_big_m(self, trips: List[Trip]) -> Tuple[float, float]:
+        BIG_M_SAFETY_FACTOR = 1.25  # Buffer de 25% sobre o custo máximo teórico
         """Calcula valores seguros de Big-M baseados no tamanho do problema.
         
         Args:

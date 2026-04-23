@@ -47,6 +47,14 @@ class HybridPipeline(BaseAlgorithm):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> OptimizationResult:
+        # Early stopping por qualidade se atingir 80% do tempo
+        if self._elapsed_ms() > 0.8 * self.time_budget_s * 1000:
+            if hasattr(self, '_early_stop_count'):
+                self._early_stop_count += 1
+            return self._finalize(
+                best_vsp, trips, vehicle_types, 
+                {"early_stop": True, "elapsed_pct": 0.8}
+            )
         import random
         import time
         # Se houver seed explícita, prioriza replay reprodutível; caso contrário mantém exploração estocástica.
