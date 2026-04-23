@@ -489,9 +489,9 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         crew_base_direct = self.evaluator.crew_cost_per_hour * Decimal(str(self.min_paid_hours))
         extra_work = max(0, work_time - self.max_work_minutes)
-        base_overtime = (extra_work / 60) * self.evaluator.crew_cost_per_hour * Decimal(str(self.overtime_multiplier))
+        base_overtime = (extra_work / Decimal('60.0')) * self.evaluator.crew_cost_per_hour * self.overtime_multiplier
         overtime_cost = self._apply_dynamic_rules(base_overtime, "overtime_cost", path_context)
-        base_work_cost = (work_time / 60) * self.evaluator.crew_cost_per_hour
+        base_work_cost = (work_time / Decimal('60.0')) * self.evaluator.crew_cost_per_hour
         work_cost = self._apply_dynamic_rules(base_work_cost, "work_cost", path_context)
         cost_single = vehicle_cost + crew_base_direct + overtime_cost + work_cost
         
