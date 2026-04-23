@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import logging
 import operator
+from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -98,9 +99,9 @@ _VALID_ACTION_TYPES = frozenset({"multiply", "add", "subtract", "set"})
 
 # ── Limites de segurança contra explosão numérica ────────────────────────────
 _MAX_RULES = 50
-_MULTIPLY_MIN = 0.0
-_MULTIPLY_MAX = 10.0
-_ABSOLUTE_VALUE_LIMIT = 100000.0
+_MULTIPLY_MIN = Decimal('0.0')
+_MULTIPLY_MAX = Decimal('10.0')
+_ABSOLUTE_VALUE_LIMIT = Decimal('100000.0')
 
 
 class _CompiledCondition:
@@ -130,12 +131,12 @@ class _CompiledAction:
 
     __slots__ = ("target", "action_type", "value")
 
-    def __init__(self, target: str, action_type: str, value: float) -> None:
+    def __init__(self, target: str, action_type: str, value: Decimal) -> None:
         self.target = target
         self.action_type = action_type
         self.value = value
 
-    def apply(self, costs: Dict[str, float]) -> None:
+    def apply(self, costs: Dict[str, Decimal]) -> None:
         """Aplica a ação ao dicionário de custos in-place. Ignora targets inexistentes."""
         if self.target not in costs:
             return
@@ -367,12 +368,12 @@ class DynamicRuleEngine:
 
         # Validar e clampar valor
         try:
-            numeric_value = float(value)
-        except (TypeError, ValueError):
+            numeric_value = Decimal(str(value))
+        except (TypeError, ValueError, ArithmeticError):
             self._warn(index, f"valor da ação não é numérico: {value!r}")
             return None
 
-        # Limites de segurança
+        # Limites de segurança com Decimal
         if action_type == "multiply":
             numeric_value = max(_MULTIPLY_MIN, min(_MULTIPLY_MAX, numeric_value))
         elif action_type in ("add", "subtract", "set"):
