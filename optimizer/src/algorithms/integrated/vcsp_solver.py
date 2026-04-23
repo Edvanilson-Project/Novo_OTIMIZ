@@ -109,8 +109,6 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         # Restrição Primária: Cada Viagem coberta Exatamente 1 Vez (Set Partitioning) + Dummy Variables
         unassigned_vars = {}
-        PUNISHMENT_COST = 10_000_000.0
-        
         for trip in sorted_trips:
             unassigned_var = pulp.LpVariable(f"unassigned_{trip.id}", cat=pulp.LpBinary)
             unassigned_vars[trip.id] = unassigned_var
@@ -118,7 +116,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         # Função Objetivo
         total_cost_expr = pulp.lpSum([data["total_cost"] * var for var, data in path_vars])
-        unassigned_punishment = pulp.lpSum([PUNISHMENT_COST * var for var in unassigned_vars.values()])
+        unassigned_punishment = pulp.lpSum([self._punishment_cost * var for var in unassigned_vars.values()])
         prob += total_cost_expr + unassigned_punishment, "Total_Objective_Cost"
 
         # 3. Solver Engine (CBC)
@@ -485,10 +483,9 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             "start_hour": path[0].start_time // 60 if path else 0,
         }
 
-        crew_base_direct = self.evaluator.crew_cost_per_hour * 4  # Mínimo pago 4h
+        crew_base_direct = self.evaluator.crew_cost_per_hour * Decimal(str(self.min_paid_hours))
         extra_work = max(0, work_time - self.max_work_minutes)
-        # 1.5x é o padrão CCT brasileiro — sobrescrito por dynamic_rules se configurado
-        base_overtime = (extra_work / 60) * self.evaluator.crew_cost_per_hour * 1.5
+        base_overtime = (extra_work / 60) * self.evaluator.crew_cost_per_hour * Decimal(str(self.overtime_multiplier))
         overtime_cost = self._apply_dynamic_rules(base_overtime, "overtime_cost", path_context)
         base_work_cost = (work_time / 60) * self.evaluator.crew_cost_per_hour
         work_cost = self._apply_dynamic_rules(base_work_cost, "work_cost", path_context)
@@ -496,7 +493,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         
         illegal_relief_single = False
         if spread_time > self.max_shift_minutes:
-            cost_single += self._calculate_safe_big_m(path)[0]  # Use first value (illegal relief penalty)
+            cost_single += self._illegal_relief_penalty
             illegal_relief_single = True
 
         best_cost = cost_single

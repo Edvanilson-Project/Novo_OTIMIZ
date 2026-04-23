@@ -213,14 +213,16 @@ class CostEvaluator(ICostEvaluator):
 
     def csp_cost_breakdown(self, solution: CSPSolution) -> Dict[str, Any]:
         duties: List[Dict[str, Any]] = []
-        work_cost = 0.0
-        guaranteed_cost = 0.0
-        waiting_cost = 0.0
-        overtime_cost = 0.0
-        long_unpaid_break_penalty = 0.0
-        nocturnal_extra = 0.0
-        holiday_extra = 0.0
-        cct_penalties = 0.0
+        
+        # Acumuladores em Decimal
+        work_cost = Decimal('0.0')
+        guaranteed_cost = Decimal('0.0')
+        waiting_cost = Decimal('0.0')
+        overtime_cost = Decimal('0.0')
+        long_unpaid_break_penalty = Decimal('0.0')
+        nocturnal_extra = Decimal('0.0')
+        holiday_extra = Decimal('0.0')
+        cct_penalties = Decimal('0.0')
 
         # ── Compilar regras dinâmicas UMA VEZ (reutilizada em todos os duties) ─
         rule_engine = DynamicRuleEngine(self._dynamic_rules)
