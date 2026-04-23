@@ -73,25 +73,35 @@ def quick_cost_sorted(
     - crew_cost_weight: custo de cada tripulante extra necessário no bloco
     - max_work_minutes: jornada máxima de trabalho (além disso, precisa outro tripulante)
     """
-    total = 0.0
+    from decimal import Decimal
+    
+    total = Decimal('0.0')
+    fixed_vehicle_cost_dec = Decimal(str(fixed_vehicle_cost))
+    idle_cost_per_minute_dec = Decimal(str(idle_cost_per_minute))
+    max_work_minutes_dec = Decimal(str(max_work_minutes))
+    crew_cost_weight_dec = Decimal(str(crew_cost_weight))
+    
     for b in blocks:
         trips = b.trips  # assumes sort_block_trips() already called
-        total += fixed_vehicle_cost
-        block_work = sum(t.duration for t in trips)
-        if trips and max_work_minutes > 0:
-            block_spread = trips[-1].end_time - trips[0].start_time
-            min_crew = max(
-                -(-block_work // int(max_work_minutes)),  # ceil division by work
-                -(-block_spread // int(max_work_minutes + 80)),  # ceil division by spread
-            )
-            total += max(0, min_crew - 1) * crew_cost_weight
+        total += fixed_vehicle_cost_dec
+        block_work = Decimal('0.0')
+        for t in trips:
+            block_work += Decimal(str(t.duration))
+        if trips and max_work_minutes_dec > Decimal('0'):
+            block_spread = Decimal(str(trips[-1].end_time - trips[0].start_time))
+            # ceil division by work
+            min_crew_work = -(-block_work // max_work_minutes_dec)
+            # ceil division by spread
+            min_crew_spread = -(-block_spread // (max_work_minutes_dec + Decimal('80')))
+            min_crew = max(min_crew_work, min_crew_spread)
+            total += max(Decimal('0'), min_crew - Decimal('1')) * crew_cost_weight_dec
         for i in range(len(trips) - 1):
-            gap = trips[i + 1].start_time - trips[i].end_time
-            if gap < 0:
-                total += abs(gap) * 50.0  # penalidade forte por overlap
+            gap = Decimal(str(trips[i + 1].start_time - trips[i].end_time))
+            if gap < Decimal('0'):
+                total += abs(gap) * Decimal('50.0')  # penalidade forte por overlap
             else:
-                total += gap * idle_cost_per_minute
-    return total
+                total += gap * idle_cost_per_minute_dec
+    return float(total)
 
 
 def preferred_pair_penalty(
@@ -102,6 +112,8 @@ def preferred_pair_penalty(
     hard_pairing_penalty: float = 0.0,
 ) -> float:
     """Pontua preservação de pares preferenciais/trip_group no VSP."""
+    from decimal import Decimal
+    
     if not preferred_pairs:
         return 0.0
 
@@ -116,7 +128,11 @@ def preferred_pair_penalty(
             if preferred_pairs.get(current.id) == nxt.id:
                 consecutive_pairs.add(tuple(sorted((current.id, nxt.id))))
 
-    total = 0.0
+    total = Decimal('0.0')
+    pair_break_penalty_dec = Decimal(str(pair_break_penalty))
+    paired_trip_bonus_dec = Decimal(str(paired_trip_bonus))
+    hard_pairing_penalty_dec = Decimal(str(hard_pairing_penalty))
+    
     seen_pairs: set[Tuple[int, int]] = set()
     for trip_id, pair_id in preferred_pairs.items():
         signature = tuple(sorted((trip_id, pair_id)))
@@ -127,10 +143,10 @@ def preferred_pair_penalty(
         block_a = trip_to_block.get(trip_id)
         block_b = trip_to_block.get(pair_id)
         if signature in consecutive_pairs:
-            total -= paired_trip_bonus
+            total -= paired_trip_bonus_dec
         elif block_a is None or block_b is None or block_a != block_b:
-            total += hard_pairing_penalty or pair_break_penalty
+            total += hard_pairing_penalty_dec if hard_pairing_penalty_dec != Decimal('0') else pair_break_penalty_dec
         else:
-            total += pair_break_penalty
+            total += pair_break_penalty_dec
 
-    return total
+    return float(total)

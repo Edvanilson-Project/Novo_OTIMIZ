@@ -120,15 +120,15 @@ class CostEvaluator(ICostEvaluator):
 
     # ── Frota ─────────────────────────────────────────────────────────────────
 
-    def _vehicle_trip_components(self, vt: VehicleType | None, trip) -> Dict[str, float]:
+    def _vehicle_trip_components(self, vt: VehicleType | None, trip) -> Dict[str, Decimal]:
         if vt:
             return {
-                "distance": vt.cost_per_km * trip.distance_km,
-                "time": vt.cost_per_hour * (trip.duration / 60.0),
+                "distance": self._to_decimal(vt.cost_per_km) * self._to_decimal(trip.distance_km),
+                "time": self._to_decimal(vt.cost_per_hour) * (self._to_decimal(trip.duration) / Decimal('60.0')),
             }
         return {
-            "distance": trip.distance_km * self.cost_km,
-            "time": (trip.duration / 60.0) * settings.default_cost_per_hour,
+            "distance": self._to_decimal(trip.distance_km) * self.cost_km,
+            "time": (self._to_decimal(trip.duration) / Decimal('60.0')) * self._to_decimal(settings.default_cost_per_hour),
         }
 
     def vsp_cost_breakdown(self, solution: VSPSolution, vehicle_types: List[VehicleType]) -> Dict[str, Any]:
@@ -158,8 +158,8 @@ class CostEvaluator(ICostEvaluator):
 
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
-                block_distance += self._to_decimal(components["distance"])
-                block_time += self._to_decimal(components["time"])
+                block_distance += components["distance"]  # Já é Decimal
+                block_time += components["time"]          # Já é Decimal
                 if not has_boundary_buffers:
                     idle_before = self._to_decimal(trip.idle_before_minutes)
                     idle_after = self._to_decimal(trip.idle_after_minutes)
@@ -460,17 +460,17 @@ class CostEvaluator(ICostEvaluator):
         cost = Decimal('0.0')
         idle_cost_per_min = self.idle_cost_per_minute
         if vt:
-            cost += Decimal(str(vt.fixed_cost))
+            cost += self._to_decimal(vt.fixed_cost)
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
-                cost += self._to_decimal(components["distance"]) + self._to_decimal(components["time"])
+                cost += components["distance"] + components["time"]  # Já são Decimal
                 # Custo do tempo ocioso antes/depois da viagem (pull-out/pull-back)
-                cost += (Decimal(str(trip.idle_before_minutes)) + Decimal(str(trip.idle_after_minutes))) * idle_cost_per_min
+                cost += (self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)) * idle_cost_per_min
         else:
             # Custo fixo de ativação é por bloco, não por viagem
             cost += self.cost_vehicle
             for trip in block.trips:
                 components = self._vehicle_trip_components(None, trip)
-                cost += self._to_decimal(components["distance"]) + self._to_decimal(components["time"])
-                cost += (Decimal(str(trip.idle_before_minutes)) + Decimal(str(trip.idle_after_minutes))) * idle_cost_per_min
+                cost += components["distance"] + components["time"]  # Já são Decimal
+                cost += (self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)) * idle_cost_per_min
         return float(cost)
