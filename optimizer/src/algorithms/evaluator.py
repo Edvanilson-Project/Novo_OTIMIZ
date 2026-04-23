@@ -86,7 +86,7 @@ class CostEvaluator(ICostEvaluator):
             return Decimal('0.0')
         return Decimal(str(value))
 
-    def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> float:
+    def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> Decimal:
         """Piecewise-linear penalty.
 
         Faixas após o limite base:
@@ -96,12 +96,12 @@ class CostEvaluator(ICostEvaluator):
         """
         excess = max(0, int(unpaid_break_minutes) - self.long_unpaid_break_limit_minutes)
         if excess <= 0:
-            return 0.0
+            return Decimal('0.0')
 
         tier1 = min(excess, 30)
         tier2 = min(max(0, excess - 30), 60)
         tier3 = max(0, excess - 90)
-        return self.long_unpaid_break_penalty_weight * (
+        return self.long_unpaid_break_penalty_weight * Decimal(
             tier1 * 1.0
             + tier2 * 3.0
             + tier3 * 10.0
@@ -145,7 +145,7 @@ class CostEvaluator(ICostEvaluator):
             block_activation = self._to_decimal(
                 block.meta.get(
                     "activation_cost",
-                    float(self.cost_vehicle) if not vt else vt.fixed_cost,
+                    self.cost_vehicle if not vt else Decimal(str(vt.fixed_cost)),
                 )
             )
             block_connection = self._to_decimal(block.meta.get("connection_cost", 0.0))
@@ -457,20 +457,20 @@ class CostEvaluator(ICostEvaluator):
         Inclui custo de tempo ocioso (pull-out/pull-back e idle entre viagens)."""
         vt_map = {vt.id: vt for vt in vehicle_types}
         vt = vt_map.get(block.vehicle_type_id or 0)  # type: ignore[arg-type]
-        cost = 0.0
+        cost = Decimal('0.0')
         idle_cost_per_min = self.idle_cost_per_minute
         if vt:
-            cost += vt.fixed_cost
+            cost += Decimal(str(vt.fixed_cost))
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
-                cost += components["distance"] + components["time"]
+                cost += self._to_decimal(components["distance"]) + self._to_decimal(components["time"])
                 # Custo do tempo ocioso antes/depois da viagem (pull-out/pull-back)
-                cost += (trip.idle_before_minutes + trip.idle_after_minutes) * idle_cost_per_min
+                cost += (Decimal(str(trip.idle_before_minutes)) + Decimal(str(trip.idle_after_minutes))) * idle_cost_per_min
         else:
             # Custo fixo de ativação é por bloco, não por viagem
-            cost += settings.default_vehicle_fixed_cost
+            cost += self.cost_vehicle
             for trip in block.trips:
                 components = self._vehicle_trip_components(None, trip)
-                cost += components["distance"] + components["time"]
-                cost += (trip.idle_before_minutes + trip.idle_after_minutes) * idle_cost_per_min
-        return cost
+                cost += self._to_decimal(components["distance"]) + self._to_decimal(components["time"])
+                cost += (Decimal(str(trip.idle_before_minutes)) + Decimal(str(trip.idle_after_minutes))) * idle_cost_per_min
+        return float(cost)

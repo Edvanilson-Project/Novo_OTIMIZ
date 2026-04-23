@@ -59,7 +59,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
         
         # Parâmetros de custo CCT (com defaults)
-        self.min_paid_hours = float(self.cct_params.get("min_paid_hours", 4.0))
+        self.min_paid_hours = self._to_decimal(self.cct_params.get("min_paid_hours", Decimal('4.0')))
         self.overtime_multiplier = self._to_decimal(self.cct_params.get("overtime_multiplier", Decimal('1.5')))
         
         self._rule_engine = DynamicRuleEngine(self.cct_params.get("dynamic_rules") or [])
@@ -487,7 +487,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             "start_hour": path[0].start_time // 60 if path else 0,
         }
 
-        crew_base_direct = self.evaluator.crew_cost_per_hour * Decimal(str(self.min_paid_hours))
+        crew_base_direct = self.evaluator.crew_cost_per_hour * self.min_paid_hours
         extra_work = max(0, work_time - self.max_work_minutes)
         base_overtime = (extra_work / Decimal('60.0')) * self.evaluator.crew_cost_per_hour * self.overtime_multiplier
         overtime_cost = self._apply_dynamic_rules(base_overtime, "overtime_cost", path_context)
