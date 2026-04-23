@@ -13,6 +13,7 @@ Melhorias implementadas:
 """
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP, getcontext
 from typing import Any, Dict, List
 
 from ..core.config import get_settings
@@ -26,51 +27,64 @@ from ..domain.models import (
     VSPSolution,
 )
 
+# Configurar contexto decimal para alta precisão
+getcontext().prec = 28
+getcontext().rounding = ROUND_HALF_UP
+
 settings = get_settings()
 
 # Custo horário padrão caso o tipo de veículo não informe custo de tripulante
-_DEFAULT_CREW_COST_PER_HOUR = 25.0
-_CCT_VIOLATION_PENALTY = 500.0   # multa por violação de CCT (por ocorrência)
+_DEFAULT_CREW_COST_PER_HOUR = Decimal('25.0')
+_CCT_VIOLATION_PENALTY = Decimal('500.0')   # multa por violação de CCT (por ocorrência)
 _LONG_UNPAID_BREAK_LIMIT_MINUTES = 90
-_LONG_UNPAID_BREAK_PENALTY_WEIGHT = 0.05
-_DEFAULT_OVERTIME_EXTRA_PCT = 0.5
+_LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal('0.05')
+_DEFAULT_OVERTIME_EXTRA_PCT = Decimal('0.5')
 
 
-def _R(v: float) -> float:
-    """Arredonda para exibição (2 casas).  Usado apenas na saída, nunca em acumuladores."""
-    return round(v, 2)
+def _R(v: Decimal) -> float:
+    """Arredonda Decimal para exibição (2 casas). Usado apenas na saída final."""
+    return float(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
 class CostEvaluator(ICostEvaluator):
-    """Calcula o custo total de uma solução, separando frota e tripulação."""
+    """Calcula o custo total de uma solução com precisão decimal."""
 
     def __init__(
         self,
-        crew_cost_per_hour: float = _DEFAULT_CREW_COST_PER_HOUR,
-        violation_penalty: float = _CCT_VIOLATION_PENALTY,
+        crew_cost_per_hour: float = float(_DEFAULT_CREW_COST_PER_HOUR),
+        violation_penalty: float = float(_CCT_VIOLATION_PENALTY),
         long_unpaid_break_limit_minutes: int = _LONG_UNPAID_BREAK_LIMIT_MINUTES,
-        long_unpaid_break_penalty_weight: float = _LONG_UNPAID_BREAK_PENALTY_WEIGHT,
+        long_unpaid_break_penalty_weight: float = float(_LONG_UNPAID_BREAK_PENALTY_WEIGHT),
         idle_cost_per_minute: float = 0.25,
-        overtime_extra_pct: float = _DEFAULT_OVERTIME_EXTRA_PCT,
+        overtime_extra_pct: float = float(_DEFAULT_OVERTIME_EXTRA_PCT),
     ):
-        self.crew_cost_per_hour = crew_cost_per_hour
-        self.violation_penalty = violation_penalty
+        # Converter todos os parâmetros para Decimal
+        self.crew_cost_per_hour = Decimal(str(crew_cost_per_hour))
+        self.violation_penalty = Decimal(str(violation_penalty))
         self.long_unpaid_break_limit_minutes = max(0, int(long_unpaid_break_limit_minutes))
-        self.long_unpaid_break_penalty_weight = max(0.0, float(long_unpaid_break_penalty_weight))
-        self.idle_cost_per_minute = idle_cost_per_minute
-        self.overtime_extra_pct = max(0.0, float(overtime_extra_pct))
+        self.long_unpaid_break_penalty_weight = Decimal(str(long_unpaid_break_penalty_weight))
+        self.idle_cost_per_minute = Decimal(str(idle_cost_per_minute))
+        self.overtime_extra_pct = Decimal(str(overtime_extra_pct))
         self._dynamic_rules: list = []  # Populado externamente via set_dynamic_rules()
         
         # Pesos de custo dinâmicos
-        self.cost_vehicle = float(settings.default_vehicle_fixed_cost)
-        self.cost_km = float(settings.default_cost_per_km)
-        self.cost_duty = 0.0  # Default 0 para compatibilidade; pode ser ativado via API/set_costs
+        self.cost_vehicle = Decimal(str(settings.default_vehicle_fixed_cost))
+        self.cost_km = Decimal(str(settings.default_cost_per_km))
+        self.cost_duty = Decimal('0.0')  # Default 0 para compatibilidade
 
     def set_costs(self, cost_vehicle: float = 1000.0, cost_km: float = 1.0, cost_duty: float = 500.0) -> None:
         """Define os pesos de custo dinâmicos recebidos via API."""
-        self.cost_vehicle = float(cost_vehicle)
-        self.cost_km = float(cost_km)
-        self.cost_duty = float(cost_duty)
+        self.cost_vehicle = Decimal(str(cost_vehicle))
+        self.cost_km = Decimal(str(cost_km))
+        self.cost_duty = Decimal(str(cost_duty))
+
+    def _to_decimal(self, value: Any) -> Decimal:
+        """Converte qualquer valor para Decimal de forma segura."""
+        if isinstance(value, Decimal):
+            return value
+        if value is None:
+            return Decimal('0.0')
+        return Decimal(str(value))
 
     def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> float:
         """Piecewise-linear penalty.

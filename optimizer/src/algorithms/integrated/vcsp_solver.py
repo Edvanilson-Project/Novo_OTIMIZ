@@ -50,12 +50,22 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         self.evaluator = CostEvaluator()
         self.routing = _RoutingClient() if _HAS_ROUTING else None
 
+        # Restrições CCT RÍGIDAS com parametrização
         self.max_shift_minutes = 720  # 12 horas - RÍGIDO
         self.max_work_minutes = 480   # 8 horas - RÍGIDO
         self.meal_break_minutes = self.cct_params.get("meal_break_minutes", 60)
         self.min_inter_shift_rest = 660  # 11 horas - RÍGIDO
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
+        
+        # Parâmetros de custo CCT (com defaults)
+        self.min_paid_hours = float(self.cct_params.get("min_paid_hours", 4.0))
+        self.overtime_multiplier = float(self.cct_params.get("overtime_multiplier", 1.5))
+        
         self._rule_engine = DynamicRuleEngine(self.cct_params.get("dynamic_rules") or [])
+        
+        # Big-M será calculado dinamicamente e armazenado
+        self._illegal_relief_penalty: Optional[float] = None
+        self._punishment_cost: Optional[float] = None
 
     def solve(
         self,
