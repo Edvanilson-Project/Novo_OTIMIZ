@@ -291,52 +291,78 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         else:
             max_idle_gap = self.meal_break_minutes + 180  # comportamento padrão do solver
         
+        # Ordenar viagens por start_time para poda temporal precoce
+        sorted_trips = sorted(trips, key=lambda t: t.start_time)
+        
         def dfs(current_path, current_time, last_trip, current_work, last_end_time=None, depth=0):
             if len(paths) >= MAX_PATHS or depth >= MAX_DEPTH:
                 return
                 
-            # Restrição CCT: Descanso interjornada (se aplicável)
-            if last_end_time and current_path:
-                time_since_last_duty = current_path[0].start_time - last_end_time
-                if time_since_last_duty < self.min_inter_shift_rest:
-                    return  # Poda por violação CCT
+            # Se o caminho atual não está vazio, podemos avaliá-lo
             if current_path:
                 paths.append(self._evaluate_path(current_path))
             
-            for t in trips:
+            # Poda por janela temporal: só considerar viagens nas próximas 8 horas
+            time_window_end = current_time + 480
+            
+            for t in sorted_trips:
+                # Se já estamos no limite de caminhos, parar
+                if len(paths) >= MAX_PATHS:
+                    return
+                    
+                if t.start_time > time_window_end:
+                    break  # Viagens fora da janela - poda agressiva
+                    
+                if t in current_path:
+                    continue
+                    
                 deadhead_dur = last_trip.deadhead_times.get(t.origin_id, 0) if last_trip else 0
                 
+                # Verificar se a viagem t pode ser adicionada temporalmente
                 if t.start_time >= current_time + deadhead_dur:
-                    # Garantir que a viagem atual não está no caminho já
-                    if t not in current_path:
-                        # Regra de Poda: Viagem Casada (Arquiteto)
-                        force_round_trip = self.cct_params.get('force_round_trip', False)
-                        if force_round_trip and last_trip is not None:
-                            if t.origin_id != last_trip.destination_id:
-                                continue
+                    # Regra de Poda: Viagem Casada (Arquiteto)
+                    force_round_trip = self.cct_params.get('force_round_trip', False)
+                    if force_round_trip and last_trip is not None:
+                        if t.origin_id != last_trip.destination_id:
+                            continue
 
-                        if last_trip is None or last_trip.can_precede(t):
+                    if last_trip is None or last_trip.can_precede(t):
+                        
+                        # 1. Poda por Tempo de Direção (Work Time + Deadhead)
+                        # Deadhead conta como tempo de trabalho na CCT brasileira
+                        new_work = current_work + deadhead_dur + t.duration
+                        if new_work > self.max_work_minutes:
+                            continue
                             
-                            # 1. Poda por Tempo de Direção (Work Time + Deadhead)
-                            # Deadhead conta como tempo de trabalho na CCT brasileira
-                            new_work = current_work + deadhead_dur + t.duration
-                            if new_work > self.max_work_minutes:
+                        # 1.2 Poda por Jornada Total (Spread Time)
+                        spread_time = t.end_time - current_path[0].start_time if current_path else t.duration
+                        if spread_time > self.max_shift_minutes:
+                            continue
+                            
+                        # 2. Poda por Distância Temporal (Max Idle Time)
+                        if last_trip is not None:
+                            gap = t.start_time - last_trip.end_time
+                            if gap > max_idle_gap:
                                 continue
-                                
-                            # 1.2 Poda por Jornada Total (Spread Time)
-                            spread_time = t.end_time - current_path[0].start_time if current_path else t.duration
-                            if spread_time > self.max_shift_minutes:
+
+                        # 3. Poda por Interjornada (se for a primeira viagem do duty e tivermos last_end_time)
+                        if last_end_time is not None and not current_path:
+                            # Estamos começando um novo duty. A primeira viagem deve respeitar a interjornada.
+                            if t.start_time < last_end_time + self.min_inter_shift_rest:
                                 continue
-                                
-                            # 2. Poda por Distância Temporal (Max Idle Time)
-                            if last_trip is not None:
-                                gap = t.start_time - last_trip.end_time
-                                if gap > max_idle_gap:
-                                    continue
 
-                            dfs(current_path + [t], t.end_time, t, new_work)
+                        # CHAMADA RECURSIVA CORRIGIDA: passando todos os parâmetros necessários
+                        dfs(
+                            current_path + [t], 
+                            t.end_time, 
+                            t, 
+                            new_work, 
+                            last_end_time,  # Mantém o mesmo last_end_time durante a construção do duty
+                            depth + 1       # Incrementa a profundidade
+                        )
 
-        dfs([], 0, None, 0)
+        # Chamada inicial: não temos last_end_time, pois é o primeiro duty do dia
+        dfs([], 0, None, 0, None, 0)
         return paths
 
     def validate_solution_quality(self, result: OptimizationResult) -> Dict[str, Any]:
