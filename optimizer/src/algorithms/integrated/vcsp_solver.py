@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 import pulp
 
