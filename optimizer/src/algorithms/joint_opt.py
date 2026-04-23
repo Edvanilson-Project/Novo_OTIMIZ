@@ -1,5 +1,7 @@
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+import math
+import random
+from typing import List, Dict, Any, Optional, Tuple, Set
 import copy
 from .evaluator import CostEvaluator
 from ..domain.models import CSPSolution, VSPSolution, Trip, Block, Duty
@@ -489,6 +491,18 @@ def _select_blocks_by_marginal_cost(
     # Selecionar top N blocos
     n_destroy = max(2, int(len(vsp_sol.blocks) * destruction_rate))
     return {block_id for block_id, _ in block_costs[:n_destroy]}
+
+def _feasible_insertion(block: Block, trip: Trip, vsp_params: Dict[str, Any]) -> Tuple[bool, int, float]:
+    """Verifica viabilidade de inserção de uma trip em um bloco e retorna custo estimado."""
+    # Implementação simplificada - deve ser substituída pela lógica real
+    # Retorna (viável, posição, custo)
+    return True, 0, 0.0
+
+def _local_search_2opt(blocks: List[Block], vsp_params: Dict[str, Any]) -> List[Block]:
+    """Implementação simplificada da busca local 2-opt."""
+    # Apenas retorna os blocos sem modificação
+    # Deve ser substituída pela implementação real
+    return blocks
 
 def _grasp_repair(
     base_blocks: List[Block],
