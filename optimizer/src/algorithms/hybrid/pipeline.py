@@ -4,6 +4,7 @@ Pipeline Híbrido — Greedy → Local Search → Melhor Metaheurístico → ILP
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import List, Optional
 
 from ...core.config import get_settings
@@ -260,46 +261,58 @@ class HybridPipeline(BaseAlgorithm):
 
 def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
     vsp_params = vsp_params or {}
-    unassigned_penalty = len(getattr(sol, "unassigned_trips", [])) * 5000.0
+    # Inicializar todas as penalidades como Decimal
+    unassigned_penalty = Decimal('0.0')
+    long_block_penalty = Decimal('0.0')
+    infeasible_penalty = Decimal('0.0')
+    pair_penalty = Decimal('0.0')
+
+    # Penalidade por viagens não atribuídas
+    unassigned_penalty = Decimal(len(getattr(sol, "unassigned_trips", []))) * Decimal('5000.0')
+
     crew_block_limit = int(vsp_params.get("crew_block_limit_minutes", 0) or 0)
-    long_block_penalty = 0.0
-    infeasible_penalty = 0.0
-    pair_penalty = 0.0
     if crew_block_limit > 0:
         for block in getattr(sol, "blocks", []):
             duration = int(block.end_time - block.start_time)
             if duration > crew_block_limit:
-                long_block_penalty += (duration - crew_block_limit) * 200.0
+                long_block_penalty += Decimal(duration - crew_block_limit) * Decimal('200.0')
+
     min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
     if bool(vsp_params.get("preserve_preferred_pairs", True)):
         preferred_pairs = cached_pairs if cached_pairs is not None else build_preferred_pairs(
             [trip for block in getattr(sol, "blocks", []) for trip in getattr(block, "trips", [])],
             min_layover, int(vsp_params.get("preferred_pair_window_minutes", 120) or 120),
         )
-        pair_break_penalty = float(vsp_params.get("pair_break_penalty", 1000.0))
-        paired_trip_bonus = float(vsp_params.get("paired_trip_bonus", 40.0))
-        hard_pairing_penalty = (
-            float(
-                vsp_params.get(
-                    "hard_pairing_penalty",
-                    max(pair_break_penalty * 10.0, float(vsp_params.get("fixed_vehicle_activation_cost", 800.0)) * 25.0),
+        # Converter os parâmetros de penalidade para Decimal
+        pair_break_penalty = Decimal(str(vsp_params.get("pair_break_penalty", 1000.0)))
+        paired_trip_bonus = Decimal(str(vsp_params.get("paired_trip_bonus", 40.0)))
+        # Cálculo do hard_pairing_penalty com Decimal
+        if bool(vsp_params.get("hard_pairing_vehicle_level", False)):
+            if "hard_pairing_penalty" in vsp_params:
+                hard_pairing_penalty = Decimal(str(vsp_params["hard_pairing_penalty"]))
+            else:
+                hard_pairing_penalty = max(
+                    pair_break_penalty * Decimal('10.0'),
+                    Decimal(str(vsp_params.get("fixed_vehicle_activation_cost", 800.0))) * Decimal('25.0')
                 )
-            )
-            if bool(vsp_params.get("hard_pairing_vehicle_level", False))
-            else 0.0
-        )
+        else:
+            hard_pairing_penalty = Decimal('0.0')
     else:
         preferred_pairs = {}
-        pair_break_penalty = 0.0
-        paired_trip_bonus = 0.0
-        hard_pairing_penalty = 0.0
-    pair_penalty = preferred_pair_penalty(
+        pair_break_penalty = Decimal('0.0')
+        paired_trip_bonus = Decimal('0.0')
+        hard_pairing_penalty = Decimal('0.0')
+
+    # Chamar preferred_pair_penalty com parâmetros float (pois a função espera float)
+    pair_penalty = Decimal(str(preferred_pair_penalty(
         getattr(sol, "blocks", []),
         preferred_pairs,
-        pair_break_penalty,
-        paired_trip_bonus,
-        hard_pairing_penalty,
-    )
+        float(pair_break_penalty),
+        float(paired_trip_bonus),
+        float(hard_pairing_penalty),
+    )))
+
+    # Penalidades por inviabilidade (gaps negativos ou insuficientes)
     for block in getattr(sol, "blocks", []):
         trips = list(getattr(block, "trips", []))
         for index in range(len(trips) - 1):
@@ -309,10 +322,15 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
             deadhead_need = int(current.deadhead_times.get(nxt.origin_id, 0))
             need = max(min_layover, deadhead_need)
             if gap < 0:
-                infeasible_penalty += 20000.0 + abs(gap) * 500.0
+                infeasible_penalty += Decimal('20000.0') + Decimal(abs(gap)) * Decimal('500.0')
             elif gap < need:
-                infeasible_penalty += 15000.0 + (need - gap) * 400.0
-    return quick_cost_sorted(sol.blocks) + unassigned_penalty + long_block_penalty + infeasible_penalty + pair_penalty
+                infeasible_penalty += Decimal('15000.0') + Decimal(need - gap) * Decimal('400.0')
+
+    # Custo rápido dos blocos (a função retorna float, convertemos para Decimal)
+    quick_cost = Decimal(str(quick_cost_sorted(sol.blocks)))
+
+    total = quick_cost + unassigned_penalty + long_block_penalty + infeasible_penalty + pair_penalty
+    return float(total)
 
 
 def _vsp_hard_issue_count(sol, vsp_params=None) -> int:
