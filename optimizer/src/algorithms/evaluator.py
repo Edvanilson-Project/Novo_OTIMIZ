@@ -41,9 +41,9 @@ _LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal('0.05')
 _DEFAULT_OVERTIME_EXTRA_PCT = Decimal('0.5')
 
 
-def _R(v: Decimal) -> float:
-    """Arredonda Decimal para exibição (2 casas). Usado apenas na saída final."""
-    return float(v.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+def _R(v) -> float:
+    """Converte para Decimal antes de arredondar, aceitando float ou Decimal."""
+    return float(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
 class CostEvaluator(ICostEvaluator):
@@ -227,7 +227,7 @@ class CostEvaluator(ICostEvaluator):
         # ── Compilar regras dinâmicas UMA VEZ (reutilizada em todos os duties) ─
         rule_engine = DynamicRuleEngine(self._dynamic_rules)
         has_dynamic_rules = rule_engine.rule_count > 0
-        dynamic_adjustments_total = 0.0
+        dynamic_adjustments_total = Decimal('0.0')
 
         for duty in solution.duties:
             duty_work_cost = (duty.work_time / 60.0) * self.crew_cost_per_hour

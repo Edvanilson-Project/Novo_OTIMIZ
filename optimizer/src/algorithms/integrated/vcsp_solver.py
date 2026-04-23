@@ -451,6 +451,9 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         trips_cost_dist = Decimal('0.0')
         trips_cost_time = Decimal('0.0')
         trips_work_time = Decimal('0.0')
+        deadhead_cost = Decimal('0.0')
+        deadhead_work_time = Decimal('0.0')
+        vehicle_cost = Decimal('0.0')
         
         for t in path:
             comp = self.evaluator._vehicle_trip_components(None, t)
