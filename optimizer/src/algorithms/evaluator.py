@@ -230,39 +230,39 @@ class CostEvaluator(ICostEvaluator):
         dynamic_adjustments_total = Decimal('0.0')
 
         for duty in solution.duties:
-            duty_work_cost = (duty.work_time / 60.0) * self.crew_cost_per_hour
+            duty_work_cost = (self._to_decimal(duty.work_time) / Decimal('60.0')) * self.crew_cost_per_hour
             guaranteed_minutes = max(
-                int(duty.work_time),
-                int(duty.meta.get("guaranteed_minutes", duty.work_time) or duty.work_time),
+                self._to_decimal(duty.work_time),
+                self._to_decimal(duty.meta.get("guaranteed_minutes", duty.work_time) or duty.work_time),
             )
-            paid_minutes = max(int(duty.paid_minutes or 0), guaranteed_minutes)
-            guaranteed_extra_minutes = max(0, guaranteed_minutes - int(duty.work_time))
-            paid_waiting_minutes = max(0, paid_minutes - guaranteed_minutes)
-            duty_guaranteed_cost = (guaranteed_extra_minutes / 60.0) * self.crew_cost_per_hour
-            duty_waiting_cost = (paid_waiting_minutes / 60.0) * self.crew_cost_per_hour
+            paid_minutes = max(self._to_decimal(duty.paid_minutes or 0), guaranteed_minutes)
+            guaranteed_extra_minutes = max(Decimal('0.0'), guaranteed_minutes - self._to_decimal(duty.work_time))
+            paid_waiting_minutes = max(Decimal('0.0'), paid_minutes - guaranteed_minutes)
+            duty_guaranteed_cost = (guaranteed_extra_minutes / Decimal('60.0')) * self.crew_cost_per_hour
+            duty_waiting_cost = (paid_waiting_minutes / Decimal('60.0')) * self.crew_cost_per_hour
             duty_overtime_cost = (
-                (max(0, int(duty.overtime_minutes or 0)) / 60.0)
+                (self._to_decimal(max(0, int(duty.overtime_minutes or 0))) / Decimal('60.0'))
                 * self.crew_cost_per_hour
-                * float(duty.meta.get("overtime_extra_pct", self.overtime_extra_pct))
+                * self._to_decimal(duty.meta.get("overtime_extra_pct", self.overtime_extra_pct))
             )
             unpaid_break_minutes = max(
-                0,
-                int(duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0),
+                Decimal('0.0'),
+                self._to_decimal(duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0),
             )
             duty_long_break_penalty = self._long_unpaid_break_penalty(unpaid_break_minutes)
-            duty_nocturnal_extra = 0.0
+            duty_nocturnal_extra = Decimal('0.0')
             if duty.nocturnal_minutes > 0:
                 duty_nocturnal_extra = (
-                    (duty.nocturnal_minutes / 60.0)
+                    (self._to_decimal(duty.nocturnal_minutes) / Decimal('60.0'))
                     * self.crew_cost_per_hour
-                    * float(duty.meta.get("nocturnal_extra_pct", 0.20))
+                    * self._to_decimal(duty.meta.get("nocturnal_extra_pct", Decimal('0.20')))
                 )
-            duty_holiday_extra = 0.0
+            duty_holiday_extra = Decimal('0.0')
             if duty.meta.get("holiday_extra_pct"):
                 duty_holiday_extra = (
-                    (duty.work_time / 60.0)
+                    (self._to_decimal(duty.work_time) / Decimal('60.0'))
                     * self.crew_cost_per_hour
-                    * float(duty.meta.get("holiday_extra_pct", 0.0))
+                    * self._to_decimal(duty.meta.get("holiday_extra_pct", Decimal('0.0')))
                 )
             duty_cct_penalties = (duty.rest_violations + duty.shift_violations) * self.violation_penalty
             if duty.meta.get("illegal_relief"):

@@ -60,7 +60,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         
         # Parâmetros de custo CCT (com defaults)
         self.min_paid_hours = float(self.cct_params.get("min_paid_hours", 4.0))
-        self.overtime_multiplier = float(self.cct_params.get("overtime_multiplier", 1.5))
+        self.overtime_multiplier = self._to_decimal(self.cct_params.get("overtime_multiplier", Decimal('1.5')))
         
         self._rule_engine = DynamicRuleEngine(self.cct_params.get("dynamic_rules") or [])
         
@@ -472,8 +472,8 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             # Estimativa de custo de deadhead (usando custos padrão)
             # Como não temos a distância exata do deadhead aqui mas temos o tempo, 
             # podemos estimar via custo por hora do veículo.
-            deadhead_cost += (dur / 60.0) * self.evaluator.crew_cost_per_hour # Custeio simplificado do motorista em deslocamento
-            deadhead_cost += (dur / 60.0) * 10.0 # Custeio do veículo (combustível/desgaste estimado por hora)
+            deadhead_cost += (dur / Decimal('60.0')) * self.evaluator.crew_cost_per_hour # Custeio simplificado do motorista em deslocamento
+            deadhead_cost += (dur / Decimal('60.0')) * Decimal('10.0') # Custeio do veículo (combustível/desgaste estimado por hora)
 
         vehicle_cost = vehicle_fixed + trips_cost_dist + trips_cost_time + deadhead_cost
         work_time = trips_work_time + deadhead_work_time
