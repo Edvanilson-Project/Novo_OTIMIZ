@@ -187,9 +187,16 @@ async def get_optimization_status(task_id: str) -> TaskStatusResponse:
     task_result = AsyncResult(task_id)
     state = task_result.state
 
-    # ── Em processamento ────────────────────────────────────────────────────
-    if state in ("PENDING", "STARTED", "RETRY"):
-        return TaskStatusResponse(status="processing", task_id=task_id)
+    # ── Em processamento (inclui PROGRESS com fases do pipeline) ────────────
+    if state in ("PENDING", "STARTED", "RETRY", "PROGRESS"):
+        progress_meta = {}
+        if state == "PROGRESS" and isinstance(task_result.info, dict):
+            progress_meta = {
+                "phase": task_result.info.get("phase", "processing"),
+                "phase_label": task_result.info.get("phase_label", "Processando..."),
+                "progress_pct": task_result.info.get("progress_pct", 0),
+            }
+        return TaskStatusResponse(status="processing", task_id=task_id, **progress_meta)
 
     # ── Concluído: verificar se é sucesso ou erro de negócio ─────────────────
     if state == "SUCCESS":
