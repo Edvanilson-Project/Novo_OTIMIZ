@@ -14,6 +14,7 @@ TRATAMENTO DE ERROS (Ajuste 1):
 import hashlib
 import json
 import logging
+import time
 from typing import Union
 
 import redis.asyncio as aioredis
