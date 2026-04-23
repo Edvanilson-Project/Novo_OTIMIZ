@@ -486,7 +486,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         
         illegal_relief_single = False
         if spread_time > self.max_shift_minutes:
-            cost_single += ILLEGAL_RELIEF_PENALTY
+            cost_single += self._calculate_safe_big_m(path)[0]  # Use first value (illegal relief penalty)
             illegal_relief_single = True
 
         best_cost = cost_single
@@ -524,7 +524,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             node = t_next.origin_id
             is_terminal = node in self.terminal_location_ids
             if not is_terminal:
-                relief_c += ILLEGAL_RELIEF_PENALTY
+                relief_c += self._calculate_safe_big_m(path)[0]  # Use first value (illegal relief penalty)
                 
             if relief_c < best_cost:
                 best_cost = relief_c
