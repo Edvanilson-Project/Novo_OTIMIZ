@@ -158,10 +158,7 @@ class RoutingClient:
         locations: List[Tuple[float, float, int]],
         location_ids: List[int],
     ) -> Optional[Dict[Tuple[int, int], float]]:
-        """
-        Chama o endpoint /table do OSRM para calcular a matriz de duração completa.
-        Retorna None em caso de falha para acionar o fallback Haversine.
-        """
+        """Versão robusta com tratamento completo de erros."""
         try:
             # OSRM espera: lon,lat;lon,lat;...
             coords_str = ";".join(f"{lon},{lat}" for lat, lon, _ in locations)
@@ -195,6 +192,30 @@ class RoutingClient:
                         matrix[(origin_id, dest_id)] = 999_999.0
                     else:
                         matrix[(origin_id, dest_id)] = max(0.0, float(dur_secs) / 60.0)
+
+            # VALIDAÇÃO: Verificar integridade da matriz
+            expected_pairs = len(locations) * (len(locations) - 1)
+            if len(matrix) < expected_pairs:
+                logger.warning(f"Matriz incompleta: {len(matrix)}/{expected_pairs} pares")
+                
+                # Preencher pares faltantes com Big-M de roteamento
+                for i in range(len(locations)):
+                    for j in range(len(locations)):
+                        if i == j:
+                            continue
+                        key = (location_ids[i], location_ids[j])
+                        if key not in matrix:
+                            # Usar distância Haversine como fallback
+                            lat1, lon1, _ = locations[i]
+                            lat2, lon2, _ = locations[j]
+                            _, dur_min = self._haversine_fallback(lat1, lon1, lat2, lon2)
+                            matrix[key] = dur_min
+                            logger.debug(f"Par {key} preenchido com fallback: {dur_min}min")
+            
+            # VALIDAÇÃO: Verificar valores nulos ou negativos
+            for key, duration in list(matrix.items()):
+                if duration is None or duration < 0:
+                    matrix[key] = 999_999.0  # Big-M de roteamento
 
             logger.info(
                 "OSRM /table: %d localizações → %d pares calculados em 1 requisição.",

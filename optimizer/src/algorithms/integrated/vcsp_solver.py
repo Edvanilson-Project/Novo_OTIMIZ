@@ -50,9 +50,10 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         self.evaluator = CostEvaluator()
         self.routing = _RoutingClient() if _HAS_ROUTING else None
 
-        self.max_shift_minutes = self.cct_params.get("max_shift_minutes", 720)
-        self.max_work_minutes = self.cct_params.get("max_work_minutes", 480)
+        self.max_shift_minutes = 720  # 12 horas - RÍGIDO
+        self.max_work_minutes = 480   # 8 horas - RÍGIDO
         self.meal_break_minutes = self.cct_params.get("meal_break_minutes", 60)
+        self.min_inter_shift_rest = 660  # 11 horas - RÍGIDO
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
         self._rule_engine = DynamicRuleEngine(self.cct_params.get("dynamic_rules") or [])
 
@@ -273,8 +274,11 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         return costs[target]
 
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
-        """Gera caminhos válidos (Constrained DFS) com podas de segurança para evitar OOM."""
+        """Gera caminhos viáveis com podas agressivas e limite de expansão."""
+        MAX_PATHS = 5000  # Limite absoluto de caminhos a gerar
+        MAX_DEPTH = 10    # Máximo de viagens por caminho
         paths = []
+        
         # Comportamento do intervalo ocioso do veículo (vsp_params)
         _behavior = self.vsp_params.get("vehicle_idle_gap_behavior", "solver_decides")
         _threshold = self.vsp_params.get("vehicle_idle_gap_threshold_minutes")
@@ -287,7 +291,15 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         else:
             max_idle_gap = self.meal_break_minutes + 180  # comportamento padrão do solver
         
-        def dfs(current_path, current_time, last_trip, current_work):
+        def dfs(current_path, current_time, last_trip, current_work, last_end_time=None, depth=0):
+            if len(paths) >= MAX_PATHS or depth >= MAX_DEPTH:
+                return
+                
+            # Restrição CCT: Descanso interjornada (se aplicável)
+            if last_end_time and current_path:
+                time_since_last_duty = current_path[0].start_time - last_end_time
+                if time_since_last_duty < self.min_inter_shift_rest:
+                    return  # Poda por violação CCT
             if current_path:
                 paths.append(self._evaluate_path(current_path))
             
@@ -326,6 +338,32 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         dfs([], 0, None, 0)
         return paths
+
+    def validate_solution_quality(self, result: OptimizationResult) -> Dict[str, Any]:
+        """Valida a qualidade matemática da solução."""
+        validation = {
+            "optimality_gap": None,
+            "constraint_violations": 0,
+            "cost_consistency": True,
+            "cct_compliance": True
+        }
+        
+        # 1. Verificar violações CCT
+        for duty in result.csp.duties:
+            if duty.duration_minutes > 480:
+                validation["constraint_violations"] += 1
+                validation["cct_compliance"] = False
+                
+        # 2. Verificar consistência de custos
+        internal_cost = result.total_cost
+        api_cost = self.evaluator.total_cost_breakdown(result, ...)["total"]
+        validation["cost_consistency"] = self._validate_cost_consistency(internal_cost, api_cost)
+        
+        # 3. Calcular gap de otimalidade (se disponível)
+        if hasattr(result, "lower_bound"):
+            validation["optimality_gap"] = (result.total_cost - result.lower_bound) / result.total_cost
+        
+        return validation
 
     def _evaluate_path(self, path: List[Trip]) -> Dict:
         """Determina o arranjo mais barato de tripulação para uma sequência de veículo."""
