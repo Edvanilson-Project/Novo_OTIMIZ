@@ -362,6 +362,198 @@ def _generate_tail_relocation_candidates(
     return candidates[:limit], stats
 
 
+def _enhanced_large_neighborhood_search(
+    vsp_sol: VSPSolution,
+    csp_sol: CSPSolution,
+    vsp_params: Dict[str, Any],
+    cct_params: Dict[str, Any],
+    trips: List[Trip],
+    evaluator: CostEvaluator,
+    max_iterations: int = 10,
+    destruction_rate: float = 0.3,
+    temperature: float = 100.0,
+    cooling_rate: float = 0.95
+) -> Tuple[VSPSolution, CSPSolution, Dict[str, Any]]:
+    """
+    LNS aprimorada com:
+    1. Destruição baseada em custo marginal
+    2. Reparação com busca local
+    3. Critério de aceitação por simulated annealing
+    4. Foco em redução de custo total (frota + pessoal)
+    """
+    from .csp.greedy import GreedyCSP
+    
+    best_vsp = copy.deepcopy(vsp_sol)
+    best_csp = copy.deepcopy(csp_sol)
+    best_cost = evaluator.total_cost(best_csp, best_vsp)
+    
+    stats = {
+        "iterations": 0,
+        "accepted": 0,
+        "improvements": 0,
+        "temperature_history": [],
+        "cost_history": []
+    }
+    
+    current_temp = temperature
+    
+    for iteration in range(max_iterations):
+        # 1. DESTRUIR: Selecionar blocos com maior custo marginal
+        blocks_to_destroy = _select_blocks_by_marginal_cost(
+            best_vsp, best_csp, evaluator, destruction_rate
+        )
+        
+        # Extrair trips dos blocos destruídos
+        destroyed_trips = []
+        remaining_blocks = []
+        
+        for block in best_vsp.blocks:
+            if block.id in blocks_to_destroy:
+                destroyed_trips.extend(block.trips)
+            else:
+                remaining_blocks.append(copy.deepcopy(block))
+        
+        # 2. REPARAR: Heurística GRASP com múltiplos critérios
+        repaired_blocks = _grasp_repair(
+            remaining_blocks, destroyed_trips, vsp_params, evaluator
+        )
+        
+        # 3. AVALIAR: Resolver CSP para nova configuração
+        candidate_vsp = VSPSolution(
+            blocks=repaired_blocks,
+            algorithm=f"{best_vsp.algorithm}_lns",
+            meta=dict(best_vsp.meta or {})
+        )
+        
+        csp_solver = GreedyCSP(vsp_params=vsp_params, **cct_params)
+        candidate_csp = csp_solver.solve(candidate_vsp.blocks, trips)
+        
+        candidate_cost = evaluator.total_cost(candidate_csp, candidate_vsp)
+        
+        # 4. ACEITAR: Critério de simulated annealing
+        cost_delta = candidate_cost - best_cost
+        
+        if cost_delta < 0 or random.random() < math.exp(-cost_delta / current_temp):
+            best_vsp = candidate_vsp
+            best_csp = candidate_csp
+            best_cost = candidate_cost
+            
+            if cost_delta < 0:
+                stats["improvements"] += 1
+            stats["accepted"] += 1
+        
+        # Atualizar temperatura
+        current_temp *= cooling_rate
+        stats["temperature_history"].append(current_temp)
+        stats["cost_history"].append(best_cost)
+        stats["iterations"] += 1
+        
+        # Critério de parada prematura
+        if current_temp < 1.0 and stats["improvements"] == 0:
+            break
+    
+    return best_vsp, best_csp, stats
+
+def _select_blocks_by_marginal_cost(
+    vsp_sol: VSPSolution,
+    csp_sol: CSPSolution,
+    evaluator: CostEvaluator,
+    destruction_rate: float
+) -> Set[int]:
+    """Seleciona blocos com maior custo marginal para destruição."""
+    block_costs = []
+    
+    # Calcular custo marginal de cada bloco
+    for block in vsp_sol.blocks:
+        # Custo de frota (proporcional à duração)
+        fleet_cost = block.total_duration * 0.5  # R$/min
+        
+        # Custo de pessoal (encontrar duty que contém o bloco)
+        personnel_cost = 0
+        for duty in (csp_sol.duties or []):
+            for seg in duty.segments:
+                if seg.block_id == block.id:
+                    # Custo proporcional ao trabalho no bloco
+                    block_work = sum(t.duration for t in block.trips)
+                    duty_work = duty.work_time
+                    if duty_work > 0:
+                        personnel_cost = duty.cost * (block_work / duty_work)
+                    break
+        
+        total_cost = fleet_cost + personnel_cost
+        block_costs.append((block.id, total_cost))
+    
+    # Ordenar por custo decrescente
+    block_costs.sort(key=lambda x: x[1], reverse=True)
+    
+    # Selecionar top N blocos
+    n_destroy = max(2, int(len(vsp_sol.blocks) * destruction_rate))
+    return {block_id for block_id, _ in block_costs[:n_destroy]}
+
+def _grasp_repair(
+    base_blocks: List[Block],
+    unassigned_trips: List[Trip],
+    vsp_params: Dict[str, Any],
+    evaluator: CostEvaluator,
+    alpha: float = 0.3,
+    local_search_iterations: int = 5
+) -> List[Block]:
+    """
+    Reparação GRASP (Greedy Randomized Adaptive Search Procedure).
+    """
+    repaired_blocks = copy.deepcopy(base_blocks)
+    unassigned = sorted(unassigned_trips, key=lambda t: t.start_time)
+    
+    while unassigned:
+        # Lista de candidatos restritos (RCL)
+        candidate_insertions = []
+        
+        for trip in unassigned[:10]:  # Limitar busca
+            for block in repaired_blocks:
+                # Verificar viabilidade de inserção
+                feasible, position, cost = _feasible_insertion(
+                    block, trip, vsp_params
+                )
+                if feasible:
+                    candidate_insertions.append((trip, block, position, cost))
+        
+        if not candidate_insertions:
+            # Criar novo bloco
+            new_block = Block(
+                id=len(repaired_blocks) + 1,
+                trips=[unassigned[0]],
+                vehicle_type_id=1
+            )
+            repaired_blocks.append(new_block)
+            unassigned.pop(0)
+            continue
+        
+        # Ordenar por custo
+        candidate_insertions.sort(key=lambda x: x[3])
+        
+        # Criar RCL (Restricted Candidate List)
+        min_cost = candidate_insertions[0][3]
+        max_cost = candidate_insertions[-1][3]
+        threshold = min_cost + alpha * (max_cost - min_cost)
+        
+        rcl = [c for c in candidate_insertions if c[3] <= threshold]
+        
+        # Seleção aleatória da RCL
+        selected = random.choice(rcl)
+        trip, block, position, _ = selected
+        
+        # Inserir trip
+        block.trips.insert(position, trip)
+        
+        # Remover trip da lista não atribuída
+        unassigned = [t for t in unassigned if t.id != trip.id]
+    
+    # Busca local nos blocos reparados
+    for _ in range(local_search_iterations):
+        repaired_blocks = _local_search_2opt(repaired_blocks, vsp_params)
+    
+    return repaired_blocks
+
 def joint_duty_vehicle_swap(
     csp_sol: CSPSolution,
     vsp_sol: VSPSolution,

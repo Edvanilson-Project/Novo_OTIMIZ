@@ -24,8 +24,10 @@ VERSÃO: Optibus Performance Edition
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
+import numpy as np
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Set, Generator
 from collections import defaultdict
 
@@ -69,7 +71,51 @@ if _NUMBA_AVAILABLE:
                 if task_last_depot == -1 or nxt_first_depot == -1 or task_last_depot != nxt_first_depot:
                     return False
         return True
-else:
+if _NUMBA_AVAILABLE:
+
+    @numba.jit(nopython=True, cache=True)
+    def _jit_transfer_matrix(
+        origin_ids: np.ndarray,
+        dest_ids: np.ndarray,
+        depot_ids: np.ndarray,
+        deadhead_matrix: np.ndarray,
+        terminal_only: bool
+    ) -> np.ndarray:
+        """Matriz de transferência JIT-otimizada."""
+        n = len(origin_ids)
+        result = np.zeros(n, dtype=np.int32)
+        
+        for i in range(n):
+            if terminal_only:
+                if origin_ids[i] != dest_ids[i]:
+                    # Verificar se ambos têm depot_id
+                    if depot_ids[i] != -1:
+                        result[i] = 0  # Mesmo terminal
+                    else:
+                        result[i] = deadhead_matrix[origin_ids[i], dest_ids[i]]
+                else:
+                    result[i] = 0
+            else:
+                result[i] = deadhead_matrix[origin_ids[i], dest_ids[i]]
+        
+        return result
+    
+    @numba.jit(nopython=True, cache=True)
+    def _jit_meal_break_check(
+        work_times: np.ndarray,
+        break_times: np.ndarray,
+        meal_threshold: int = 360  # 6 horas
+    ) -> np.ndarray:
+        """Verificação JIT de janelas de refeição."""
+        n = len(work_times)
+        needs_break = np.zeros(n, dtype=np.bool_)
+        
+        for i in range(n):
+            if work_times[i] >= meal_threshold and break_times[i] < 30:
+                needs_break[i] = True
+        
+        return needs_break
+
     def _jit_fast_feasibility(
         task_end: int, task_day: int, task_last_dest: int, task_last_depot: int,
         nxt_start: int, nxt_day: int, nxt_first_orig: int, nxt_first_depot: int,
@@ -746,7 +792,8 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         fairness_tolerance = int(self.goal_weights.get("fairness_tolerance_minutes", 30))
 
         class _Label:
-            __slots__ = ('rc', 'c', 'w', 's', 'd', 'ub', 'task', 'first_start', 'prev')
+            __slots__ = ('rc', 'c', 'w', 's', 'd', 'ub', 'task', 'first_start', 'prev',
+                         'meal_break_used', 'rest_since_last_duty', 'cost_with_penalties')
 
             def __init__(
                 self_l,
@@ -969,6 +1016,49 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         _log.debug("Pricing SPPRC: %d novas colunas com custo reduzido negativo", len(additions))
         return additions
+
+    def _validate_mathematical_assumptions(self, tasks: List[Block]) -> None:
+        """
+        Valida premissas matemáticas para evitar 'alucinações'.
+        """
+        # 1. Verificar monotonicidade de custos
+        for i in range(len(tasks)):
+            for j in range(i + 1, len(tasks)):
+                combo1 = [tasks[i]]
+                combo2 = [tasks[i], tasks[j]]
+                
+                cost1 = self._piece_cost(combo1)
+                cost2 = self._piece_cost(combo2)
+                
+                # Custo deve ser não-decrescente (subadditivo)
+                if cost2 < cost1 - 1e-6:  # Tolerância numérica
+                    _log.warning(f"Violacao de subadditividade: {cost2} < {cost1}")
+        
+        # 2. Verificar triangularidade de deadhead times
+        for i in range(len(tasks)):
+            for j in range(len(tasks)):
+                for k in range(len(tasks)):
+                    if i != j and j != k and i != k:
+                        t1 = tasks[i].trips[-1]
+                        t2 = tasks[j].trips[0]
+                        t3 = tasks[k].trips[0]
+                        
+                        d_ij = t1.deadhead_times.get(t2.origin_id, float('inf'))
+                        d_jk = t2.deadhead_times.get(t3.origin_id, float('inf'))
+                        d_ik = t1.deadhead_times.get(t3.origin_id, float('inf'))
+                        
+                        if d_ij + d_jk < d_ik - 1e-6:
+                            _log.warning(f"Violacao de desigualdade triangular: "
+                                       f"{d_ij} + {d_jk} < {d_ik}")
+        
+        # 3. Verificar consistência de tempos
+        for task in tasks:
+            for trip in task.trips:
+                if trip.start_time >= trip.end_time:
+                    raise ValueError(f"Trip {trip.id}: start_time >= end_time")
+                
+                if trip.start_time < 0 or trip.end_time > 1440:
+                    _log.warning(f"Trip {trip.id}: tempo fora do range [0, 1440]")
 
     def solve(
         self,
