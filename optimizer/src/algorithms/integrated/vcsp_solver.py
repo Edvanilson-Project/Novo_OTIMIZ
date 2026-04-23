@@ -445,25 +445,25 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
     def _evaluate_path(self, path: List[Trip]) -> Dict:
         """Determina o arranjo mais barato de tripulação para uma sequência de veículo."""
-        vehicle_fixed = float(self.cct_params.get("vehicle_fixed_cost", 800.0))
+        vehicle_fixed = self._to_decimal(self.cct_params.get("vehicle_fixed_cost", 800.0))
         
         # Custos das trips em si
-        trips_cost_dist = 0.0
-        trips_cost_time = 0.0
-        trips_work_time = 0.0
+        trips_cost_dist = Decimal('0.0')
+        trips_cost_time = Decimal('0.0')
+        trips_work_time = Decimal('0.0')
         
         for t in path:
             comp = self.evaluator._vehicle_trip_components(None, t)
-            trips_cost_dist += comp["distance"]
-            trips_cost_time += comp["time"]
-            trips_work_time += t.duration
+            trips_cost_dist += self._to_decimal(comp["distance"])
+            trips_cost_time += self._to_decimal(comp["time"])
+            trips_work_time += self._to_decimal(t.duration)
             
         # Custos de Deadhead (Deslocamento Vazio)
-        deadhead_cost = 0.0
-        deadhead_work_time = 0.0
+        deadhead_cost = Decimal('0.0')
+        deadhead_work_time = Decimal('0.0')
         for i in range(len(path) - 1):
             t1, t2 = path[i], path[i+1]
-            dur = t1.deadhead_times.get(t2.origin_id, 0)
+            dur = self._to_decimal(t1.deadhead_times.get(t2.origin_id, 0))
             deadhead_work_time += dur
             
             # Estimativa de custo de deadhead (usando custos padrão)

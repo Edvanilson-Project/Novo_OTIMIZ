@@ -134,36 +134,36 @@ class CostEvaluator(ICostEvaluator):
     def vsp_cost_breakdown(self, solution: VSPSolution, vehicle_types: List[VehicleType]) -> Dict[str, Any]:
         vt_map: Dict[int, VehicleType] = {vt.id: vt for vt in vehicle_types}
         blocks: List[Dict[str, Any]] = []
-        activation = 0.0
-        connection = 0.0
-        distance = 0.0
-        time = 0.0
-        idle_cost = 0.0
+        activation = Decimal('0.0')
+        connection = Decimal('0.0')
+        distance = Decimal('0.0')
+        time = Decimal('0.0')
+        idle_cost = Decimal('0.0')
 
         for block in solution.blocks:
             vt = vt_map.get(block.vehicle_type_id or 0)  # type: ignore[arg-type]
-            block_activation = float(
+            block_activation = self._to_decimal(
                 block.meta.get(
                     "activation_cost",
-                    self.cost_vehicle if not vt else vt.fixed_cost,
+                    float(self.cost_vehicle) if not vt else vt.fixed_cost,
                 )
             )
-            block_connection = float(block.meta.get("connection_cost", 0.0))
-            block_distance = 0.0
-            block_time = 0.0
-            start_buffer = max(0, int(block.meta.get("start_buffer_minutes", 0) or 0))
-            end_buffer = max(0, int(block.meta.get("end_buffer_minutes", 0) or 0))
+            block_connection = self._to_decimal(block.meta.get("connection_cost", 0.0))
+            block_distance = Decimal('0.0')
+            block_time = Decimal('0.0')
+            start_buffer = self._to_decimal(max(0, int(block.meta.get("start_buffer_minutes", 0) or 0)))
+            end_buffer = self._to_decimal(max(0, int(block.meta.get("end_buffer_minutes", 0) or 0)))
             has_boundary_buffers = "start_buffer_minutes" in block.meta or "end_buffer_minutes" in block.meta
-            block_idle_cost = (start_buffer + end_buffer) * self.idle_cost_per_minute if has_boundary_buffers else 0.0
+            block_idle_cost = (start_buffer + end_buffer) * self.idle_cost_per_minute if has_boundary_buffers else Decimal('0.0')
 
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
-                block_distance += components["distance"]
-                block_time += components["time"]
+                block_distance += self._to_decimal(components["distance"])
+                block_time += self._to_decimal(components["time"])
                 if not has_boundary_buffers:
-                    block_idle_cost += (
-                        trip.idle_before_minutes + trip.idle_after_minutes
-                    ) * self.idle_cost_per_minute
+                    idle_before = self._to_decimal(trip.idle_before_minutes)
+                    idle_after = self._to_decimal(trip.idle_after_minutes)
+                    block_idle_cost += (idle_before + idle_after) * self.idle_cost_per_minute
 
             activation += block_activation
             connection += block_connection
