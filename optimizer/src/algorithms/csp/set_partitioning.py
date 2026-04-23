@@ -13,6 +13,7 @@ jornada, aproximando melhor a formulação clássica de set covering.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ...core.config import get_settings
@@ -90,18 +91,40 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         for index in range(len(combo) - 1):
             passive += max(0, self.greedy._transfer_needed(combo[index], combo[index + 1]) - self.greedy.min_layover)
 
-        cost = 50.0 + work / 60.0 * _DEFAULT_CREW_COST_PER_HOUR + sum(gaps) * 0.1 + passive * self.goal_weights.get("passive_transfer", 0.25)
+        # Converter tudo para Decimal
+        work_dec = Decimal(str(work))
+        spread_dec = Decimal(str(spread))
+        gaps_sum = Decimal(str(sum(gaps)))
+        passive_dec = Decimal(str(passive))
+        
+        # Custos base
+        cost = Decimal('50.0')  # custo fixo por jornada
+        cost += (work_dec / Decimal('60.0')) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
+        cost += gaps_sum * Decimal('0.1')
+        cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))
+        
+        # Desvios de metas
         target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
         target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
+        
         overtime_dev = max(0, spread - self.greedy.max_work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)
-        cost += overtime_dev * self.goal_weights.get("overtime", 0.8)
-        cost += underwork_dev * self.goal_weights.get("min_work", 0.2)
-        cost += spread_dev * self.goal_weights.get("spread", 0.15)
-        cost += fairness_dev * self.goal_weights.get("fairness", 0.05)
-        return cost
+        
+        # Converter desvios para Decimal
+        overtime_dev_dec = Decimal(str(overtime_dev))
+        underwork_dev_dec = Decimal(str(underwork_dev))
+        spread_dev_dec = Decimal(str(spread_dev))
+        fairness_dev_dec = Decimal(str(fairness_dev))
+        
+        # Adicionar penalidades de desvio
+        cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 0.8)))
+        cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.2)))
+        cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.15)))
+        cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.05)))
+        
+        return float(cost)
 
     def _feasible_combo(self, combo: Sequence[Block]) -> bool:
         duty = Duty(id=0)
