@@ -261,7 +261,7 @@ export default function OperationsDataPage() {
 
   // ─── CRUD Viagens ──────────────────────────────────────────────────────────
   const toHHMM = (min: number) => {
-    const h = Math.floor((min % 1440) / 60).toString().padStart(2, "0");
+    const h = Math.floor(min / 60).toString().padStart(2, "0");
     const m = (min % 60).toString().padStart(2, "0");
     return `${h}:${m}`;
   };
@@ -288,7 +288,7 @@ export default function OperationsDataPage() {
       direction: row.direction ?? "IDA",
       roundTrip: !!pairTrip,
       returnStartTime: pairTrip ? toHHMM(pairTrip.startTime) : toHHMM(row.endTime),
-      returnEndTime: pairTrip ? toHHMM(pairTrip.endTime) : toHHMM((row.endTime + row.duration) % 1440),
+      returnEndTime: pairTrip ? toHHMM(pairTrip.endTime) : toHHMM(row.endTime + row.duration),
       returnDuration: pairTrip?.duration ?? 0,
       returnOriginId: pairTrip?.originId ?? row.destinationId,
       returnDestinationId: pairTrip?.destinationId ?? row.originId,
@@ -493,23 +493,27 @@ export default function OperationsDataPage() {
   }) => (
     <Grid container spacing={2}>
       <Grid size={{ xs: 6 }}>
-        <TextField fullWidth size="small" label={`${prefix} Início (HH:MM)`} type="time"
-          slotProps={{ inputLabel: { shrink: true } }}
+        <TextField fullWidth size="small" label={`${prefix} Início (HH:MM, ex: 06:00 ou 25:30)`} type="text"
+          placeholder="HH:MM" inputMode="numeric"
           value={startTime} onChange={e => {
             const v = e.target.value;
-            const s = hhmmToMin(v), en = hhmmToMin(endTime);
             onStartTime(v);
-            if (endTime) onDuration(en >= s ? en - s : 1440 + en - s);
+            if (endTime && /^\d{1,2}:\d{2}$/.test(v) && /^\d{1,2}:\d{2}$/.test(endTime)) {
+              const s = hhmmToMin(v), en = hhmmToMin(endTime);
+              if (en >= s) onDuration(en - s);
+            }
           }} />
       </Grid>
       <Grid size={{ xs: 6 }}>
-        <TextField fullWidth size="small" label={`${prefix} Fim (HH:MM)`} type="time"
-          slotProps={{ inputLabel: { shrink: true } }}
+        <TextField fullWidth size="small" label={`${prefix} Fim (HH:MM, ex: 14:00 ou 25:30)`} type="text"
+          placeholder="HH:MM" inputMode="numeric"
           value={endTime} onChange={e => {
             const v = e.target.value;
-            const s = hhmmToMin(startTime), en = hhmmToMin(v);
             onEndTime(v);
-            if (startTime) onDuration(en >= s ? en - s : 1440 + en - s);
+            if (startTime && /^\d{1,2}:\d{2}$/.test(v) && /^\d{1,2}:\d{2}$/.test(startTime)) {
+              const s = hhmmToMin(startTime), en = hhmmToMin(v);
+              if (en >= s) onDuration(en - s);
+            }
           }} />
       </Grid>
       {calcDur > 0 && (
@@ -517,7 +521,6 @@ export default function OperationsDataPage() {
           <Alert severity={calcDur > 720 ? "warning" : "info"} sx={{ py: 0 }}>
             Duração: <strong>{calcDur} min</strong>
             {calcDur > 720 && " — viagem muito longa, confirme os horários"}
-            {hhmmToMin(endTime) < hhmmToMin(startTime) && " (virada de meia-noite)"}
           </Alert>
         </Grid>
       )}

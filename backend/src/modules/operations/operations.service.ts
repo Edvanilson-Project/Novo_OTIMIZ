@@ -144,9 +144,12 @@ export class OperationsService {
         return;
       }
 
-      const duration = item.duration
-        ? safeInt(item.duration)
-        : (endTime >= startTime ? endTime - startTime : 1440 + endTime - startTime);
+      if (endTime < startTime) {
+        errors.push(`Linha ${row}: Hora de fim (${item.endTime}) é anterior à hora de início (${item.startTime})`);
+        return;
+      }
+
+      const duration = item.duration ? safeInt(item.duration) : (endTime - startTime);
 
       tripsToSave.push(this.tripRepository.create({
         companyId,
@@ -277,8 +280,12 @@ export class OperationsService {
 
     const startTime = parseMinutes(data.startTime) ?? safeInt(data.startTime);
     const endTime = parseMinutes(data.endTime) ?? safeInt(data.endTime);
-    // Correct midnight-crossing duration: if end < start, trip spans midnight
-    const calcDuration = endTime >= startTime ? endTime - startTime : 1440 + endTime - startTime;
+
+    if (endTime < startTime) {
+      throw new BadRequestException(`Hora de fim não pode ser anterior à hora de início (início: ${data.startTime}, fim: ${data.endTime})`);
+    }
+
+    const calcDuration = endTime - startTime;
     const duration = data.duration ? safeInt(data.duration) : calcDuration;
 
     const roundTrip = data.roundTrip === true || data.roundTrip === 'true';
@@ -308,7 +315,7 @@ export class OperationsService {
         : endTime;
       const retEnd = data.returnEndTime !== undefined
         ? (parseMinutes(data.returnEndTime) ?? safeInt(data.returnEndTime))
-        : (endTime + duration) % 1440;
+        : (endTime + duration);
       const retCalcDuration = retEnd >= retStart ? retEnd - retStart : 1440 + retEnd - retStart;
       const retDuration = data.returnDuration ? safeInt(data.returnDuration) : retCalcDuration;
 
@@ -337,11 +344,19 @@ export class OperationsService {
   async updateTrip(id: number, data: Record<string, any>, companyId: number) {
     const trip = await this.tripRepository.findOne({ where: { id, companyId } });
     if (!trip) throw new NotFoundException('Viagem não encontrada');
+
+    const newStartTime = data.startTime !== undefined ? (parseMinutes(data.startTime) ?? safeInt(data.startTime)) : trip.startTime;
+    const newEndTime = data.endTime !== undefined ? (parseMinutes(data.endTime) ?? safeInt(data.endTime)) : trip.endTime;
+
+    if (newEndTime < newStartTime) {
+      throw new BadRequestException(`Hora de fim não pode ser anterior à hora de início`);
+    }
+
     Object.assign(trip, {
       lineId: data.lineId !== undefined ? (data.lineId ? safeInt(data.lineId) : null) : trip.lineId,
       lineCode: data.lineCode !== undefined ? data.lineCode : trip.lineCode,
-      startTime: data.startTime !== undefined ? (parseMinutes(data.startTime) ?? safeInt(data.startTime)) : trip.startTime,
-      endTime: data.endTime !== undefined ? (parseMinutes(data.endTime) ?? safeInt(data.endTime)) : trip.endTime,
+      startTime: newStartTime,
+      endTime: newEndTime,
       originId: data.originId !== undefined ? safeInt(data.originId) : trip.originId,
       destinationId: data.destinationId !== undefined ? safeInt(data.destinationId) : trip.destinationId,
       distanceKm: data.distanceKm !== undefined ? safeFloat(data.distanceKm) : trip.distanceKm,
