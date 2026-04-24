@@ -550,7 +550,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     });
     tripMetadataRef.current = metadata;
 
-    baselineCostRef.current = (res as any).totalCost ?? (res as any).total_cost ?? 0;
+    baselineCostRef.current = res ? ((res as any).totalCost ?? (res as any).total_cost ?? 0) : 0;
     setLocalBlocks(hydrated);
     setBackupBlocks(JSON.parse(JSON.stringify(hydrated)));
     localBlocksRef.current = hydrated;
@@ -573,11 +573,15 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   }, [localBlocks, filterLine, filterSearch]);
 
   const unassignedTrips: any[] = useMemo(() => {
+    if (!res) return [];
     const raw = (res as any).metadata?.unassigned_trips || (res as any).unassigned_trips || [];
     return Array.isArray(raw) ? raw : [];
   }, [res]);
 
-  const duties = useMemo(() => (res as any).resultSummary?.duties || (res as any).duties || [], [res]);
+  const duties = useMemo(() => {
+    if (!res) return [];
+    return (res as any).resultSummary?.duties || (res as any).duties || [];
+  }, [res]);
 
   // ─── PlanGroups for Veículos tab ───
   const vehicleGroups = useMemo((): PlanGroup[] => {
@@ -871,6 +875,10 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     });
 
     if (moves.length === 0) return;
+    if (!res) {
+      setNotification({ msg: 'Erro: Dados da otimização não carregados.', sev: 'error' });
+      return;
+    }
     setSaving(true);
     try {
       const scheduleId = (res as any).id || (res as any).scheduleId;
@@ -1006,6 +1014,16 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       </Button>
     </Stack>
   );
+
+  if (!res) {
+    return (
+      <Paper variant="outlined" sx={{ borderRadius: 2, p: 3, textAlign: 'center' }}>
+        <Typography color="text.secondary">
+          Nenhuma otimização disponível. Execute uma otimização para visualizar o Gantt.
+        </Typography>
+      </Paper>
+    );
+  }
 
   const ganttHeight = fullscreen ? (typeof window !== 'undefined' ? window.innerHeight - 200 : 600) : 520;
 

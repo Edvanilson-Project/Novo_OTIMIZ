@@ -4,6 +4,8 @@
 
 set -e
 
+cd "$(dirname "$0")" || exit 1
+
 echo "[startup] Iniciando Celery worker..."
 celery -A src.core.celery_app.celery_app worker \
   --loglevel=info \

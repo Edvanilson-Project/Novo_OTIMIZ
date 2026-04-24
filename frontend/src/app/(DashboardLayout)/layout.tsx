@@ -39,13 +39,23 @@ export default function DashboardLayout({ children }: Props) {
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
-    const user = getSessionUser();
-    const token = localStorage.getItem('otimiz_token');
-    if (!user || !token) {
-      router.replace('/auth/login');
-    } else {
-      setAuthorized(true);
-    }
+    let isMounted = true;
+
+    const checkAuth = () => {
+      const user = getSessionUser();
+      const token = localStorage.getItem('otimiz_token');
+      if (!user || !token) {
+        if (isMounted) router.replace('/auth/login');
+      } else {
+        if (isMounted) setAuthorized(true);
+      }
+    };
+
+    checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   if (!authorized) return null;

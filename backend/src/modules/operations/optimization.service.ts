@@ -124,6 +124,8 @@ export class OptimizationService {
       });
       const taskId = submitData.task_id;
 
+      this.gateway.notifyOptimizationQueued(companyId, { scheduleId: schedule.id, taskId });
+
       // 4. Iniciar Polling no Backend (Processo em Background)
       this.pollOptimizerTask(taskId, schedule.id, companyId);
 
@@ -162,9 +164,11 @@ export class OptimizationService {
   }
 
   private async pollOptimizerTask(taskId: string, scheduleId: number, companyId: number) {
-    const maxAttempts = 60; // 5 minutos (5s * 60)
+    const maxAttempts = 120; // 10 minutos (5s * 120)
+    const maxConsecutiveErrors = 5;
     let attempts = 0;
-    let done = false; // Evita duplo processamento em caso de sobreposição de ticks
+    let consecutiveErrors = 0;
+    let done = false;
 
     const interval = setInterval(async () => {
       if (done) return;
@@ -172,7 +176,10 @@ export class OptimizationService {
       try {
         const { data } = await axios.get(`${this.OPTIMIZER_URL}/optimize/status/${taskId}`, {
           headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          timeout: 10000,
         });
+
+        consecutiveErrors = 0; // Reset error counter on success
 
         if (data.status === 'completed') {
           done = true;
@@ -185,19 +192,35 @@ export class OptimizationService {
           const errMsg = data.error?.message || data.error?.error_message || 'Erro no motor de otimização.';
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
           this.gateway.notifyOptimizationFailed(companyId, errMsg);
-        } else if (attempts >= maxAttempts) {
+        } else {
+          this.gateway.notifyOptimizationProgress(companyId, {
+            scheduleId,
+            taskId,
+            progressPct: data.progress_pct ?? null,
+            phase: data.phase ?? null,
+            phaseLabel: data.phase_label ?? null,
+          });
+        }
+
+        if (attempts >= maxAttempts && !done) {
           done = true;
           clearInterval(interval);
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
+          this.gateway.notifyOptimizationStale(companyId, { scheduleId, taskId });
           this.gateway.notifyOptimizationFailed(companyId, 'Timeout na otimização.');
         }
       } catch (error) {
         if (done) return;
-        done = true;
-        this.logger.error(`Erro no polling do task ${taskId}: ${error.message}`);
-        clearInterval(interval);
-        await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
-        this.gateway.notifyOptimizationFailed(companyId, 'Erro de comunicação com o solver.');
+        consecutiveErrors++;
+        this.logger.warn(`Erro no polling do task ${taskId} (${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`);
+
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          done = true;
+          clearInterval(interval);
+          this.logger.error(`Falha permanente no polling do task ${taskId}`);
+          await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
+          this.gateway.notifyOptimizationFailed(companyId, 'Erro de comunicação com o solver.');
+        }
       }
     }, 5000);
   }
@@ -507,37 +530,40 @@ export class OptimizationService {
       trips.forEach((t) => tripMap.set(t.id, t));
     }
 
-    const hydratedBlocks = schedule.blocks.map((block) => {
+    const hydratedBlocks = (schedule.blocks || []).map((block) => {
       const meta = (block.metadata || {}) as any;
       const st = meta.start_time ?? 0;
       const et = meta.end_time ?? 0;
+      
       const hydratedTrips = (block.tripIds || [])
         .map((id) => tripMap.get(id))
-        .filter((t): t is Trip => t !== undefined)
+        .filter((t): t is Trip => !!t)
         .map((t) => ({
           id: t.id,
           trip_id: t.tripId,
-          start_time: t.startTime,
-          // normaliza virada de meia-noite para o frontend (end sempre > start)
-          end_time: t.endTime < t.startTime ? t.endTime + 1440 : t.endTime,
-          line_id: t.lineId ?? null,
+          start_time: Number(t.startTime),
+          end_time: Number(t.endTime) < Number(t.startTime) ? Number(t.endTime) + 1440 : Number(t.endTime),
+          line_id: Number(t.lineId) || null,
           line_code: t.lineCode ?? null,
-          origin_id: t.originId,
-          destination_id: t.destinationId,
-          duration: t.duration,
-          distance_km: t.distanceKm,
+          origin_id: Number(t.originId),
+          destination_id: Number(t.destinationId),
+          duration: Number(t.duration),
+          distance_km: Number(t.distanceKm),
           direction: t.direction ?? null,
           pair_id: t.pairId ?? null,
         }))
         .sort((a, b) => a.start_time - b.start_time);
 
       return {
-        ...block,
+        id: block.id,
         block_id: block.blockId,
+        scheduleId: block.scheduleId,
+        companyId: block.companyId,
         start_time: st,
         end_time: et,
-        total_cost: block.cost,
+        total_cost: Number(block.cost),
         trips: hydratedTrips,
+        metadata: meta,
       };
     }).sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
 
@@ -577,7 +603,13 @@ export class OptimizationService {
     };
 
     return {
-      ...schedule,
+      id: schedule.id,
+      companyId: schedule.companyId,
+      status: schedule.status,
+      totalCost: Number(schedule.totalCost),
+      cctViolations: Number(schedule.cctViolations),
+      createdAt: schedule.createdAt,
+      updatedAt: schedule.updatedAt,
       blocks: hydratedBlocks,
       resultSummary,
     };

@@ -20,9 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-import tracemalloc
-from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from ..core.celery_app import celery_app
 from ..core.exceptions import OptimizerError
@@ -72,17 +70,6 @@ def _reconstruct_trip(d: Dict[str, Any]) -> Trip:
     )
 
 
-@lru_cache(maxsize=32)
-def _reconstruct_vehicle_type_cached(d: Dict[str, Any]) -> VehicleType:
-    """Reconstrói um objeto VehicleType de domínio a partir de um dicionário JSON com cache."""
-    # Nota: O dicionário não é hashable, então precisamos converter para uma tupla de itens ordenados
-    # No entanto, como os vehicle_types são poucos e os dicionários são pequenos, podemos usar uma representação em string.
-    # Vamos criar uma chave de cache baseada em uma representação estável do dicionário.
-    # Para simplificar, vamos usar a função original sem cache e implementar o cache de forma manual.
-    pass
-
-
-# Como o dicionário não é hashable, vamos criar uma função wrapper que converte para uma tupla ordenada
 def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
     """Reconstrói um objeto VehicleType de domínio a partir de um dicionário JSON."""
     return VehicleType(
@@ -101,19 +88,21 @@ def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
     )
 
 
-# Cache para vehicle_types: como os dicionários não são hashable, vamos usar um cache baseado no id e em uma string de representação.
-# Mas note que os vehicle_types são tipicamente poucos (menos de 10) e são os mesmos para todas as trips.
-# Vamos criar um cache simples baseado no id e nos campos relevantes.
-_vehicle_type_cache = {}
+def _vehicle_type_cache_key(d: Dict[str, Any]) -> Tuple[int, Tuple[Tuple[str, str], ...]]:
+    return (int(d["id"]), tuple(sorted((str(k), str(v)) for k, v in d.items())))
 
-def _reconstruct_vehicle_type_cached(d: Dict[str, Any]) -> VehicleType:
-    """Reconstrói com cache baseado em uma chave derivada do dicionário."""
-    # Criar uma chave que capture a identidade do vehicle_type
-    # Usamos o id e uma string de representação dos campos relevantes
-    key = (d["id"], frozenset((k, str(v)) for k, v in d.items()))
-    if key not in _vehicle_type_cache:
-        _vehicle_type_cache[key] = _reconstruct_vehicle_type(d)
-    return _vehicle_type_cache[key]
+
+def _reconstruct_vehicle_types(vehicle_types_raw: List[Dict[str, Any]]) -> List[VehicleType]:
+    cache: Dict[Tuple[int, Tuple[Tuple[str, str], ...]], VehicleType] = {}
+    vehicle_types: List[VehicleType] = []
+    for raw in vehicle_types_raw:
+        key = _vehicle_type_cache_key(raw)
+        vehicle_type = cache.get(key)
+        if vehicle_type is None:
+            vehicle_type = _reconstruct_vehicle_type(raw)
+            cache[key] = vehicle_type
+        vehicle_types.append(vehicle_type)
+    return vehicle_types
 
 
 @celery_app.task(bind=True, name="run_optimization")
@@ -135,10 +124,6 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     NUNCA faz `raise` de exceções customizadas — preserva os dados ricos de diagnóstico.
     """
-    # Iniciar rastreamento de memória para diagnóstico
-    tracemalloc.start()
-    start_time = time.time()
-
     trips_raw: List[Dict[str, Any]] = payload.get("trips", [])
     vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
     algorithm_str: str = payload.get("algorithm", "hybrid_pipeline")
@@ -157,4 +142,54 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     _last_update_time = 0
     UPDATE_INTERVAL = 5  # segundos
 
-    def _update_prog
+    def _update_prog(progress: float, message: str = ""):
+        nonlocal _last_update_time
+        task_id = getattr(getattr(self, "request", None), "id", None)
+        if not task_id:
+            return
+        now = time.time()
+        if now - _last_update_time >= UPDATE_INTERVAL or progress >= 1.0:
+            self.update_state(state="PROGRESS", meta={"progress": progress, "message": message})
+            _last_update_time = now
+
+    try:
+        # Reconstrução dos objetos de domínio
+        trips = [_reconstruct_trip(t) for t in trips_raw]
+        vehicle_types = _reconstruct_vehicle_types(vehicle_types_raw)
+
+        # Execução do serviço de otimização
+        service = OptimizerService()
+        result = service.run(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            algorithm=AlgorithmType(algorithm_str),
+            depot_id=depot_id,
+            time_budget_s=time_budget_s,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=optimization_params,
+        )
+        result_dict = result.as_dict()
+        result_dict.setdefault("meta", {})
+        result_dict["meta"].update(
+            {
+                "run_id": run_id,
+                "line_id": line_id,
+                "company_id": company_id,
+            }
+        )
+        _update_prog(1.0, "Otimização concluída")
+
+        return {"_is_error": False, "result": result_dict}
+
+    except Exception as e:
+        logger.exception("Erro durante a execução da otimização")
+        return {
+            "_is_error": True,
+            "error_payload": {
+                "message": str(e),
+                "code": "INTERNAL_ERROR",
+                "run_id": run_id
+            },
+            "http_status": 500
+        }

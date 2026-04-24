@@ -201,41 +201,42 @@ class OptimizerService:
         )
 
         # ── AI Copilot: insight em linguagem natural (nice-to-have) ──────────
-        # Esta chamada é o ÚLTIMO passo — toda a matemática já está concluída.
-        # Se falhar por qualquer motivo, ai_copilot_insight fica None e o
-        # resultado é retornado normalmente. NUNCA quebra o pipeline.
-        try:
-            cost_bd = result.meta.get("cost_breakdown") or {}
-            phase_sum = result.meta.get("phase_summary") or {}
-            op_kpis = result.meta.get("operational_kpis") or {}
-            ai_metrics = {
-                "vehicles": len(result.vsp.blocks or []),
-                "crew": result.csp.num_crew,
-                "duties": len(result.csp.duties or []),
-                "total_cost": float(result.total_cost or 0),
-                "vsp_cost": float((cost_bd.get("vsp") or {}).get("total", 0) or 0),
-                "csp_cost": float((cost_bd.get("csp") or {}).get("total", 0) or 0),
-                "covered_trips": sum(
-                    len(block.trips) for block in (result.vsp.blocks or [])
-                ),
-                "total_trips": len(trips),
-                "cct_violations": int(result.csp.cct_violations or 0),
-                "work_minutes": int(op_kpis.get("work_minutes", 0) or 0),
-                "paid_minutes": int(op_kpis.get("paid_minutes", 0) or 0),
-                "dominant_vsp": (
-                    (phase_sum.get("vsp") or {}).get("dominant_cost_component") or {}
-                ).get("component", "N/A"),
-                "dominant_csp": (
-                    (phase_sum.get("csp") or {}).get("dominant_cost_component") or {}
-                ).get("component", "N/A"),
-                "status": (result.meta.get("solver_explanation") or {}).get(
-                    "status", "feasible"
-                ),
-            }
-            result.meta["ai_copilot_insight"] = AiService().generate_insight_sync(ai_metrics)
-        except Exception as _ai_exc:
-            logger.warning("[AI Copilot] Falha ao gerar insight (não crítico): %s", _ai_exc)
-            result.meta["ai_copilot_insight"] = None
+        # Mantido fora do caminho crítico do solver. Se não estiver explicitamente
+        # habilitado, não bloqueia a resposta da otimização.
+        result.meta["ai_copilot_insight"] = None
+        if bool(vsp_params.get("enable_ai_copilot", False)):
+            try:
+                cost_bd = result.meta.get("cost_breakdown") or {}
+                phase_sum = result.meta.get("phase_summary") or {}
+                op_kpis = result.meta.get("operational_kpis") or {}
+                ai_metrics = {
+                    "vehicles": len(result.vsp.blocks or []),
+                    "crew": result.csp.num_crew,
+                    "duties": len(result.csp.duties or []),
+                    "total_cost": float(result.total_cost or 0),
+                    "vsp_cost": float((cost_bd.get("vsp") or {}).get("total", 0) or 0),
+                    "csp_cost": float((cost_bd.get("csp") or {}).get("total", 0) or 0),
+                    "covered_trips": sum(
+                        len(block.trips) for block in (result.vsp.blocks or [])
+                    ),
+                    "total_trips": len(trips),
+                    "cct_violations": int(result.csp.cct_violations or 0),
+                    "work_minutes": int(op_kpis.get("work_minutes", 0) or 0),
+                    "paid_minutes": int(op_kpis.get("paid_minutes", 0) or 0),
+                    "dominant_vsp": (
+                        (phase_sum.get("vsp") or {}).get("dominant_cost_component") or {}
+                    ).get("component", "N/A"),
+                    "dominant_csp": (
+                        (phase_sum.get("csp") or {}).get("dominant_cost_component") or {}
+                    ).get("component", "N/A"),
+                    "status": (result.meta.get("solver_explanation") or {}).get(
+                        "status", "feasible"
+                    ),
+                }
+                result.meta["ai_copilot_insight"] = AiService().generate_insight_sync(ai_metrics)
+            except Exception as _ai_exc:
+                logger.warning("[AI Copilot] Falha ao gerar insight (não crítico): %s", _ai_exc)
+                result.meta["ai_copilot_insight"] = None
 
         return result
 

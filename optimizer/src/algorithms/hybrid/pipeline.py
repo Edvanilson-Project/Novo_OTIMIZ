@@ -92,6 +92,11 @@ class HybridPipeline(BaseAlgorithm):
         best_vehicles = len(best_vsp.blocks)
         strict_hard = bool(self.vsp_params.get("strict_hard_validation", self.cct_params.get("strict_hard_validation", False)))
         logger.info(f"[PIPELINE] mcnf baseline: {best_vehicles} veículos, cost={best_cost:.0f}, issues={best_issues}")
+        
+        # [Fast Path] Para datasets pequenos, se a baseline for perfeita, encerramos imediatamente.
+        if len(trips) <= 10 and best_issues == 0:
+            logger.info("[PIPELINE] Solução ideal encontrada para dataset reduzido. Finalizando.")
+            return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
         elapsed = time.perf_counter() - self._start_time
         remaining_budget = max(1.0, budget - elapsed)

@@ -39,6 +39,10 @@ export class OptimizationGateway implements OnGatewayConnection, OnGatewayDiscon
     return 'pong';
   }
 
+  notifyOptimizationProgress(companyId: number, payload: { scheduleId: number; taskId: string; progressPct?: number | null; phase?: string | null; phaseLabel?: string | null; }) {
+    this.server.to(`company_${companyId}`).emit('optimization_progress', payload);
+  }
+
   notifyOptimizationFinished(companyId: number, scheduleId: number, result: any) {
     this.server.to(`company_${companyId}`).emit('optimization_finished', {
       scheduleId,
@@ -50,5 +54,13 @@ export class OptimizationGateway implements OnGatewayConnection, OnGatewayDiscon
     this.server.to(`company_${companyId}`).emit('optimization_failed', {
       error,
     });
+  }
+
+  notifyOptimizationQueued(companyId: number, payload: { scheduleId: number; taskId: string }) {
+    this.server.to(`company_${companyId}`).emit('optimization_queued', payload);
+  }
+
+  notifyOptimizationStale(companyId: number, payload: { scheduleId: number; taskId: string }) {
+    this.server.to(`company_${companyId}`).emit('optimization_stale', payload);
   }
 }

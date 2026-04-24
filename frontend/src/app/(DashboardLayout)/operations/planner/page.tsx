@@ -78,9 +78,19 @@ export default function PlannerPage() {
     message: "",
     severity: "info" as "info" | "success" | "warning" | "error",
   });
+  const [optimizationProgress, setOptimizationProgress] = useState<{
+    taskId?: string | null;
+    scheduleId?: number | null;
+    phase?: string | null;
+    phaseLabel?: string | null;
+    progressPct?: number | null;
+  } | null>(null);
 
   const companyId = useMemo(() => getSessionUser()?.companyId ?? 0, []);
   const socketRef = useRef<any>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const optimizingRef = useRef(false);
 
   const dynamicRules = useMemo(() => parameters?.dynamic_rules || [], [parameters?.dynamic_rules]);
 
@@ -96,6 +106,21 @@ export default function PlannerPage() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    optimizingRef.current = optimizing;
+  }, [optimizing]);
+
+  const stopOptimizationFallbacks = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -119,7 +144,21 @@ export default function PlannerPage() {
       }
 
       if (scheduleRes?.status === "processing") {
-        setOptimizing(true);
+        setOptimizationProgress((prev) => ({
+          taskId: prev?.taskId ?? null,
+          scheduleId: scheduleRes?.id ?? prev?.scheduleId ?? null,
+          phase: prev?.phase ?? "queued",
+          phaseLabel: prev?.phaseLabel ?? "Otimização em andamento...",
+          progressPct: prev?.progressPct ?? 0,
+        }));
+      } else {
+        setOptimizationProgress(null);
+      }
+
+      setOptimizing(scheduleRes?.status === "processing");
+
+      if (scheduleRes?.status !== "processing") {
+        stopOptimizationFallbacks();
       }
     } catch (error) {
       console.error("Erro ao buscar dados do planejador:", error);
@@ -131,54 +170,148 @@ export default function PlannerPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, stopOptimizationFallbacks]);
 
   useEffect(() => {
     if (!mounted) return;
     fetchData();
 
-    // Socket loaded lazily inside useEffect — safe from SSR
-    import("@/lib/socket").then(({ getSocket, disconnectSocket }) => {
+    import("@/lib/socket").then(({ getSocket, disconnectSocket, reconnectSocket, getSocketDiagnostics }) => {
       const socket = getSocket(companyId);
-      socketRef.current = { socket, disconnectSocket };
+      socketRef.current = { socket, disconnectSocket, reconnectSocket, getSocketDiagnostics };
 
-      socket.on("optimization_finished", () => {
+      const handleQueued = (data: any) => {
+        setOptimizing(true);
+        setOptimizationProgress({
+          taskId: data?.taskId ?? null,
+          scheduleId: data?.scheduleId ?? null,
+          phase: "queued",
+          phaseLabel: "Otimização enfileirada.",
+          progressPct: 0,
+        });
+      };
+
+      const handleProgress = (data: any) => {
+        setOptimizing(true);
+        setOptimizationProgress({
+          taskId: data?.taskId ?? null,
+          scheduleId: data?.scheduleId ?? null,
+          phase: data?.phase ?? "processing",
+          phaseLabel: data?.phaseLabel ?? "Otimização em andamento...",
+          progressPct: data?.progressPct ?? null,
+        });
+      };
+
+      const handleFinished = () => {
+        stopOptimizationFallbacks();
         setOptimizing(false);
+        setOptimizationProgress(null);
         setNotification({ open: true, message: "Otimização concluída!", severity: "success" });
         fetchData();
-      });
+      };
 
-      socket.on("optimization_failed", (data: any) => {
+      const handleFailed = (data: any) => {
+        stopOptimizationFallbacks();
         setOptimizing(false);
+        setOptimizationProgress(null);
         setNotification({
           open: true,
           message: "Falha na otimização: " + (data?.error || "Erro desconhecido"),
           severity: "error",
         });
-      });
+      };
+
+      const handleStale = () => {
+        setNotification({
+          open: true,
+          message: "A otimização demorou além do esperado. Recarregando status...",
+          severity: "warning",
+        });
+      };
+
+      const handleDisconnect = (reason: string) => {
+        console.warn("[planner] websocket disconnected", { reason, diagnostics: getSocketDiagnostics() });
+      };
+
+      const handleConnectError = (error: Error) => {
+        console.warn("[planner] websocket connect_error", { message: error.message, diagnostics: getSocketDiagnostics() });
+      };
+
+      socket.on("optimization_queued", handleQueued);
+      socket.on("optimization_progress", handleProgress);
+      socket.on("optimization_finished", handleFinished);
+      socket.on("optimization_failed", handleFailed);
+      socket.on("optimization_stale", handleStale);
+      socket.on("disconnect", handleDisconnect);
+      socket.on("connect_error", handleConnectError);
+      reconnectSocket();
     });
 
     return () => {
+      stopOptimizationFallbacks();
       if (socketRef.current) {
+        socketRef.current.socket.off("optimization_queued");
+        socketRef.current.socket.off("optimization_progress");
         socketRef.current.socket.off("optimization_finished");
         socketRef.current.socket.off("optimization_failed");
+        socketRef.current.socket.off("optimization_stale");
+        socketRef.current.socket.off("disconnect");
+        socketRef.current.socket.off("connect_error");
         socketRef.current.disconnectSocket();
         socketRef.current = null;
       }
     };
-  }, [mounted, companyId, fetchData]);
+  }, [mounted, companyId, fetchData, stopOptimizationFallbacks]);
 
   const handleOptimize = async () => {
+    stopOptimizationFallbacks();
     setOptimizing(true);
+    setOptimizationProgress({
+      taskId: null,
+      scheduleId: schedule?.id ?? null,
+      phase: "submitting",
+      phaseLabel: "Enviando otimização para o backend...",
+      progressPct: 0,
+    });
+
+    pollingRef.current = setInterval(() => {
+      if (!optimizingRef.current) return;
+      fetchData();
+    }, 5000);
+
+    timeoutRef.current = setTimeout(async () => {
+      if (!optimizingRef.current) return;
+      await fetchData();
+      if (!optimizingRef.current) return;
+      stopOptimizationFallbacks();
+      setOptimizing(false);
+      setOptimizationProgress(null);
+      setNotification({
+        open: true,
+        message: "A atualização em tempo real falhou. O status foi recarregado manualmente.",
+        severity: "warning",
+      });
+    }, 120000);
+
     try {
-      await operationsApi.optimize({ algorithm: selectedAlgorithm });
+      const optimizeResponse = await operationsApi.optimize({ algorithm: selectedAlgorithm });
+      setOptimizationProgress((prev) => ({
+        taskId: optimizeResponse?.taskId ?? optimizeResponse?.task_id ?? prev?.taskId ?? null,
+        scheduleId: optimizeResponse?.scheduleId ?? prev?.scheduleId ?? null,
+        phase: "queued",
+        phaseLabel: "Otimização aceita e aguardando processamento...",
+        progressPct: 5,
+      }));
+      await fetchData();
       setNotification({
         open: true,
         message: `Otimização disparada com algoritmo "${ALGORITHMS.find((a) => a.value === selectedAlgorithm)?.label}"...`,
         severity: "info",
       });
     } catch (error: any) {
+      stopOptimizationFallbacks();
       setOptimizing(false);
+      setOptimizationProgress(null);
       if (error.response?.status === 409) {
         setNotification({
           open: true,
@@ -230,7 +363,30 @@ export default function PlannerPage() {
                 icon={<CircularProgress size={18} />}
                 sx={{ fontWeight: 500 }}
               >
-                Motor de otimização em execução. Novas otimizações e movimentos manuais estão bloqueados até a conclusão.
+                <Stack spacing={0.5}>
+                  <Typography variant="body2" fontWeight={600}>
+                    {optimizationProgress?.phaseLabel || "Motor de otimização em execução."}
+                  </Typography>
+                  {optimizationProgress?.taskId && (
+                    <Typography variant="caption" color="text.secondary">
+                      Task: {optimizationProgress.taskId}
+                    </Typography>
+                  )}
+                  {typeof optimizationProgress?.progressPct === "number" && (
+                    <Typography variant="caption" color="text.secondary">
+                      Progresso: {optimizationProgress.progressPct}%
+                    </Typography>
+                  )}
+                  <Typography variant="caption" color="text.secondary">
+                    Novas otimizações e movimentos manuais estão bloqueados até a conclusão.
+                  </Typography>
+                </Stack>
+              </Alert>
+            )}
+
+            {!optimizing && schedule?.status === "processing" && (
+              <Alert severity="warning" variant="outlined">
+                Há uma otimização marcada como PROCESSING no backend. Recarregue os dados ou aguarde a próxima atualização automática.
               </Alert>
             )}
 
@@ -258,107 +414,82 @@ export default function PlannerPage() {
                       disabled={optimizing}
                       startAdornment={<IconSettings size={16} style={{ marginRight: 4, opacity: 0.6 }} />}
                     >
-                      {ALGORITHMS.map((a) => (
-                        <MenuItem key={a.value} value={a.value}>
-                          {a.label}
+                      {ALGORITHMS.map((algorithm) => (
+                        <MenuItem key={algorithm.value} value={algorithm.value}>
+                          {algorithm.label}
                         </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
                 </Tooltip>
 
-                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <Button
-                    variant="text"
-                    size="small"
-                    startIcon={<IconRefresh size={16} />}
+                    variant="outlined"
+                    startIcon={<IconRefresh size={18} />}
                     onClick={fetchData}
-                    disabled={loading || optimizing}
+                    disabled={loading}
                   >
                     Atualizar
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={optimizing ? <CircularProgress size={16} color="inherit" /> : <IconBolt size={18} />}
+                    onClick={handleOptimize}
+                    disabled={optimizing}
+                  >
+                    {optimizing ? "Otimizando..." : "Executar Otimização"}
                   </Button>
                   <Tooltip title={schedule?.status !== 'completed' ? "Execute uma otimização para ativar" : "Copiloto de Análise de Custos"}>
                     <span>
                       <Button
                         variant="outlined"
-                        size="small"
                         color="secondary"
-                        startIcon={<IconRobot size={16} />}
+                        startIcon={<IconRobot size={18} />}
                         onClick={() => setAiDrawerOpen(true)}
                         disabled={schedule?.status !== 'completed'}
                       >
-                        IA de Custos
+                        AI Cost Copilot
                       </Button>
                     </span>
                   </Tooltip>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={
-                      optimizing ? (
-                        <CircularProgress size={16} color="inherit" />
-                      ) : (
-                        <IconBolt size={16} />
-                      )
-                    }
-                    onClick={handleOptimize}
-                    disabled={optimizing}
-                    color="primary"
-                    sx={{ fontWeight: 700 }}
-                  >
-                    {optimizing ? "Otimizando..." : "Otimizar"}
-                  </Button>
                 </Stack>
               </Stack>
             </Paper>
 
-            <Box sx={{ minHeight: 600 }}>
-              {loading && !schedule ? (
-                <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", p: 10 }}>
-                  <CircularProgress />
-                </Box>
-              ) : schedule ? (
-                <Suspense
-                  fallback={
-                    <Box sx={{ p: 4, textAlign: "center" }}>
-                      <CircularProgress />
-                      <Typography sx={{ mt: 2 }}>Carregando Inteligência Operacional...</Typography>
-                    </Box>
-                  }
-                >
-                  <TabGantt
-                    res={schedule}
-                    lines={lines}
-                    terminals={terminals}
-                    intervalPolicy={intervalPolicy}
-                    onWhatIfUpdate={handleWhatIfUpdate}
-                  />
-                </Suspense>
-              ) : (
-                <Alert severity="info">
-                  Nenhuma escala encontrada. Clique em &quot;Iniciar Otimização&quot; para gerar resultados.
-                </Alert>
-              )}
-            </Box>
+            <Suspense fallback={<CircularProgress />}>
+              <TabGantt
+                res={schedule?.resultSummary ?? (schedule?.status === 'completed' ? schedule : null)}
+                lines={lines}
+                terminals={terminals}
+                intervalPolicy={intervalPolicy}
+                onWhatIfUpdate={handleWhatIfUpdate}
+              />
+            </Suspense>
           </Stack>
         </DashboardCard>
       </Stack>
 
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={() => setNotification((n) => ({ ...n, open: false }))}
-      >
-        <Alert severity={notification.severity} sx={{ width: "100%" }}>
-          {notification.message}
-        </Alert>
-      </Snackbar>
-
       <AiCostDrawer
         open={aiDrawerOpen}
         onClose={() => setAiDrawerOpen(false)}
-        result={schedule?.resultSummary ?? (schedule?.status === 'completed' ? schedule : null)}
+        result={schedule?.resultSummary ?? null}
+        parameters={parameters}
       />
+
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={4000}
+        onClose={() => setNotification((prev) => ({ ...prev, open: false }))}
+      >
+        <Alert
+          onClose={() => setNotification((prev) => ({ ...prev, open: false }))}
+          severity={notification.severity}
+          sx={{ width: "100%" }}
+        >
+          {notification.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

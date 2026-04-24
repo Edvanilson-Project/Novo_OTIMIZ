@@ -18,21 +18,33 @@ export function useAuth(requiredRole?: AppRole) {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    const u = getSessionUser();
-    const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
+    let isMounted = true;
 
-    if (!u || !token) {
-      router.replace('/auth/login');
-      return;
-    }
+    const checkAuth = async () => {
+      const u = getSessionUser();
+      const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
 
-    if (requiredRole && ROLE_RANK[u.role as AppRole] < ROLE_RANK[requiredRole]) {
-      router.replace('/dashboard');
-      return;
-    }
+      if (!u || !token) {
+        if (isMounted) router.replace('/auth/login');
+        return;
+      }
 
-    setUser(u);
-    setChecked(true);
+      if (requiredRole && ROLE_RANK[u.role as AppRole] < ROLE_RANK[requiredRole]) {
+        if (isMounted) router.replace('/dashboard');
+        return;
+      }
+
+      if (isMounted) {
+        setUser(u);
+        setChecked(true);
+      }
+    };
+
+    checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, [router, requiredRole]);
 
   const hasRole = (min: AppRole) =>
