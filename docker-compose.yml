@@ -48,7 +48,7 @@ services:
         condition: service_healthy
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3002
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-otimiz_admin}
@@ -61,13 +61,13 @@ services:
       - OPTIMIZER_URL=http://host.docker.internal:8000
       - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
     ports:
-      - "3001:3001"
+      - "3002:3002"
     networks:
       - otimiz-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/api/v1 || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/api/v1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
