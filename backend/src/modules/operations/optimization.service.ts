@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import axios from 'axios';
@@ -10,6 +10,7 @@ import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
 import { OptimizationGateway } from './optimization.gateway';
 import { ConfigService } from '@nestjs/config';
+import { TenantContext } from '../../common/context/tenant-context';
 
 @Injectable()
 export class OptimizationService {
@@ -25,6 +26,7 @@ export class OptimizationService {
     private dataSource: DataSource,
     private gateway: OptimizationGateway,
     private configService: ConfigService,
+    private tenantContext: TenantContext,
   ) {
     this.INTERNAL_KEY = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY') || 'internal-key-123456';
   }
@@ -130,6 +132,32 @@ export class OptimizationService {
       this.logger.error(`Falha ao iniciar otimização: ${error.message}`);
       await this.scheduleRepo.update(schedule.id, { status: ScheduleStatus.FAILED });
       throw new InternalServerErrorException(error.message);
+    }
+  }
+
+  async aiChat(metrics: any, question: string) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada.');
+
+    try {
+      // Busca os parâmetros reais configurados para esta empresa
+      const params = await this.paramRepo.findOne({ where: { companyId } });
+      const cctParams = this.buildCctParams(params);
+
+      const { data } = await axios.post(`${this.OPTIMIZER_URL}/optimize/chat`, {
+        metrics: {
+          ...metrics,
+          current_parameters: cctParams, // Agora a IA sabe suas regras atuais!
+        },
+        question,
+      }, {
+        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+        timeout: 70000,
+      });
+      return data;
+    } catch (error) {
+      this.logger.error(`Erro no chat de IA: ${error.message}`);
+      return { answer: 'O serviço de IA está temporariamente indisponível. Tente novamente em instantes.', status: 'error' };
     }
   }
 

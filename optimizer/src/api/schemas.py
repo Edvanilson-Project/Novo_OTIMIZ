@@ -528,3 +528,13 @@ class NominalRosteringResponse(BaseModel):
     total_utility: float
     elapsed_ms: float
     logs: List[str]
+
+
+class AiChatRequest(BaseModel):
+    metrics: Dict[str, Any]
+    question: str
+
+
+class AiChatResponse(BaseModel):
+    answer: str
+    status: str = "ok"

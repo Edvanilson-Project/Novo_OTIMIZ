@@ -5,11 +5,9 @@ import {
   TextField, CircularProgress, Paper, Chip, Alert,
   Tooltip,
 } from '@mui/material';
-import {
-  IconRobot, IconX, IconSend, IconBulb, IconCurrency,
-  IconChartBar, IconRefresh,
-} from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconBulb, IconCurrency, IconChartBar, IconRefresh } from '@tabler/icons-react';
 import type { OptimizationResultSummary } from '../../_types';
+import { operationsApi } from '@/lib/api';
 
 export interface AiCostDrawerProps {
   open: boolean;
@@ -65,52 +63,6 @@ function buildInitialInsight(result: OptimizationResultSummary): string {
   return lines.join('\n');
 }
 
-function buildAnswerForQuestion(question: string, result: OptimizationResultSummary): string {
-  const q = question.toLowerCase();
-  const cb = result.costBreakdown;
-
-  if (q.includes('veículo') || q.includes('veiculo') || q.includes('ativação') || q.includes('ativacao')) {
-    const val = cb?.vsp?.activation ?? cb?.vsp?.total;
-    return `O custo de ativação de veículos representa o valor fixo de cada ônibus colocado em operação. Nesta solução: **${formatCost(val as number | undefined)}**.\n\nPara reduzir: diminua o número de veículos consolidando blocos com gaps menores ou ampliando a janela de layover no terminal.`;
-  }
-
-  if (q.includes('deadhead') || q.includes('vazio') || q.includes('conexão') || q.includes('conexao')) {
-    const val = cb?.vsp?.connection ?? cb?.vsp?.distance;
-    return `Deadheads são viagens sem passageiros para reposicionamento de veículos. Custo atual: **${formatCost(val as number | undefined)}**.\n\nPara reduzir: prefira terminais intermediários como ponto de rendição e ative a restrição \`force_round_trip\`.`;
-  }
-
-  if (q.includes('hora extra') || q.includes('overtime')) {
-    const val = cb?.csp?.overtime_cost;
-    return `Custo de horas extras: **${formatCost(val as number | undefined)}**.\n\nHoras extras ocorrem quando a jornada do motorista supera o limite da CCT (padrão 8h trabalho efetivo). Reduza aumentando o número de turnos parciais ou ajustando \`max_work_minutes\`.`;
-  }
-
-  if (q.includes('noturno') || q.includes('nocturnal')) {
-    const val = cb?.csp?.nocturnal_extra;
-    return `Adicional noturno: **${formatCost(val as number | undefined)}**.\n\nViagens entre as 22h e 5h geram adicional de ~20% sobre o custo de mão de obra. Para minimizar: concentre viagens noturnas em menos motoristas especializados.`;
-  }
-
-  if (q.includes('cct') || q.includes('violação') || q.includes('violacao') || q.includes('penalidade')) {
-    const v = result.cct_violations ?? result.cctViolations ?? 0;
-    const pen = cb?.csp?.cct_penalties;
-    return `**${v}** violação(ões) CCT detectada(s). Penalidades aplicadas: **${formatCost(pen as number | undefined)}**.\n\nViolações comuns: intervalo insuficiente, jornada acima de 12h, rendição fora de terminal. Habilite \`strict_hard_validation\` para bloquear estas situações no solver.`;
-  }
-
-  if (q.includes('tripulação') || q.includes('tripulacao') || q.includes('motorista') || q.includes('crew')) {
-    const val = cb?.csp?.work_cost ?? cb?.csp?.total;
-    return `Custo de tripulação: **${formatCost(val as number | undefined)}** (${result.num_crew ?? result.crew ?? '?'} motoristas).\n\nInclui: salário base, garantido, adicionais. Para reduzir: maximize a eficiência dos turnos minimizando tempo improdutivo (waiting_time).`;
-  }
-
-  if (q.includes('total') || q.includes('custo geral')) {
-    const total = result.total_cost ?? result.totalCost;
-    return `Custo total da solução: **${formatCost(total)}**.\n\nDecomposição:\n• VSP (veículos): ${formatCost(cb?.vsp?.total as number | undefined)}\n• CSP (tripulação): ${formatCost(cb?.csp?.total as number | undefined)}\n\nO índice de eficiência é determinado pela relação custo/viagem atendida.`;
-  }
-
-  if (q.includes('melhor') || q.includes('reduzir') || q.includes('otimizar')) {
-    return `Para melhorar a solução atual, recomendo:\n1. **Aumentar o orçamento de tempo** do solver (parâmetro \`time_budget_s\`)\n2. **Ajustar a janela de pareamento** (\`preferred_pair_window_minutes\`)\n3. **Habilitar force_round_trip** para reduzir deadheads\n4. **Revisar blocos com layover excessivo** (>90min identificados no painel de conflitos)\n5. **Usar \`vcsp_pulp\`** com ILP integrado para soluções globalmente ótimas`;
-  }
-
-  return `Não encontrei uma resposta específica para sua pergunta. Posso explicar:\n• **Custos de ativação** de veículos\n• **Deadheads** e viagens em vazio\n• **Horas extras** e adicionais\n• **Violações de CCT** e penalidades\n• **Como reduzir** o custo total\n\nPergunta: "${question}"`;
-}
 
 export function AiCostDrawer({ open, onClose, result }: AiCostDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -148,10 +100,36 @@ export function AiCostDrawer({ open, onClose, result }: AiCostDrawerProps) {
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', content: question, timestamp: new Date() }]);
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const answer = buildAnswerForQuestion(question, result);
-    setMessages((prev) => [...prev, { role: 'assistant', content: answer, timestamp: new Date() }]);
-    setLoading(false);
+
+    try {
+      // Chamar a IA real através da API do Backend
+      const response = await operationsApi.aiChat({
+        metrics: {
+          vehicles: result.num_vehicles ?? result.vehicles,
+          crew: result.num_crew ?? result.crew,
+          total_cost: result.total_cost ?? result.totalCost,
+          covered_trips: result.covered_trips,
+          total_trips: result.total_trips,
+          cct_violations: result.cct_violations ?? result.cctViolations,
+          cost_breakdown: result.costBreakdown,
+        },
+        question
+      });
+
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: response.answer,
+        timestamp: new Date()
+      }]);
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: 'Desculpe, tive um problema ao me conectar com o motor de IA. Tente novamente em instantes.',
+        timestamp: new Date()
+      }]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   const quickQuestions = [
@@ -260,7 +238,7 @@ export function AiCostDrawer({ open, onClose, result }: AiCostDrawerProps) {
                 variant="body2"
                 sx={{ whiteSpace: 'pre-wrap', fontSize: '0.82rem', lineHeight: 1.55 }}
               >
-                {msg.content.replace(/\*\*(.*?)\*\*/g, '$1')}
+                {msg.content}
               </Typography>
             </Paper>
           </Box>

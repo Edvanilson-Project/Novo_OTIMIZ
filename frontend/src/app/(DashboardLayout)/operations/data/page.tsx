@@ -129,35 +129,57 @@ export default function OperationsDataPage() {
   const handleExportLayout = () => {
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1: Viagens
+    // Sheet 1: Viagens (Template Completo - World Class)
     const tripsTemplate = [
       {
+        trip_id: 1001,
         line_code: "101-A",
+        line_name: "Linha Exemplo Matriz",
+        pair_id: "P001",
+        direction: "IDA",
         start_time: "06:00",
         end_time: "07:30",
+        duration: 90,
         origin_id: 1,
+        origin_name: "Terminal Norte",
         destination_id: 2,
-        distance_km: 25.5,
-        direction: "IDA",
-        round_trip: 0,
+        destination_name: "Terminal Sul",
+        distance_km: 25.50,
       },
       {
+        trip_id: 1002,
         line_code: "101-A",
-        start_time: "07:30",
-        end_time: "09:00",
-        origin_id: 2,
-        destination_id: 1,
-        distance_km: 25.5,
+        line_name: "Linha Exemplo Matriz",
+        pair_id: "P001",
         direction: "VOLTA",
-        round_trip: 0,
+        start_time: "07:45",
+        end_time: "09:15",
+        duration: 90,
+        origin_id: 2,
+        origin_name: "Terminal Sul",
+        destination_id: 1,
+        destination_name: "Terminal Norte",
+        distance_km: 25.50,
       },
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tripsTemplate), "Viagens");
 
-    // Sheet 2: Motoristas
+    // Sheet 2: Motoristas (Template Completo)
     const driversTemplate = [
-      { driver_id: "M001", name: "João Silva", role: "Motorista", max_hours_per_day_minutes: 480, last_shift_end_minutes: 0 },
-      { driver_id: "M002", name: "Maria Souza", role: "Motorista/Cobrador", max_hours_per_day_minutes: 480, last_shift_end_minutes: 0 },
+      { 
+        driver_id: "M001", 
+        name: "João Silva", 
+        role: "Motorista", 
+        max_hours_per_day: 480, 
+        last_shift_end: 0 
+      },
+      { 
+        driver_id: "M002", 
+        name: "Maria Souza", 
+        role: "Motorista/Cobrador", 
+        max_hours_per_day: 540, 
+        last_shift_end: 1320 
+      },
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(driversTemplate), "Motoristas");
 

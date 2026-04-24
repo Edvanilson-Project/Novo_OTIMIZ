@@ -41,13 +41,34 @@ function normalizeRow(raw: Record<string, any>, colMap: Record<string, string>):
 
 function parseMinutes(val: any): number | null {
   if (val === undefined || val === null || val === '') return null;
+
+  // Se o valor for um número (comum em arquivos Excel), 
+  // ele vem como fração do dia (ex: 0.5 = 12:00) ou minutos totais.
+  if (typeof val === 'number') {
+    if (val > 0 && val < 1) {
+      return Math.round(val * 1440); // 1440 minutos em um dia
+    }
+    return Math.round(val);
+  }
+
   const s = String(val).trim();
+  
+  // Suporte ao formato HH:MM ou HH:MM:SS
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
     const parts = s.split(':').map(Number);
-    return parts[0] * 60 + parts[1];
+    return (parts[0] || 0) * 60 + (parts[1] || 0);
   }
+  
+  // Se for uma string numérica (ex: "480" ou "0.5")
   const n = Number(s.replace(',', '.'));
-  return isNaN(n) ? null : Math.round(n);
+  if (isNaN(n)) return null;
+  
+  // Se for uma fração de dia em formato string
+  if (n > 0 && n < 1) {
+    return Math.round(n * 1440);
+  }
+  
+  return Math.round(n);
 }
 
 function safeInt(val: any, fallback = 0): number {
@@ -118,8 +139,10 @@ export class OperationsService {
       const startTime = parseMinutes(item.startTime);
       const endTime = parseMinutes(item.endTime);
 
-      if (startTime === null) { errors.push(`Linha ${row}: startTime inválido ("${item.startTime}")`); return; }
-      if (endTime === null) { errors.push(`Linha ${row}: endTime inválido ("${item.endTime}")`); return; }
+      if (startTime === null || endTime === null) {
+        errors.push(`Linha ${row}: Horário inválido (Início: "${item.startTime}", Fim: "${item.endTime}")`);
+        return;
+      }
 
       const duration = item.duration
         ? safeInt(item.duration)
@@ -127,7 +150,7 @@ export class OperationsService {
 
       tripsToSave.push(this.tripRepository.create({
         companyId,
-        tripId: item.tripId ? safeInt(item.tripId) : (tripsToSave.length + 1),
+        tripId: item.tripId ? safeInt(item.tripId) : undefined,
         lineCode: item.lineCode ? String(item.lineCode) : undefined,
         lineId: item.lineId ? safeInt(item.lineId) : undefined,
         pairId: item.pairId ? String(item.pairId) : undefined,
@@ -137,7 +160,7 @@ export class OperationsService {
         destinationId: safeInt(item.destinationId),
         distanceKm: safeFloat(item.distanceKm),
         duration,
-        direction: item.direction || undefined,
+        direction: item.direction ? String(item.direction).toUpperCase() : undefined,
       }));
     });
 

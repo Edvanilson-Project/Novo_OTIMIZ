@@ -523,7 +523,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
                 should_cut = False
 
-                if gap >= self.min_break:
+                if gap >= self.min_break and boundary:
                     should_cut = True
                 elif explicit_mid_trip_relief_boundary:
                     should_cut = True

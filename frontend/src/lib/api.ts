@@ -130,6 +130,7 @@ export const operationsApi = {
   reassignTrip: (data: object) => apiClient.patch('/operations/reassign-trip', data).then((r) => r.data),
   evaluateDelta: (data: object) => apiClient.post('/operations/evaluate-delta', data).then((r) => r.data),
   evaluateBaseline: (data: object) => apiClient.post('/operations/evaluate-baseline', data).then((r) => r.data),
+  aiChat: (data: { metrics: any; question: string }) => apiClient.post('/operations/chat', data).then((r) => r.data),
 };
 
 // ─── Parameters (CCT) ────────────────────────────────────────────────────────

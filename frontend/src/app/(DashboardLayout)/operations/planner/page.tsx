@@ -52,15 +52,15 @@ const DynamicRulesEditor = dynamic(
 );
 
 const ALGORITHMS = [
-  { value: "vcsp_pulp", label: "VCSP PuLP — ILP Integrado VSP+CSP (Motor V8)" },
-  { value: "hybrid_pipeline", label: "Pipeline Híbrido VSP+CSP" },
-  { value: "joint_solver", label: "Solver Integrado" },
+  { value: "hybrid_pipeline", label: "Pipeline Híbrido VSP+CSP (Recomendado)" },
   { value: "greedy", label: "Guloso (mais rápido)" },
   { value: "genetic", label: "Algoritmo Genético" },
   { value: "tabu_search", label: "Busca Tabu" },
   { value: "simulated_annealing", label: "Recozimento Simulado" },
   { value: "set_partitioning", label: "Set Partitioning (CSP)" },
   { value: "mcnf", label: "MCNF (Fluxo de Custo Mínimo)" },
+  { value: "joint_solver", label: "Solver Integrado" },
+  { value: "vcsp_pulp", label: "VCSP PuLP — ILP Integrado (Experimental)" },
 ];
 
 export default function PlannerPage() {
@@ -71,7 +71,7 @@ export default function PlannerPage() {
   const [lines, setLines] = useState<any[]>([]);
   const [terminals, setTerminals] = useState<any[]>([]);
   const [parameters, setParameters] = useState<any>(null);
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState("vcsp_pulp");
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState("hybrid_pipeline");
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [notification, setNotification] = useState({
     open: false,
@@ -216,62 +216,62 @@ export default function PlannerPage() {
 
         <DashboardCard
           title="Gantt Planner"
-          subtitle="Planejamento Integrado de Frota e Tripulação"
+          subtitle={
+            schedule
+              ? `Escala de ${new Date(schedule.createdAt).toLocaleDateString("pt-BR")} — Planejamento Integrado VSP + CSP`
+              : "Planejamento Integrado de Frota e Tripulação"
+          }
         >
-          <Stack spacing={3}>
+          <Stack spacing={2.5}>
             {optimizing && (
               <Alert
                 severity="info"
                 variant="outlined"
-                icon={<CircularProgress size={20} />}
+                icon={<CircularProgress size={18} />}
                 sx={{ fontWeight: 500 }}
               >
-                O motor de otimização está processando a escala da sua empresa.
-                Novas otimizações e movimentos manuais estão bloqueados até a conclusão.
+                Motor de otimização em execução. Novas otimizações e movimentos manuais estão bloqueados até a conclusão.
               </Alert>
             )}
 
-            <Paper variant="outlined" sx={{ p: 2, backgroundColor: "background.default" }}>
-              <Stack spacing={2}>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ alignItems: { md: "center" } }}>
-                  <Box sx={{ flex: 1 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                      Escala Diária Operacional
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      Data de Referência:{" "}
-                      {schedule
-                        ? new Date(schedule.createdAt).toLocaleDateString("pt-BR")
-                        : "Nenhuma"}
-                    </Typography>
-                  </Box>
+            <Paper
+              variant="outlined"
+              sx={{
+                px: 2,
+                py: 1.5,
+                bgcolor: "background.default",
+                borderRadius: 2,
+              }}
+            >
+              <Stack
+                direction={{ xs: "column", md: "row" }}
+                spacing={1.5}
+                sx={{ alignItems: { md: "center" }, justifyContent: "space-between" }}
+              >
+                <Tooltip title="Escolha o algoritmo de otimização. 'Pipeline Híbrido' é recomendado para uso operacional.">
+                  <FormControl size="small" sx={{ minWidth: 260, maxWidth: 340, flex: { xs: 1, md: 'none' } }}>
+                    <InputLabel>Algoritmo</InputLabel>
+                    <Select
+                      value={selectedAlgorithm}
+                      label="Algoritmo"
+                      onChange={(e) => setSelectedAlgorithm(e.target.value)}
+                      disabled={optimizing}
+                      startAdornment={<IconSettings size={16} style={{ marginRight: 4, opacity: 0.6 }} />}
+                    >
+                      {ALGORITHMS.map((a) => (
+                        <MenuItem key={a.value} value={a.value}>
+                          {a.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Tooltip>
 
-                  <Box sx={{ minWidth: 200, maxWidth: { md: 260 } }}>
-                    <Tooltip title="Escolha o algoritmo de otimização. 'VCSP PuLP' é o mais preciso.">
-                      <FormControl size="small" fullWidth>
-                        <InputLabel>Algoritmo</InputLabel>
-                        <Select
-                          value={selectedAlgorithm}
-                          label="Algoritmo"
-                          onChange={(e) => setSelectedAlgorithm(e.target.value)}
-                          disabled={optimizing}
-                          startAdornment={<IconSettings size={16} style={{ marginRight: 4 }} />}
-                        >
-                          {ALGORITHMS.map((a) => (
-                            <MenuItem key={a.value} value={a.value}>
-                              {a.label}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    </Tooltip>
-                  </Box>
-                </Stack>
-
-                <Stack direction="row" spacing={1.5} sx={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", rowGap: 1 }}>
                   <Button
-                    variant="outlined"
-                    startIcon={<IconRefresh size={18} />}
+                    variant="text"
+                    size="small"
+                    startIcon={<IconRefresh size={16} />}
                     onClick={fetchData}
                     disabled={loading || optimizing}
                   >
@@ -281,8 +281,9 @@ export default function PlannerPage() {
                     <span>
                       <Button
                         variant="outlined"
+                        size="small"
                         color="secondary"
-                        startIcon={<IconRobot size={18} />}
+                        startIcon={<IconRobot size={16} />}
                         onClick={() => setAiDrawerOpen(true)}
                         disabled={schedule?.status !== 'completed'}
                       >
@@ -292,18 +293,20 @@ export default function PlannerPage() {
                   </Tooltip>
                   <Button
                     variant="contained"
+                    size="small"
                     startIcon={
                       optimizing ? (
-                        <CircularProgress size={18} color="inherit" />
+                        <CircularProgress size={16} color="inherit" />
                       ) : (
-                        <IconBolt size={18} />
+                        <IconBolt size={16} />
                       )
                     }
                     onClick={handleOptimize}
                     disabled={optimizing}
                     color="primary"
+                    sx={{ fontWeight: 700 }}
                   >
-                    {optimizing ? "Otimizando..." : "Iniciar Otimização"}
+                    {optimizing ? "Otimizando..." : "Otimizar"}
                   </Button>
                 </Stack>
               </Stack>

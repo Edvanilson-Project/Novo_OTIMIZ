@@ -11,7 +11,8 @@ export class ParametersService {
   ) {}
 
   async getParameters(): Promise<CompanyParameters> {
-    const params = await this.parametersRepository.findOne({ where: {} });
+    const companyId = this.tenantContext.getCompanyId();
+    const params = await this.parametersRepository.findOne({ where: { companyId } });
     if (!params) {
       // Se não houver, criamos o padrão para o tenant
       return this.createDefaultParameters();
@@ -20,7 +21,8 @@ export class ParametersService {
   }
 
   async updateParameters(updateData: Partial<CompanyParameters>): Promise<CompanyParameters> {
-    let params = await this.parametersRepository.findOne({ where: {} });
+    const companyId = this.tenantContext.getCompanyId();
+    let params = await this.parametersRepository.findOne({ where: { companyId } });
     
     if (!params) {
       params = await this.createDefaultParameters();

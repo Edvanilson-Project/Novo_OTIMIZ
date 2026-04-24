@@ -21,6 +21,13 @@ export class OperationsController {
     return this.optimizationService.runOptimization(companyId, algorithm);
   }
 
+  @Post('chat')
+  async aiChat(@Body() body: { metrics: any; question: string }) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.optimizationService.aiChat(body.metrics, body.question);
+  }
+
   @Patch('reassign-trip')
   async reassignTrip(
     @Body('scheduleId') scheduleId: number,

@@ -489,6 +489,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
   const [filterLine, setFilterLine] = useState<string>('');
   const [filterSearch, setFilterSearch] = useState('');
+  const [hoverBlockId, setHoverBlockId] = useState<number | null>(null);
 
   const tripMetadataRef = useRef<Map<number, TripMetadata>>(new Map());
   const localBlocksRef = useRef<any[]>([]);
@@ -689,61 +690,66 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const vehiculosExportRows = useMemo(() =>
     vehicleGroups.flatMap((g) =>
       g.events.map((ev) => ({
+        'ID Bloco': g.id,
         Veículo: g.label,
         'Saída (Bloco)': minToHHMM(g.startTime),
         'Retorno (Bloco)': minToHHMM(g.endTime),
+        'Duração Total': minToDuration(g.endTime - g.startTime),
         'Num Viagens': g.tripCount,
-        'Km Total Bloco': g.totalKm.toFixed(1),
+        'Km Total Bloco': g.totalKm.toFixed(2),
         Evento: EVENT_CONFIG[ev.kind].label,
-        Linha: ev.linha,
-        Sentido: ev.sentido,
+        Linha: ev.linha || '—',
+        Sentido: ev.sentido || '—',
         'Início Evento': minToHHMM(ev.inicio),
         'Chegada Evento': minToHHMM(ev.chegada),
-        'Duração (min)': ev.duracao,
-        Origem: ev.origemName,
-        Destino: ev.destinoName,
-        'KM Evento': ev.kind === 'descanso' ? '—' : ev.km,
-        'Intervalo (se descanso)': ev.kind === 'descanso' ? minToDuration(ev.duracao) : '—',
+        'Duração (min)': ev.duracao || 0,
+        Origem: ev.origemName || '—',
+        Destino: ev.destinoName || '—',
+        'KM Evento': ev.kind === 'descanso' ? '—' : (ev.km || 0).toFixed(2),
+        'Motorista': ev.dutyId != null ? `M${ev.dutyId}` : '—',
       }))
     ), [vehicleGroups]);
 
   const motoristasExportRows = useMemo(() =>
     dutyGroups.flatMap((g) =>
       g.events.map((ev) => ({
+        'ID Jornada': g.id,
         Motorista: g.label,
         'Início Jornada': minToHHMM(g.startTime),
         'Fim Jornada': minToHHMM(g.endTime),
-        'Duração Jornada': minToDuration(g.workTime ?? 0),
+        'Duração Total (min)': g.workTime || 0,
+        'Duração Formatada': minToDuration(g.workTime ?? 0),
         'Num Viagens': g.tripCount,
-        'Km Total': g.totalKm.toFixed(1),
-        'Custo': fmtCurrency(g.totalCost ?? 0),
+        'Km Total': g.totalKm.toFixed(2),
+        'Custo': g.totalCost ? Number(g.totalCost) : 0,
+        'Custo Formatado': fmtCurrency(g.totalCost ?? 0),
         'Violações': g.violations ?? 0,
         Evento: EVENT_CONFIG[ev.kind].label,
-        Linha: ev.linha,
-        Sentido: ev.sentido,
+        Linha: ev.linha || '—',
+        Sentido: ev.sentido || '—',
         'Início Evento': minToHHMM(ev.inicio),
         'Chegada Evento': minToHHMM(ev.chegada),
-        'Duração Evento (min)': ev.duracao,
-        Origem: ev.origemName,
-        Destino: ev.destinoName,
-        'KM Evento': ev.kind === 'descanso' ? '—' : ev.km,
+        'Duração Evento (min)': ev.duracao || 0,
+        Origem: ev.origemName || '—',
+        Destino: ev.destinoName || '—',
+        'Veículo': ev.vehicleId != null ? `V${ev.vehicleId}` : '—',
       }))
     ), [dutyGroups]);
 
   const viagensExportRows = useMemo(() =>
     allEventsSorted.map((ev) => ({
+      'ID Viagem': ev.tripId || '—',
       Evento: EVENT_CONFIG[ev.kind].label,
-      Linha: ev.linha,
-      Sentido: ev.sentido,
+      Linha: ev.linha || '—',
+      Sentido: ev.sentido || '—',
       'Início': minToHHMM(ev.inicio),
       'Início (min)': ev.inicio,
       'Chegada': minToHHMM(ev.chegada),
       'Chegada (min)': ev.chegada,
-      'Duração (min)': ev.duracao,
-      Origem: ev.origemName,
-      Destino: ev.destinoName,
-      'KM': ev.kind === 'descanso' ? '—' : ev.km,
-      'Intervalo': ev.kind === 'descanso' ? minToDuration(ev.duracao) : '—',
+      'Duração (min)': ev.duracao || 0,
+      Origem: ev.origemName || '—',
+      Destino: ev.destinoName || '—',
+      'KM': ev.kind === 'descanso' ? '—' : (ev.km || 0).toFixed(2),
       Veículo: ev.vehicleId != null ? `V${ev.vehicleId}` : '—',
       Motorista: ev.dutyId != null ? `M${ev.dutyId}` : '—',
     })), [allEventsSorted]);
@@ -760,24 +766,40 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     e.dataTransfer.dropEffect = 'move';
   }, []);
 
+  const handleDragEnter = useCallback((blockId: number) => {
+    setHoverBlockId(blockId);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setHoverBlockId(null);
+  }, []);
+
   const handleWhatIfDrop = useCallback(async (e: React.DragEvent, targetBlockId: number) => {
     e.preventDefault();
     const tripId = parseInt(e.dataTransfer.getData('trip_id'));
     const originBlockId = parseInt(e.dataTransfer.getData('origin_block_id'));
     if (isNaN(tripId) || originBlockId === targetBlockId) return;
 
-    const currentBlocks = localBlocksRef.current;
-    const currentBackup = backupBlocksRef.current;
+    // Pre-move state = what we're evaluating the move against. We do NOT touch
+    // backupBlocksRef here — that ref is the last *persisted* baseline and only
+    // moves forward on Save. Otherwise the "Salvar Alterações" diff collapses
+    // to zero and the drag never reaches the DB.
+    const preMoveBlocks = localBlocksRef.current;
 
-    const movingTrip = currentBlocks
+    const movingTrip = preMoveBlocks
       .find((b) => b.block_id === originBlockId)
       ?.items.find((t: any) => t.tripId === tripId);
+    if (!movingTrip) return;
 
-    const newLocalBlocks = currentBlocks.map((block) => {
+    const newLocalBlocks = preMoveBlocks.map((block) => {
       if (block.block_id === originBlockId)
         return { ...block, items: block.items.filter((t: any) => t.tripId !== tripId) };
       if (block.block_id === targetBlockId)
-        return { ...block, items: [...block.items, { ...movingTrip, block_id: targetBlockId }].sort((a, b) => a.start_time - b.start_time) };
+        return {
+          ...block,
+          items: [...block.items, { ...movingTrip, block_id: targetBlockId }]
+            .sort((a, b) => a.start_time - b.start_time),
+        };
       return block;
     });
 
@@ -787,7 +809,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
     try {
       const payload = {
-        blocks: currentBackup.map((b) => ({
+        blocks: preMoveBlocks.map((b) => ({
           block_id: b.block_id,
           trips: b.items.map((t: any) => ({
             id: t.tripId, start_time: t.start_time, end_time: t.end_time,
@@ -803,23 +825,33 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       if (result.isValid) {
         const delta = (result.totalCost ?? 0) - baselineCostRef.current;
         baselineCostRef.current = result.totalCost ?? 0;
-        setNotification({ msg: `Movimento válido! Δ custo: ${fmtSignedCurrency(delta)}`, sev: 'success' });
-        backupBlocksRef.current = JSON.parse(JSON.stringify(newLocalBlocks));
-        setBackupBlocks(JSON.parse(JSON.stringify(newLocalBlocks)));
+        setNotification({
+          msg: `Viagem ${tripId} movida para Veículo ${targetBlockId}. Δ custo: ${fmtSignedCurrency(delta)}. Clique em "Salvar" para persistir.`,
+          sev: 'success',
+        });
         if (onWhatIfUpdate) onWhatIfUpdate(result.totalCost);
       } else {
         setNotification({ msg: `Regra violada: ${result.violations?.join(', ')}`, sev: 'error' });
-        localBlocksRef.current = currentBackup;
-        setLocalBlocks(currentBackup);
+        localBlocksRef.current = preMoveBlocks;
+        setLocalBlocks(preMoveBlocks);
       }
     } catch {
       setNotification({ msg: 'Erro ao avaliar movimento. Tente novamente.', sev: 'error' });
-      localBlocksRef.current = currentBackup;
-      setLocalBlocks(currentBackup);
+      localBlocksRef.current = preMoveBlocks;
+      setLocalBlocks(preMoveBlocks);
     } finally {
       setLoading(false);
     }
   }, [onWhatIfUpdate]);
+
+  // ─── Undo: revert all unsaved moves back to the last persisted baseline ───
+  const handleUndo = useCallback(() => {
+    const persisted = backupBlocksRef.current;
+    const restored = JSON.parse(JSON.stringify(persisted));
+    localBlocksRef.current = restored;
+    setLocalBlocks(restored);
+    setNotification({ msg: 'Alterações descartadas.', sev: 'info' });
+  }, []);
 
   // ─── Save ───
   const handleSave = async () => {
@@ -854,23 +886,49 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     }
   };
 
-  const hasChanges = useMemo(() => {
-    const curr = localBlocks.map((b) => ({ id: b.block_id, trips: b.items.map((t: any) => t.tripId) }));
-    const back = backupBlocks.map((b) => ({ id: b.block_id, trips: b.items.map((t: any) => t.tripId) }));
-    return JSON.stringify(curr) !== JSON.stringify(back);
+  // Count of unsaved trip moves, diffed against the last persisted baseline.
+  const unsavedMoves = useMemo(() => {
+    const persistedTripBlock = new Map<number, number>();
+    backupBlocks.forEach((b) =>
+      (b.items || []).forEach((t: any) => persistedTripBlock.set(t.tripId, b.block_id))
+    );
+    let moves = 0;
+    localBlocks.forEach((b) => {
+      (b.items || []).forEach((t: any) => {
+        const old = persistedTripBlock.get(t.tripId);
+        if (old !== undefined && old !== b.block_id) moves += 1;
+      });
+    });
+    return moves;
   }, [localBlocks, backupBlocks]);
+
+  const hasChanges = unsavedMoves > 0;
 
   // ─── Gantt Row ───
   const GanttRow = useCallback(
     ({ index, style }: RowComponentProps) => {
       const block = filteredBlocks[index];
       if (!block) return <Box style={style as React.CSSProperties} />;
+      const isDropTarget = hoverBlockId === block.block_id;
       return (
         <Box
           style={style}
           onDragOver={handleDragOver}
-          onDrop={(e) => handleWhatIfDrop(e, block.block_id)}
-          sx={{ borderBottom: `1px solid ${theme.palette.divider}`, display: 'flex', '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.02) } }}
+          onDragEnter={() => handleDragEnter(block.block_id)}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => {
+            handleDragLeave();
+            handleWhatIfDrop(e, block.block_id);
+          }}
+          sx={{
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            display: 'flex',
+            bgcolor: isDropTarget ? alpha(theme.palette.primary.main, 0.10) : 'transparent',
+            outline: isDropTarget ? `2px dashed ${theme.palette.primary.main}` : 'none',
+            outlineOffset: -2,
+            transition: 'background-color 0.12s, outline-color 0.12s',
+            '&:hover': { bgcolor: isDropTarget ? alpha(theme.palette.primary.main, 0.12) : alpha(theme.palette.primary.main, 0.02) },
+          }}
         >
           <Box sx={{ width: 140, minWidth: 140, borderRight: `1px solid ${theme.palette.divider}`, p: 1.5, bgcolor: 'background.paper', zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main' }}>Veículo {block.block_id}</Typography>
@@ -888,7 +946,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         </Box>
       );
     },
-    [filteredBlocks, scale, theme, colors, handleDragStart, handleDragOver, handleWhatIfDrop]
+    [filteredBlocks, scale, theme, colors, handleDragStart, handleDragOver, handleDragEnter, handleDragLeave, handleWhatIfDrop, hoverBlockId]
   );
 
   // ─── Common toolbar controls ───
@@ -925,6 +983,24 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         </Button>
       </Tooltip>
 
+      {hasChanges && (
+        <Chip
+          size="small"
+          color="warning"
+          variant="filled"
+          label={`${unsavedMoves} não salv${unsavedMoves === 1 ? 'a' : 'as'}`}
+          sx={{ fontWeight: 700 }}
+        />
+      )}
+      <Button
+        variant="outlined"
+        color="inherit"
+        size="small"
+        disabled={saving || !hasChanges}
+        onClick={handleUndo}
+      >
+        Descartar
+      </Button>
       <Button variant="contained" color="primary" size="small" disabled={saving || !hasChanges} onClick={handleSave}>
         {saving ? 'Salvando…' : 'Salvar Alterações'}
       </Button>

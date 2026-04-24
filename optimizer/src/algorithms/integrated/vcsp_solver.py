@@ -51,11 +51,11 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         self.evaluator = CostEvaluator()
         self.routing = _RoutingClient() if _HAS_ROUTING else None
 
-        # Restrições CCT RÍGIDAS com parametrização
-        self.max_shift_minutes = 720  # 12 horas - RÍGIDO
-        self.max_work_minutes = 480   # 8 horas - RÍGIDO
+        # Restrições CCT RÍGIDAS com parametrização via cct_params
+        self.max_shift_minutes = int(self.cct_params.get("max_shift_minutes", 720))
+        self.max_work_minutes = int(self.cct_params.get("max_work_minutes", 480))
         self.meal_break_minutes = self.cct_params.get("meal_break_minutes", 60)
-        self.min_inter_shift_rest = 660  # 11 horas - RÍGIDO
+        self.min_inter_shift_rest = int(self.cct_params.get("min_inter_shift_rest_minutes", 660))
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
         
         # Parâmetros de custo CCT (com defaults)
@@ -88,7 +88,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             raise InfeasibleProblemError("Nenhuma viagem fornecida")
         
         # Configurar Big-M dinâmico
-        illegal_relief_penalty, punishment_cost = self._calculate_safe_big_m(trips)
+        self._illegal_relief_penalty, self._punishment_cost = self._calculate_safe_big_m(trips)
         
 
         sorted_trips = sorted(trips, key=lambda t: t.start_time)
@@ -116,7 +116,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             prob += pulp.lpSum([var for var, data in path_vars if trip in data["trips"]]) + unassigned_var == 1, f"cov_trip_{trip.id}"
 
         # Função Objetivo
-        total_cost_expr = pulp.lpSum([data["total_cost"] * var for var, data in path_vars])
+        total_cost_expr = pulp.lpSum([float(data["total_cost"]) * var for var, data in path_vars])
         unassigned_punishment = pulp.lpSum([self._punishment_cost * var for var in unassigned_vars.values()])
         prob += total_cost_expr + unassigned_punishment, "Total_Objective_Cost"
 
@@ -212,6 +212,15 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         res.total_cost = pulp.value(prob.objective)
         res.meta["solver_status"] = status_str
         return res
+
+    def _to_decimal(self, val: Any) -> Decimal:
+        """Converte valores de forma segura para Decimal."""
+        if val is None: return Decimal('0.0')
+        if isinstance(val, Decimal): return val
+        try:
+            return Decimal(str(val))
+        except (ValueError, TypeError):
+            return Decimal('0.0')
 
     def _precalculate_deadheads(self, trips: List[Trip]):
         """
@@ -328,8 +337,11 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
         """Gera caminhos viáveis com podas agressivas e limite de expansão."""
-        MAX_PATHS = 5000  # Limite absoluto de caminhos a gerar
+        MAX_PATHS = 20000  # Limite absoluto de caminhos a gerar
         MAX_DEPTH = 10    # Máximo de viagens por caminho
+        # Budget por trip-inicial: evita que DFS consuma todos os slots começando
+        # apenas nos primeiros trips e deixe trips tardios sem multi-trip paths.
+        PER_START_BUDGET = max(50, MAX_PATHS // max(1, len(trips)))
         paths = []
         
         # Comportamento do intervalo ocioso do veículo (vsp_params)
@@ -347,25 +359,37 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         # Ordenar viagens por start_time para poda temporal precoce
         sorted_trips = sorted(trips, key=lambda t: t.start_time)
         
+        start_budget_used = [0]  # nonlocal contador por trip-inicial
+
         def dfs(current_path, current_time, last_trip, current_work, last_end_time=None, depth=0):
             if len(paths) >= MAX_PATHS or depth >= MAX_DEPTH:
                 return
-                
+            if start_budget_used[0] >= PER_START_BUDGET:
+                return  # esgotou budget desse trip-inicial, próximo start terá sua cota
+
             # Se o caminho atual não está vazio, podemos avaliá-lo
             if current_path:
-                paths.append(self._evaluate_path(current_path))
-            
+                evaluated = self._evaluate_path(current_path)
+                # Rejeitar paths cujo único style viável viola spread/max_shift hard.
+                # O set-partitioning ILP não pode escolher paths infeasíveis — quando
+                # isso acontece o output falha com SPREAD_EXCEEDED.
+                if not evaluated.get("illegal_relief"):
+                    paths.append(evaluated)
+                    start_budget_used[0] += 1
+
             # Poda por janela temporal: só considerar viagens nas próximas 8 horas
             time_window_end = current_time + 480
-            
+
             for t in sorted_trips:
                 # Se já estamos no limite de caminhos, parar
                 if len(paths) >= MAX_PATHS:
                     return
-                    
+                if start_budget_used[0] >= PER_START_BUDGET:
+                    return
+
                 if t.start_time > time_window_end:
                     break  # Viagens fora da janela - poda agressiva
-                    
+
                 if t in current_path:
                     continue
                     
@@ -414,8 +438,39 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                             depth + 1       # Incrementa a profundidade
                         )
 
-        # Chamada inicial: não temos last_end_time, pois é o primeiro duty do dia
-        dfs([], 0, None, 0, None, 0)
+        # Garantia de cobertura: cada viagem precisa ter pelo menos 1 caminho viável
+        # que a contenha, senão o ILP de set partitioning não consegue cobri-la.
+        covered = {id(p["trips"][0]) for p in paths if p.get("trips")}
+        for t in sorted_trips:
+            if id(t) in covered:
+                continue
+            paths.append(self._evaluate_path([t]))
+
+        # Iterar cada trip como possível start com budget equânime para evitar
+        # que os primeiros trips consumam todos os slots de MAX_PATHS.
+        for start_trip in sorted_trips:
+            if len(paths) >= MAX_PATHS:
+                break
+            start_budget_used[0] = 0
+            dfs([start_trip], start_trip.end_time, start_trip, start_trip.duration, None, 1)
+
+        # Garantia pós-DFS: cada viagem aparece como primeira viagem de pelo menos um
+        # caminho (single-trip fallback). MAX_PATHS pode cortar a recursão profunda,
+        # mas a cobertura é mandatória para viabilidade do set partitioning.
+        seen_first = {id(p["trips"][0]) for p in paths if p.get("trips")}
+        for t in sorted_trips:
+            if id(t) not in seen_first:
+                paths.append(self._evaluate_path([t]))
+
+        # Garantia final de cobertura: toda viagem deve estar em ao menos um caminho
+        covered_trips: set[int] = set()
+        for p in paths:
+            for t in p.get("trips", []):
+                covered_trips.add(id(t))
+        for t in sorted_trips:
+            if id(t) not in covered_trips:
+                paths.append(self._evaluate_path([t]))
+
         return paths
 
     def validate_solution_quality(self, result: OptimizationResult) -> Dict[str, Any]:
@@ -435,7 +490,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                 
         # 2. Verificar consistência de custos
         internal_cost = result.total_cost
-        api_cost = self.evaluator.total_cost_breakdown(result, ...)["total"]
+        api_cost = self.evaluator.total_cost_breakdown(result, [])["total"]
         validation["cost_consistency"] = self._validate_cost_consistency(internal_cost, api_cost)
         
         # 3. Calcular gap de otimalidade (se disponível)
@@ -501,49 +556,69 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             cost_single += self._illegal_relief_penalty
             illegal_relief_single = True
 
-        best_cost = cost_single
-        best_style = "single"
-        relief_idx = -1
-        illegal_relief = illegal_relief_single
-        overtime = extra_work
-        
-        # Analisar Pegada Dupla (Split Shift)
-        for i in range(len(path) - 1):
-            t1, t2 = path[i], path[i+1]
-            gap = t2.start_time - t1.end_time
-            if gap >= self.meal_break_minutes:
-                # O gap neutraliza o overtime na visão corporativa (simplificação)
-                cost_split = vehicle_cost + crew_base_direct + (work_time/60) * self.evaluator.crew_cost_per_hour
-                if cost_split < best_cost:
-                    best_cost = cost_split
-                    best_style = "split"
-                    overtime = 0
-                    illegal_relief = False
+        # Candidatos legais apenas — paths que gerariam duties com SPREAD_EXCEEDED
+        # ou relief em ponto não-terminal são excluídos por construção.
+        candidates: List[Dict[str, Any]] = []
+        if not illegal_relief_single:
+            candidates.append({
+                "cost": cost_single, "style": "single", "relief_idx": -1,
+                "overtime": extra_work,
+            })
 
-        # Analisar Rendição (Troca de tripulação no bloco)
+        # Analisar Pegada Dupla (Split Shift) — mesmo spread do single
+        if not illegal_relief_single:
+            for i in range(len(path) - 1):
+                t1, t2 = path[i], path[i+1]
+                gap = t2.start_time - t1.end_time
+                if gap >= self.meal_break_minutes:
+                    cost_split = vehicle_cost + crew_base_direct + self._to_decimal(work_time/60) * self.evaluator.crew_cost_per_hour
+                    candidates.append({
+                        "cost": cost_split, "style": "split", "relief_idx": -1,
+                        "overtime": 0,
+                    })
+                    break  # uma opção de split é suficiente para comparação
+
+        # Analisar Rendição (Troca de tripulação em terminal) — divide em 2 duties.
+        # Cada duty fica com spread menor; aceitar apenas trocas em terminal.
         for i in range(1, len(path)):
-            t_prev = path[i-1]
             t_next = path[i]
-            
+            node = t_next.origin_id
+            if node not in self.terminal_location_ids:
+                continue  # relief fora do terminal é ilegal — pular
+
+            # Ambas as metades devem respeitar max_shift individualmente
+            spread_a = path[i-1].end_time - path[0].start_time
+            spread_b = path[-1].end_time - path[i].start_time
+            if spread_a > self.max_shift_minutes or spread_b > self.max_shift_minutes:
+                continue
+
             w1 = sum(t.duration for t in path[:i])
             w2 = sum(t.duration for t in path[i:])
-            c1 = crew_base_direct + (w1/60) * self.evaluator.crew_cost_per_hour
-            c2 = crew_base_direct + (w2/60) * self.evaluator.crew_cost_per_hour
-            
+            c1 = crew_base_direct + self._to_decimal(w1/60) * self.evaluator.crew_cost_per_hour
+            c2 = crew_base_direct + self._to_decimal(w2/60) * self.evaluator.crew_cost_per_hour
             relief_c = vehicle_cost + c1 + c2
-            
-            # Aplicação da Regra de Ouro (Apenas em Terminais)
-            node = t_next.origin_id
-            is_terminal = node in self.terminal_location_ids
-            if not is_terminal:
-                relief_c += self._calculate_safe_big_m(path)[0]  # Use first value (illegal relief penalty)
-                
-            if relief_c < best_cost:
-                best_cost = relief_c
-                best_style = "relief"
-                relief_idx = i
-                illegal_relief = not is_terminal
-                overtime = 0
+            candidates.append({
+                "cost": relief_c, "style": "relief", "relief_idx": i,
+                "overtime": 0,
+            })
+
+        if not candidates:
+            # Sem opção legal — marcar como illegal_relief para ser excluído pelo caller.
+            return {
+                "trips": path,
+                "total_cost": cost_single + self._illegal_relief_penalty,
+                "crew_style": "single",
+                "relief_idx": -1,
+                "illegal_relief": True,
+                "overtime": extra_work,
+            }
+
+        best = min(candidates, key=lambda c: c["cost"])
+        best_cost = best["cost"]
+        best_style = best["style"]
+        relief_idx = best["relief_idx"]
+        illegal_relief = False
+        overtime = best["overtime"]
 
         return {
             "trips": path,

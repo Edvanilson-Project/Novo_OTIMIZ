@@ -34,6 +34,8 @@ from ..schemas import (
     OptimizeResponse,
     TaskStatusResponse,
     TaskSubmittedResponse,
+    AiChatRequest,
+    AiChatResponse,
 )
 
 router = APIRouter()
@@ -234,6 +236,30 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
         len(body.trips),
     )
     return TaskSubmittedResponse(status="processing", task_id=task.id)
+
+
+# ── POST /optimize/chat — Chat interativo com a IA ────────────────────────────
+
+@router.post(
+    "/chat",
+    response_model=AiChatResponse,
+    tags=["optimization"],
+    summary="Chat interativo com o Copiloto de IA",
+)
+async def chat_with_ai(body: AiChatRequest) -> AiChatResponse:
+    """
+    Recebe as métricas da otimização e a pergunta do usuário.
+    Retorna a resposta gerada pela IA (DeepSeek/Llama/fallback).
+    """
+    from ...services.ai_service import AiService
+    service = AiService()
+    
+    answer = await service.chat_async(body.metrics, body.question)
+    
+    return AiChatResponse(
+        answer=answer,
+        status="ok" if answer else "error"
+    )
 
 
 # ── GET /optimize/status/{task_id} — Polling do resultado ──────────────────────
