@@ -19,6 +19,9 @@ dataclass é passado pela fronteira Celery). A reconstrução dos objetos de dom
 from __future__ import annotations
 
 import logging
+import time
+import tracemalloc
+from functools import lru_cache
 from typing import Any, Dict, List
 
 from ..core.celery_app import celery_app
@@ -28,8 +31,7 @@ from ..services.optimizer_service import OptimizerService
 
 logger = logging.getLogger(__name__)
 
-# Singleton do serviço — reutilizado dentro do mesmo processo worker
-_service = OptimizerService()
+# Removido singleton global para evitar estado compartilhado entre tasks
 
 
 def _reconstruct_trip(d: Dict[str, Any]) -> Trip:
@@ -70,6 +72,17 @@ def _reconstruct_trip(d: Dict[str, Any]) -> Trip:
     )
 
 
+@lru_cache(maxsize=32)
+def _reconstruct_vehicle_type_cached(d: Dict[str, Any]) -> VehicleType:
+    """Reconstrói um objeto VehicleType de domínio a partir de um dicionário JSON com cache."""
+    # Nota: O dicionário não é hashable, então precisamos converter para uma tupla de itens ordenados
+    # No entanto, como os vehicle_types são poucos e os dicionários são pequenos, podemos usar uma representação em string.
+    # Vamos criar uma chave de cache baseada em uma representação estável do dicionário.
+    # Para simplificar, vamos usar a função original sem cache e implementar o cache de forma manual.
+    pass
+
+
+# Como o dicionário não é hashable, vamos criar uma função wrapper que converte para uma tupla ordenada
 def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
     """Reconstrói um objeto VehicleType de domínio a partir de um dicionário JSON."""
     return VehicleType(
@@ -86,6 +99,21 @@ def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
         energy_cost_per_kwh=float(d.get("energy_cost_per_kwh", 0.0)),
         depot_id=d.get("depot_id"),
     )
+
+
+# Cache para vehicle_types: como os dicionários não são hashable, vamos usar um cache baseado no id e em uma string de representação.
+# Mas note que os vehicle_types são tipicamente poucos (menos de 10) e são os mesmos para todas as trips.
+# Vamos criar um cache simples baseado no id e nos campos relevantes.
+_vehicle_type_cache = {}
+
+def _reconstruct_vehicle_type_cached(d: Dict[str, Any]) -> VehicleType:
+    """Reconstrói com cache baseado em uma chave derivada do dicionário."""
+    # Criar uma chave que capture a identidade do vehicle_type
+    # Usamos o id e uma string de representação dos campos relevantes
+    key = (d["id"], frozenset((k, str(v)) for k, v in d.items()))
+    if key not in _vehicle_type_cache:
+        _vehicle_type_cache[key] = _reconstruct_vehicle_type(d)
+    return _vehicle_type_cache[key]
 
 
 @celery_app.task(bind=True, name="run_optimization")
@@ -107,6 +135,10 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     NUNCA faz `raise` de exceções customizadas — preserva os dados ricos de diagnóstico.
     """
+    # Iniciar rastreamento de memória para diagnóstico
+    tracemalloc.start()
+    start_time = time.time()
+
     trips_raw: List[Dict[str, Any]] = payload.get("trips", [])
     vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
     algorithm_str: str = payload.get("algorithm", "hybrid_pipeline")
@@ -121,122 +153,8 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     line_id = payload.get("line_id")
     company_id = payload.get("company_id")
 
-    try:
-        # Reconstruir objetos de domínio a partir dos dicts JSON
-        trips = [_reconstruct_trip(t) for t in trips_raw]
-        vehicle_types = [_reconstruct_vehicle_type(v) for v in vehicle_types_raw]
+    # Variáveis para throttle de progress updates
+    _last_update_time = 0
+    UPDATE_INTERVAL = 5  # segundos
 
-        # Mapear string do algoritmo para AlgorithmType enum
-        try:
-            algorithm = AlgorithmType(algorithm_str)
-        except ValueError:
-            algorithm = AlgorithmType.HYBRID_PIPELINE
-            logger.warning(
-                "[CeleryTask] Algoritmo desconhecido '%s', usando hybrid_pipeline.",
-                algorithm_str,
-            )
-
-        def _update_progress(phase: str, label: str, pct: int):
-            """Atualiza o estado do Celery apenas se estiver rodando em contexto de worker."""
-            if self.request.id:
-                self.update_state(
-                    state="PROGRESS",
-                    meta={
-                        "phase": phase,
-                        "phase_label": label,
-                        "progress_pct": pct,
-                        "run_id": run_id,
-                        "trips_count": len(trips),
-                    },
-                )
-
-        logger.info(
-            "[CeleryTask] Iniciando run_id=%s, trips=%d, algorithm=%s",
-            run_id,
-            len(trips),
-            algorithm_str,
-        )
-
-        # ── Fase 1/4: Pré-processamento ────────────────────────────────────────
-        _update_progress("preprocessing", "Pré-processando viagens e regras...", 10)
-
-        # ── Fase 2/4: VSP (Alocação de Veículos) ──────────────────────────────
-        _update_progress("vsp", "Otimizando frota de veículos (VSP)...", 30)
-
-        # ── Execução do pipeline matemático ──────────────────────────────────
-        result = _service.run(
-            trips=trips,
-            vehicle_types=vehicle_types,
-            algorithm=algorithm,
-            depot_id=depot_id,
-            time_budget_s=time_budget_s,
-            cct_params=cct_params,
-            vsp_params=vsp_params,
-            optimization_params=optimization_params,
-        )
-
-        # ── Fase 3/4: CSP (Escalonamento de Tripulação) ────────────────────────
-        _update_progress("csp", "Otimizando escala de tripulantes (CSP)...", 60)
-
-        # ── Fase 4/4: Consolidação dos resultados ─────────────────────────────
-        _update_progress("finalizing", "Finalizando e auditando resultados...", 90)
-
-        raw = result.as_dict()
-
-
-        # Enriquecer com metadados da requisição original
-        meta = raw.get("meta") or {}
-        meta.update({"run_id": run_id, "line_id": line_id, "company_id": company_id})
-        raw["meta"] = meta
-
-        logger.info(
-            "[CeleryTask] Concluído run_id=%s: %d veículos, %d tripulantes, custo=%.2f",
-            run_id,
-            raw.get("vehicles", 0),
-            raw.get("crew", 0),
-            raw.get("total_cost", 0.0),
-        )
-
-        return {"_is_error": False, "result": raw}
-
-    except OptimizerError as exc:
-        # ── AJUSTE 1: Erro de negócio rico (HardConstraintViolationError, etc.) ──
-        # Em vez de fazer raise (que o Celery serializa apenas como string),
-        # extraímos o payload completo de diagnóstico e retornamos como dict.
-        logger.warning("[CeleryTask] OptimizerError no run_id=%s: %s", run_id, exc)
-        try:
-            trips_for_payload = [_reconstruct_trip(t) for t in trips_raw]
-        except Exception:
-            trips_for_payload = []
-
-        error_payload = exc.details or _service.build_failure_payload(
-            exc=exc,
-            trips=trips_for_payload,
-            algorithm=algorithm_str,
-            cct_params=cct_params,
-            vsp_params=vsp_params,
-            stage="celery_worker",
-        )
-        return {
-            "_is_error": True,
-            "http_status": 400,
-            "error_code": getattr(exc, "code", exc.__class__.__name__),
-            "error_message": str(exc),
-            "error_payload": error_payload,
-        }
-
-    except Exception as exc:
-        # ── Erro inesperado (bug, out-of-memory, etc.) ───────────────────────
-        logger.exception("[CeleryTask] Erro inesperado no run_id=%s", run_id)
-        return {
-            "_is_error": True,
-            "http_status": 500,
-            "error_code": exc.__class__.__name__,
-            "error_message": str(exc),
-            "error_payload": {
-                "code": exc.__class__.__name__,
-                "message": str(exc),
-                "kind": "internal_error",
-                "stage": "celery_worker",
-            },
-        }
+    def _update_prog
