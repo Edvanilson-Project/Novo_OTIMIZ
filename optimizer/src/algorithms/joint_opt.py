@@ -791,18 +791,25 @@ def joint_duty_vehicle_swap(
         lns_enabled = bool(vsp_params.get("enable_lns_postopt", True))
         if lns_enabled and len(best_vsp.blocks) > 2:
             import random
+            # RNG local determinístico: seed derivada da assinatura da VSP inicial.
+            # Garante reprodutibilidade entre workers Celery distintos rodando o
+            # mesmo run_id, sem mexer no estado global de `random`.
+            lns_seed = vsp_params.get("lns_seed")
+            if lns_seed is None:
+                lns_seed = hash(_vsp_signature(best_vsp)) & 0xFFFFFFFF
+            rng = random.Random(lns_seed)
             lns_vsp = copy.deepcopy(best_vsp)
             # 1. Destroy: Seleciona aleatoriamente 20% dos blocos para destruir
             num_destroy = max(2, int(len(lns_vsp.blocks) * 0.2))
-            destroy_indices = random.sample(range(len(lns_vsp.blocks)), num_destroy)
-            
+            destroy_indices = rng.sample(range(len(lns_vsp.blocks)), num_destroy)
+
             unassigned = []
             for idx in sorted(destroy_indices, reverse=True):
                 unassigned.extend(lns_vsp.blocks[idx].trips)
                 lns_vsp.blocks.pop(idx)
-                
+
             unassigned.sort(key=lambda t: t.start_time)
-            
+
             # 2. Repair: Reinsere as viagens usando heurística gulosa com ruído
             new_blocks = []
             current_block = []
@@ -814,8 +821,8 @@ def joint_duty_vehicle_swap(
                     gap = t.start_time - last_t.end_time
                     deadhead = int(last_t.deadhead_times.get(t.origin_id, 0))
                     needed = max(min_layover, deadhead)
-                    
-                    if gap >= needed and gap < max_unpaid_break + random.randint(0, 30):
+
+                    if gap >= needed and gap < max_unpaid_break + rng.randint(0, 30):
                         current_block.append(t)
                     else:
                         new_blocks.append(Block(id=0, trips=current_block, vehicle_type_id=lns_vsp.blocks[0].vehicle_type_id if lns_vsp.blocks else 1))

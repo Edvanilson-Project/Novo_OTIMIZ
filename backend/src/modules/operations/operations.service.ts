@@ -42,11 +42,13 @@ function normalizeRow(raw: Record<string, any>, colMap: Record<string, string>):
 function parseMinutes(val: any): number | null {
   if (val === undefined || val === null || val === '') return null;
 
-  // Se o valor for um número (comum em arquivos Excel), 
+  // Se o valor for um número (comum em arquivos Excel),
   // ele vem como fração do dia (ex: 0.5 = 12:00) ou minutos totais.
   if (typeof val === 'number') {
-    if (val > 0 && val < 1) {
-      return Math.round(val * 1440); // 1440 minutos em um dia
+    // Excel envia tempo como fração de dia (1.0 = 24h). Aceitamos até 2.5 (~60h)
+    // para suportar viagens que atravessam meia-noite ou múltiplos dias.
+    if (val > 0 && val < 2.5) {
+      return Math.round(val * 1440);
     }
     return Math.round(val);
   }
@@ -144,10 +146,8 @@ export class OperationsService {
         return;
       }
 
-      if (endTime < startTime) {
-        errors.push(`Linha ${row}: Hora de fim (${item.endTime}) é anterior à hora de início (${item.startTime})`);
-        return;
-      }
+      // Nota: endTime pode ser < startTime para viagens que atravessam meia-noite ou múltiplos dias
+      // Isso é tratado corretamente no banco de dados e frontend
 
       const duration = item.duration ? safeInt(item.duration) : (endTime - startTime);
 

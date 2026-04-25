@@ -13,6 +13,7 @@ Melhorias implementadas:
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 from typing import Any, Dict, List
 
@@ -26,6 +27,8 @@ from ..domain.models import (
     VehicleType,
     VSPSolution,
 )
+
+logger = logging.getLogger(__name__)
 
 # Configurar contexto decimal para alta precisão
 getcontext().prec = 28
@@ -282,7 +285,7 @@ class CostEvaluator(ICostEvaluator):
                 )
             duty_cct_penalties = (duty.rest_violations + duty.shift_violations) * self.violation_penalty
             if duty.meta.get("illegal_relief"):
-                duty_cct_penalties += 1_000_000.0  # Big-M penalty for illegal terminal relief
+                duty_cct_penalties += Decimal('1000000')  # Big-M penalty for illegal terminal relief
 
             # ── REGRAS DINÂMICAS: aplicar modificadores APÓS custos base ──────
             # Custos base estão todos calculados. As regras dinâmicas atuam como

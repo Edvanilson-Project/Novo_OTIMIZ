@@ -125,7 +125,6 @@ export default function OperationsDataPage() {
   const notify = (message: string, severity: "success" | "error" | "info" | "warning" = "success") =>
     setNotification({ open: true, message, severity });
 
-  // ─── Exportar Layout de Arquivo (template para importação) ──────────────────
   const handleExportLayout = () => {
     const wb = XLSX.utils.book_new();
 
@@ -166,19 +165,19 @@ export default function OperationsDataPage() {
 
     // Sheet 2: Motoristas (Template Completo)
     const driversTemplate = [
-      { 
-        driver_id: "M001", 
-        name: "João Silva", 
-        role: "Motorista", 
-        max_hours_per_day: 480, 
-        last_shift_end: 0 
+      {
+        driver_id: "M001",
+        name: "João Silva",
+        role: "Motorista",
+        max_hours_per_day: 480,
+        last_shift_end: 0
       },
-      { 
-        driver_id: "M002", 
-        name: "Maria Souza", 
-        role: "Motorista/Cobrador", 
-        max_hours_per_day: 540, 
-        last_shift_end: 1320 
+      {
+        driver_id: "M002",
+        name: "Maria Souza",
+        role: "Motorista/Cobrador",
+        max_hours_per_day: 540,
+        last_shift_end: 1320
       },
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(driversTemplate), "Motoristas");
@@ -477,8 +476,8 @@ export default function OperationsDataPage() {
     },
   ];
 
-  // ─── Subformulário reutilizável de campos de viagem ───────────────────────
-  const TripFields = ({
+  // ─── Subformulário reutilizável de campos de viagem (memoizado para evitar perda de foco) ───
+  const TripFields = useMemo(() => ({
     prefix, startTime, endTime, duration, originId, destinationId, distanceKm, direction,
     onStartTime, onEndTime, onDuration, onOriginId, onDestinationId, onDistanceKm, onDirection,
     showDirection = true, calcDur,
@@ -566,7 +565,7 @@ export default function OperationsDataPage() {
         </Grid>
       )}
     </Grid>
-  );
+  ), [terminals]);
 
   return (
     <Box sx={{ p: 3 }}>

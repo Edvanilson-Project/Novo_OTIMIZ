@@ -305,34 +305,55 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         return costs[target]
 
     def _calculate_safe_big_m(self, trips: List[Trip]) -> Tuple[float, float]:
-        BIG_M_SAFETY_FACTOR = 1.25  # Buffer de 25% sobre o custo máximo teórico
-        """Calcula valores seguros de Big-M baseados no tamanho do problema.
-        
-        Args:
-            trips: Lista de viagens para estimar dimensões do problema
-            
+        """Calcula valores seguros de Big-M baseados em LIMITE SUPERIOR REAL do
+        problema. Big-M deve dominar QUALQUER solução factível para evitar que
+        o LP relaxado abrace soluções com viagens não atribuídas / relief ilegal.
+
+        Componentes considerados:
+        - Custo fixo total (1 veículo por viagem, pior caso)
+        - Custo de tripulação por hora * jornada máxima
+        - Custo distância * km máximos por viagem
+        - Buffer de segurança de 25%
+
         Returns:
-            Tupla com (penalidade_rendição_ilegal, penalidade_viagem_não_atribuída)
+            (penalidade_rendição_ilegal, penalidade_viagem_não_atribuída)
         """
+        BIG_M_SAFETY_FACTOR = 1.25
         if not trips:
             return 1_000_000.0, 10_000_000.0
-        
-        # Estimativa conservadora do custo médio por viagem
-        avg_cost = sum(t.duration for t in trips) / len(trips) * 0.5  # R$/min * min
-        
-        # Penalidades proporcionais ao tamanho do problema
-        illegal_relief_penalty = avg_cost * len(trips) * 100  # 100x custo estimado
-        punishment_cost = avg_cost * len(trips) * 10  # 10x custo estimado
-        
+
+        n = len(trips)
+        vehicle_fixed = float(self.cct_params.get("vehicle_fixed_cost", 800.0) or 800.0)
+        crew_per_hour = float(self.evaluator.crew_cost_per_hour)
+        cost_per_km = float(self.evaluator.cost_km)
+
+        # Limite superior do custo da PIOR solução factível possível:
+        # - cada viagem em seu próprio bloco (n veículos ativos)
+        # - cada bloco com duração e distância máxima do dataset
+        max_duration = max((float(t.duration or 0) for t in trips), default=0.0)
+        max_distance = max((float(getattr(t, "distance_km", 0) or 0) for t in trips), default=0.0)
+        worst_per_trip = (
+            vehicle_fixed
+            + (max_duration / 60.0) * crew_per_hour
+            + max_distance * cost_per_km
+        )
+        upper_bound = worst_per_trip * n * BIG_M_SAFETY_FACTOR
+
+        # punishment_cost (não-atribuir trip) deve ser > upper_bound
+        # illegal_relief deve ser ainda maior (10x) para que o solver SEMPRE
+        # prefira não-atribuir do que aceitar relief ilegal
+        punishment_cost = max(upper_bound, 1_000_000.0)
+        illegal_relief_penalty = max(upper_bound * 10.0, 10_000_000.0)
+
         # Arredondar para múltiplos de 1000 para estabilidade numérica
         illegal_relief_penalty = math.ceil(illegal_relief_penalty / 1000) * 1000
         punishment_cost = math.ceil(punishment_cost / 1000) * 1000
-        
+
         logger.debug(
-            f"Big-M calculado dinamicamente: penalidade_rendição={illegal_relief_penalty}, "
-            f"penalidade_não_atribuída={punishment_cost}"
+            f"Big-M dinâmico: penalidade_rendição={illegal_relief_penalty}, "
+            f"penalidade_não_atribuída={punishment_cost}, upper_bound={upper_bound:.2f}"
         )
-        
+
         return illegal_relief_penalty, punishment_cost
 
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:

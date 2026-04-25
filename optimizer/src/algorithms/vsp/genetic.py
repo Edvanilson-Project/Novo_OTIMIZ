@@ -99,7 +99,13 @@ def _fitness(
     duplicates = len(all_tids) - len(set(all_tids))
     # Penalidade por blocos com deadhead inviável
     infeasible_count = sum(1 for b in blocks if not block_is_feasible(b, min_gap))
-    return -(base_cost + missing * 5000.0 + duplicates * 10000.0 + infeasible_count * 3000.0)
+    # Penalidades escaladas pelo custo fixo do veículo para garantir que
+    # soluções infactíveis NUNCA superem factíveis no fitness, independente
+    # da instância (pequena ou 10k+ trips).
+    missing_penalty = max(5000.0, 10.0 * fixed_vehicle_cost)
+    duplicate_penalty = max(10000.0, 20.0 * fixed_vehicle_cost)
+    infeasible_penalty = max(3000.0, 5.0 * fixed_vehicle_cost)
+    return -(base_cost + missing * missing_penalty + duplicates * duplicate_penalty + infeasible_count * infeasible_penalty)
 
 
 def _tournament(population: List[Chromosome], scores: List[float], k: int = 3) -> Chromosome:
