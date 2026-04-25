@@ -142,14 +142,22 @@ class AiService:
 
     async def _get_models_async(self) -> List[str]:
         """Versão assíncrona e segura para obter modelos."""
+        # Se um modelo específico foi configurado, use-o com prioridade máxima
+        pinned_model = getattr(self._settings, "openrouter_model", None)
+        
         now = time.time()
         if (now - self._models_fetched_at) < self._models_ttl and self._dynamic_models:
-            return self._dynamic_models
-
-        new_models = await self._fetch_free_models_async()
-        self._dynamic_models = new_models
-        self._models_fetched_at = now
-        return self._dynamic_models
+            models = self._dynamic_models
+        else:
+            models = await self._fetch_free_models_async()
+            self._dynamic_models = models
+            self._models_fetched_at = now
+        
+        if pinned_model:
+            # Garante que o modelo fixado seja o primeiro, sem duplicatas
+            return [pinned_model] + [m for m in models if m != pinned_model]
+            
+        return models
 
     # ── API pública ──────────────────────────────────────────────────────────
 

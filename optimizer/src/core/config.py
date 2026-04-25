@@ -104,6 +104,7 @@ class Settings(BaseSettings):
 
     # ── AI Copilot (OpenRouter) ───────────────────────────────────────────────
     openrouter_api_key: str = ""                # Chave de API. Vazia = recurso desativado silenciosamente.
+    openrouter_model: str = ""                  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
 
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
     redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
