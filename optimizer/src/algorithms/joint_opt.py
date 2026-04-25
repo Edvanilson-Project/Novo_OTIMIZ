@@ -387,7 +387,7 @@ def _enhanced_large_neighborhood_search(
     
     best_vsp = copy.deepcopy(vsp_sol)
     best_csp = copy.deepcopy(csp_sol)
-    best_cost = evaluator.total_cost(best_csp, best_vsp)
+    best_cost = evaluator.csp_cost(best_csp) + evaluator.vsp_cost(best_vsp, [])
     
     stats = {
         "iterations": 0,
@@ -401,8 +401,12 @@ def _enhanced_large_neighborhood_search(
     
     for iteration in range(max_iterations):
         # 1. DESTRUIR: Selecionar blocos com maior custo marginal
+        _duty_breakdown = evaluator.csp_cost_breakdown(best_csp)
+        duty_cost_map: Dict[int, float] = {
+            d["duty_id"]: d["total"] for d in _duty_breakdown.get("duties", [])
+        }
         blocks_to_destroy = _select_blocks_by_marginal_cost(
-            best_vsp, best_csp, evaluator, destruction_rate
+            best_vsp, best_csp, duty_cost_map, destruction_rate
         )
         
         # Extrair trips dos blocos destruídos
@@ -430,7 +434,7 @@ def _enhanced_large_neighborhood_search(
         csp_solver = GreedyCSP(vsp_params=vsp_params, **cct_params)
         candidate_csp = csp_solver.solve(candidate_vsp.blocks, trips)
         
-        candidate_cost = evaluator.total_cost(candidate_csp, candidate_vsp)
+        candidate_cost = evaluator.csp_cost(candidate_csp) + evaluator.vsp_cost(candidate_vsp, [])
         
         # 4. ACEITAR: Critério de simulated annealing
         cost_delta = candidate_cost - best_cost
@@ -459,49 +463,104 @@ def _enhanced_large_neighborhood_search(
 def _select_blocks_by_marginal_cost(
     vsp_sol: VSPSolution,
     csp_sol: CSPSolution,
-    evaluator: CostEvaluator,
+    duty_cost_map: Dict[int, float],
     destruction_rate: float
 ) -> Set[int]:
     """Seleciona blocos com maior custo marginal para destruição."""
     block_costs = []
-    
-    # Calcular custo marginal de cada bloco
+
     for block in vsp_sol.blocks:
-        # Custo de frota (proporcional à duração)
         fleet_cost = block.total_duration * 0.5  # R$/min
-        
-        # Custo de pessoal (encontrar duty que contém o bloco)
-        personnel_cost = 0
+
+        personnel_cost = 0.0
         for duty in (csp_sol.duties or []):
             for seg in duty.segments:
                 if seg.block_id == block.id:
-                    # Custo proporcional ao trabalho no bloco
                     block_work = sum(t.duration for t in block.trips)
                     duty_work = duty.work_time
                     if duty_work > 0:
-                        personnel_cost = duty.cost * (block_work / duty_work)
+                        personnel_cost = duty_cost_map.get(duty.id, 0.0) * (block_work / duty_work)
                     break
-        
-        total_cost = fleet_cost + personnel_cost
-        block_costs.append((block.id, total_cost))
-    
-    # Ordenar por custo decrescente
+
+        block_costs.append((block.id, fleet_cost + personnel_cost))
+
     block_costs.sort(key=lambda x: x[1], reverse=True)
-    
-    # Selecionar top N blocos
     n_destroy = max(2, int(len(vsp_sol.blocks) * destruction_rate))
     return {block_id for block_id, _ in block_costs[:n_destroy]}
 
 def _feasible_insertion(block: Block, trip: Trip, vsp_params: Dict[str, Any]) -> Tuple[bool, int, float]:
-    """Verifica viabilidade de inserção de uma trip em um bloco e retorna custo estimado."""
-    # Implementação simplificada - deve ser substituída pela lógica real
-    # Retorna (viável, posição, custo)
-    return True, 0, 0.0
+    """Verifica viabilidade de inserção de uma trip no final de um bloco.
+
+    Reutiliza _can_append_suffix para garantir que todas as hard constraints
+    (deadhead, min_layover, max_vehicle_shift, multi_line) sejam respeitadas.
+    Só considera inserção no final (append) para preservar a ordenação temporal.
+    """
+    if not block.trips:
+        return True, 0, 0.0
+
+    ok, _reason, data = _can_append_suffix(block, [trip], vsp_params)
+    if not ok:
+        return False, -1, 0.0
+
+    position = len(block.trips)
+    idle_cost = int(data.get("gap", 0)) * 0.25  # R$/min ocioso (alinhado ao CostEvaluator)
+    return True, position, idle_cost
 
 def _local_search_2opt(blocks: List[Block], vsp_params: Dict[str, Any]) -> List[Block]:
-    """Implementação simplificada da busca local 2-opt."""
-    # Apenas retorna os blocos sem modificação
-    # Deve ser substituída pela implementação real
+    """Busca local 2-opt inter-bloco: troca sufixos de tamanho variável para reduzir ociosidade.
+
+    Para cada par de blocos (i, j), testa trocar sufixos de tamanho 'cut'.
+    A troca só é efetivada se _can_append_suffix confirmar viabilidade em AMBOS os
+    receptores E houver redução líquida do gap ocioso no ponto de corte.
+    """
+    blocks = copy.deepcopy(blocks)
+    improved = True
+
+    while improved:
+        improved = False
+        n = len(blocks)
+        for i in range(n):
+            for j in range(i + 1, n):
+                b1, b2 = blocks[i], blocks[j]
+                if len(b1.trips) < 2 or len(b2.trips) < 2:
+                    continue
+
+                for cut in range(1, min(len(b1.trips), len(b2.trips))):
+                    head1 = b1.trips[:-cut]
+                    tail1 = b1.trips[-cut:]
+                    head2 = b2.trips[:-cut]
+                    tail2 = b2.trips[-cut:]
+
+                    if not head1 or not head2:
+                        continue
+
+                    temp_b1 = Block(id=b1.id, trips=list(head1),
+                                    vehicle_type_id=b1.vehicle_type_id, warnings=[], meta=b1.meta)
+                    temp_b2 = Block(id=b2.id, trips=list(head2),
+                                    vehicle_type_id=b2.vehicle_type_id, warnings=[], meta=b2.meta)
+
+                    ok1, _, data1 = _can_append_suffix(temp_b1, list(tail2), vsp_params)
+                    ok2, _, data2 = _can_append_suffix(temp_b2, list(tail1), vsp_params)
+
+                    if not (ok1 and ok2):
+                        continue
+
+                    cur_gap1 = tail1[0].start_time - head1[-1].end_time
+                    cur_gap2 = tail2[0].start_time - head2[-1].end_time
+                    new_gap1 = int(data1.get("gap", 0))
+                    new_gap2 = int(data2.get("gap", 0))
+
+                    if new_gap1 + new_gap2 < cur_gap1 + cur_gap2:
+                        b1.trips = list(head1) + list(tail2)
+                        b2.trips = list(head2) + list(tail1)
+                        improved = True
+                        break
+
+                if improved:
+                    break
+            if improved:
+                break
+
     return blocks
 
 def _grasp_repair(

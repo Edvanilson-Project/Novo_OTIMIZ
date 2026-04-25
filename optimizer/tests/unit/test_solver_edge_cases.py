@@ -108,4 +108,14 @@ def test_big_m_one_million_and_graceful_fallback_on_impossible_case(monkeypatch)
     assert isinstance(solution, CSPSolution)
     assert solution.meta.get("column_generation", {}).get("fallback") is True
     assert captured_slack_coeffs, "Nenhum coeficiente de slack foi capturado"
-    assert all(coef == pytest.approx(1_000_000.0) for coef in captured_slack_coeffs)
+    # Big-M agora é dinâmico: max(max_col_cost * |tasks| + 1, 1000.0).
+    # Validamos que a penalidade de slack está em escala "alta o suficiente"
+    # (>= 1000 para garantir desincentivo) e que todos os coefs são iguais
+    # entre si (uniformidade da Big-M dentro de uma mesma rodada).
+    assert all(coef >= 1000.0 for coef in captured_slack_coeffs), (
+        f"Big-M abaixo do piso 1000: {captured_slack_coeffs}"
+    )
+    first = captured_slack_coeffs[0]
+    assert all(coef == pytest.approx(first) for coef in captured_slack_coeffs), (
+        "Big-M não é uniforme entre slacks da mesma rodada"
+    )

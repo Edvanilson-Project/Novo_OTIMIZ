@@ -36,6 +36,12 @@ celery_app.conf.update(
     # Performance para CPU-bound
     worker_prefetch_multiplier=1,   # 1 tarefa por worker de cada vez
     task_acks_late=True,            # ACK apenas após conclusão (não perder tarefas em crash)
+    # Timeouts de segurança: evita workers bloqueados por solvers CBC/PuLP travados.
+    # soft_time_limit dispara SoftTimeLimitExceeded (capturável); time_limit envia SIGKILL.
+    task_soft_time_limit=1200,      # 20 min: orçamento 15 min + 5 min de overhead
+    task_time_limit=1500,           # 25 min: SIGKILL caso soft limit seja ignorado
+    # Limpa fragmentação de memória: reinicia o processo após N tarefas concluídas
+    worker_max_tasks_per_child=10,
     # Resultados e Caching
     result_expires=43200,           # 12 horas de retenção no Redis para habilitar Smart Caching
     result_extended=True,           # Guarda traceback e estado estendido

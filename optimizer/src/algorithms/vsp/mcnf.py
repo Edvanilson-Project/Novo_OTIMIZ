@@ -173,9 +173,12 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     filtered_trips = [t for t in block.trips if t.id not in assigned_trip_ids]
                     if not filtered_trips:
                         continue
-                    block = Block(id=block_id_counter, trips=filtered_trips)
+                    block = Block(
+                        id=block_id_counter,
+                        trips=filtered_trips,
+                        vehicle_type_id=vehicle_types[0].id if vehicle_types else None,
+                    )
                     if block.trips:
-                        block.vehicle_type_id = block.trips[0].vehicle_type_id if hasattr(block.trips[0], 'vehicle_type_id') else None
                         block_id_counter += 1
                         all_blocks.append(block)
                         assigned_trip_ids.update(block_trip_ids - assigned_trip_ids)
@@ -260,24 +263,24 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         # Ensure we have at least one virtual depot if none provided
         local_depots = depots if depots else [{"id": -1, "capacity": 999999}]
 
-        # Pre-filter conexões válidas para reduzir variáveis
+        # Pre-filter conexões válidas: O(N²) com early-break por monotonicidade temporal.
+        # trips_sorted está ordenado por start_time, então gap = trips[j].start - trips[i].end
+        # é não-decrescente em j para j > i. Quando gap > max_shift, todos os j seguintes
+        # também excedem, permitindo o break. Iteramos apenas j > i (j < i sempre inválido).
         valid_X: Dict[Tuple[int, int], Dict[str, Any]] = {}
         for i in range(N):
-            for j in range(N):
-                if i == j:
-                    continue
-                if trips_sorted[j].start_time < trips_sorted[i].end_time:
-                    continue
+            for j in range(i + 1, N):
+                gap = trips_sorted[j].start_time - trips_sorted[i].end_time
+                if gap > max_shift:
+                    break  # Monotonicidade: todos os j seguintes também excedem max_shift
+                if gap < 0:
+                    continue  # Sobreposição temporal (trip j começa antes de i terminar)
                 if not allow_multi and trips_sorted[i].line_id != trips_sorted[j].line_id:
                     continue
 
-                gap = trips_sorted[j].start_time - trips_sorted[i].end_time
                 dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
 
                 if gap + connection_tolerance < dh:
-                    continue
-
-                if gap > max_shift:
                     continue
 
                 idle = gap - dh

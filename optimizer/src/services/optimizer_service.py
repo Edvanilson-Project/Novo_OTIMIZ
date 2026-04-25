@@ -700,69 +700,162 @@ class OptimizerService:
         }
 
     def _build_operational_kpis(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> Dict[str, Any]:
-        # Nova métrica de conformidade CCT estrita
-        inter_shift_violations = 0
         duties = list(result.csp.duties or [])
+        blocks_list = list(result.vsp.blocks or [])
+        num_blocks = len(blocks_list)
+
+        # ── Métricas VSP ────────────────────────────────────────────────────────
+        total_trips = sum(len(b.trips) for b in blocks_list)
+        trips_per_vehicle = round(total_trips / max(1, num_blocks), 2)
+        total_driving_min = sum(t.duration for b in blocks_list for t in b.trips)
+        total_block_span_min = sum(
+            (b.trips[-1].end_time - b.trips[0].start_time)
+            for b in blocks_list if b.trips
+        )
+        avg_block_duration_h = round(total_block_span_min / max(1, num_blocks) / 60.0, 2)
+        fleet_utilization_pct = round(
+            100.0 * total_driving_min / max(1, total_block_span_min), 1
+        )
+        # Deadhead: lacunas entre viagens consecutivas do mesmo bloco
+        total_deadhead_min = sum(
+            b.trips[k + 1].start_time - b.trips[k].end_time
+            for b in blocks_list if len(b.trips) > 1
+            for k in range(len(b.trips) - 1)
+            if b.trips[k + 1].start_time - b.trips[k].end_time > 0
+        )
+        total_distance_km = sum(t.distance_km for b in blocks_list for t in b.trips)
+
+        # ── Métricas CSP ────────────────────────────────────────────────────────
         if not duties:
+            empty_fairness = {
+                "target_work_minutes": int(cct_params.get("fairness_target_work_minutes", 420) or 420),
+                "tolerance_minutes": int(cct_params.get("fairness_tolerance_minutes", 30) or 30),
+                "d_plus_total": 0,
+                "d_minus_total": 0,
+                "within_band_count": 0,
+                "outside_band_count": 0,
+                "avg_work_minutes": 0.0,
+            }
             return {
-                "vehicles": len(result.vsp.blocks or []),
+                "vehicles": num_blocks,
                 "crew": 0,
                 "work_minutes": 0,
                 "paid_minutes": 0,
                 "paid_work_delta_minutes": 0,
-                "fairness": {
-                    "target_work_minutes": int(cct_params.get("fairness_target_work_minutes", 420) or 420),
-                    "tolerance_minutes": int(cct_params.get("fairness_tolerance_minutes", 30) or 30),
-                    "d_plus_total": 0,
-                    "d_minus_total": 0,
-                    "within_band_count": 0,
-                    "outside_band_count": 0,
-                },
+                "trips_per_vehicle": trips_per_vehicle,
+                "avg_block_duration_h": avg_block_duration_h,
+                "fleet_utilization_pct": fleet_utilization_pct,
+                "total_deadhead_min": total_deadhead_min,
+                "total_distance_km": round(total_distance_km, 2),
+                "duties_with_overtime": 0,
+                "overtime_rate_pct": 0.0,
+                "avg_overtime_min_per_duty": 0.0,
+                "fairness": empty_fairness,
+                "stretch_kpi": {"operators_with_assignment": 0, "avg_vehicle_changes_per_operator": 0.0},
+                "executive_summary": {},
             }
 
         target = int(cct_params.get("fairness_target_work_minutes", 420) or 420)
         tolerance = int(cct_params.get("fairness_tolerance_minutes", 30) or 30)
 
-        total_work = sum(int(duty.work_time or 0) for duty in duties)
-        total_paid = sum(int(duty.paid_minutes or duty.work_time or 0) for duty in duties)
+        total_work = sum(int(d.work_time or 0) for d in duties)
+        total_paid = sum(int(d.paid_minutes or d.work_time or 0) for d in duties)
+        total_spread = sum(int(d.spread_time or d.work_time or 0) for d in duties)
+        total_overtime = sum(int(d.overtime_minutes or 0) for d in duties)
 
         d_plus_total = 0
         d_minus_total = 0
         within_band = 0
         outside_band = 0
+        duties_with_overtime = 0
 
-        operator_blocks: Dict[int, set[int]] = {}
+        operator_blocks: Dict[int, set] = {}
         for duty in duties:
             work = int(duty.work_time or 0)
-            d_plus = max(0, work - target)
-            d_minus = max(0, target - work)
-            d_plus_total += d_plus
-            d_minus_total += d_minus
-
+            d_plus_total += max(0, work - target)
+            d_minus_total += max(0, target - work)
             if abs(work - target) <= tolerance:
                 within_band += 1
             else:
                 outside_band += 1
-
+            if (duty.overtime_minutes or 0) > 0:
+                duties_with_overtime += 1
             operator_id = duty.meta.get("operator_id")
-            if operator_id is None:
-                continue
-            source_blocks = {
-                int(item)
-                for item in duty.meta.get("source_block_ids", [])
-                if item is not None
-            }
-            operator_blocks.setdefault(int(operator_id), set()).update(source_blocks)
+            if operator_id is not None:
+                source_blocks = {
+                    int(item)
+                    for item in duty.meta.get("source_block_ids", [])
+                    if item is not None
+                }
+                operator_blocks.setdefault(int(operator_id), set()).update(source_blocks)
 
-        stretch_values = [max(0, len(blocks) - 1) for blocks in operator_blocks.values() if blocks]
-        avg_vehicle_changes_per_operator = round(sum(stretch_values) / len(stretch_values), 3) if stretch_values else 0.0
+        stretch_values = [max(0, len(bks) - 1) for bks in operator_blocks.values() if bks]
+        avg_vehicle_changes = round(sum(stretch_values) / len(stretch_values), 3) if stretch_values else 0.0
+
+        overtime_rate_pct = round(100.0 * duties_with_overtime / max(1, len(duties)), 1)
+        avg_overtime_min = round(total_overtime / max(1, len(duties)), 2)
+
+        # Deadhead como % do spread total das jornadas (mede "tempo improdutivo do veículo")
+        deadhead_pct = round(100.0 * total_deadhead_min / max(1, total_spread), 1)
+
+        # ── Resumo financeiro executivo ─────────────────────────────────────────
+        # cost_breakdown já calculado antes desta chamada; acessado via result.meta
+        cost_bd = (result.meta or {}).get("cost_breakdown") or {}
+        total_cost = float(cost_bd.get("total", 0.0) or 0.0)
+        vsp_cost = float((cost_bd.get("vsp") or {}).get("total", 0.0) or 0.0)
+        csp_cost = float((cost_bd.get("csp") or {}).get("total", 0.0) or 0.0)
+
+        cost_per_trip = round(total_cost / max(1, total_trips), 2)
+        cost_per_productive_hour = round(
+            total_cost / max(0.01, total_driving_min / 60.0), 2
+        )
+        cost_per_km = (
+            round(total_cost / total_distance_km, 2)
+            if total_distance_km > 0
+            else None
+        )
+
+        executive_summary = {
+            # ── Custos ──
+            "total_cost_brl": round(total_cost, 2),
+            "fleet_cost_brl": round(vsp_cost, 2),
+            "crew_cost_brl": round(csp_cost, 2),
+            "fleet_cost_share_pct": round(100.0 * vsp_cost / max(1.0, total_cost), 1),
+            "crew_cost_share_pct": round(100.0 * csp_cost / max(1.0, total_cost), 1),
+            # ── Eficiência de custo ──
+            "cost_per_trip_brl": cost_per_trip,
+            "cost_per_km_brl": cost_per_km,
+            "cost_per_productive_hour_brl": cost_per_productive_hour,
+            # ── Eficiência operacional ──
+            "fleet_utilization_pct": fleet_utilization_pct,
+            "trips_per_vehicle": trips_per_vehicle,
+            "overtime_rate_pct": overtime_rate_pct,
+            "deadhead_pct_of_spread": deadhead_pct,
+            # ── Volume ──
+            "total_trips": total_trips,
+            "total_distance_km": round(total_distance_km, 2),
+            "total_driving_hours": round(total_driving_min / 60.0, 2),
+            "total_deadhead_min": total_deadhead_min,
+        }
 
         return {
-            "vehicles": len(result.vsp.blocks or []),
+            # ── Contagens base (compatibilidade com versão anterior) ────────────
+            "vehicles": num_blocks,
             "crew": len(duties),
             "work_minutes": total_work,
             "paid_minutes": total_paid,
             "paid_work_delta_minutes": max(0, total_paid - total_work),
+            # ── KPIs de frota ───────────────────────────────────────────────────
+            "trips_per_vehicle": trips_per_vehicle,
+            "avg_block_duration_h": avg_block_duration_h,
+            "fleet_utilization_pct": fleet_utilization_pct,
+            "total_deadhead_min": total_deadhead_min,
+            "total_distance_km": round(total_distance_km, 2),
+            # ── KPIs de tripulação ──────────────────────────────────────────────
+            "duties_with_overtime": duties_with_overtime,
+            "overtime_rate_pct": overtime_rate_pct,
+            "avg_overtime_min_per_duty": avg_overtime_min,
+            # ── Equidade de jornada ─────────────────────────────────────────────
             "fairness": {
                 "target_work_minutes": target,
                 "tolerance_minutes": tolerance,
@@ -772,10 +865,13 @@ class OptimizerService:
                 "outside_band_count": outside_band,
                 "avg_work_minutes": round(total_work / max(1, len(duties)), 2),
             },
+            # ── Mobilidade de veículos por operador ─────────────────────────────
             "stretch_kpi": {
                 "operators_with_assignment": len(operator_blocks),
-                "avg_vehicle_changes_per_operator": avg_vehicle_changes_per_operator,
+                "avg_vehicle_changes_per_operator": avg_vehicle_changes,
             },
+            # ── Resumo executivo para Dashboard ────────────────────────────────
+            "executive_summary": executive_summary,
         }
 
     def _dispatch(

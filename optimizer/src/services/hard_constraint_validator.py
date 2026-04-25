@@ -351,9 +351,26 @@ class HardConstraintValidator:
         issues: List[str] = []
         if duty.spread_time > max_shift:
             issues.append(f"SPREAD_EXCEEDED D{duty.id}")
-        if int(duty.meta.get("max_continuous_drive_minutes", 0)) > max_driving:
+
+        # Verifica condução contínua via flag da Duty E via meta pre-computado.
+        # O flag duty.continuous_driving_violation é setado pelo GreedyCSP;
+        # o meta "max_continuous_drive_minutes" é setado por solvers que o populam.
+        # Ambos são checados para garantir cobertura mesmo quando um não está disponível.
+        meta_drive = int(duty.meta.get("max_continuous_drive_minutes", 0))
+        if duty.continuous_driving_violation or meta_drive > max_driving:
             issues.append(f"CONTINUOUS_DRIVING_EXCEEDED D{duty.id}")
-        if any("Intervalo de refeição insuficiente" in warning for warning in duty.warnings):
+
+        # Checar ausência de intervalo a partir das tarefas (não apenas via string em warnings).
+        # min_break é o mínimo legal de pausa entre blocos de uma mesma jornada.
+        tasks = list(getattr(duty, "tasks", []))
+        meal_break_found = any(
+            tasks[k + 1].start_time - tasks[k].end_time >= min_break
+            for k in range(len(tasks) - 1)
+        ) if len(tasks) > 1 else True  # jornadas de bloco único não precisam de pausa
+        work_needs_break = duty.work_time >= 360  # 6h de direção exigem intervalo (CCT/CLT)
+        if work_needs_break and not meal_break_found:
+            issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
+        elif any("Intervalo de refeição insuficiente" in w for w in duty.warnings):
             issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
         if enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None:
             if duty.meta.get("start_depot_id") != duty.meta.get("end_depot_id"):

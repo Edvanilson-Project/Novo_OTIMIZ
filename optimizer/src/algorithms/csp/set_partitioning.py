@@ -107,7 +107,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
         target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
         
-        overtime_dev = max(0, spread - self.greedy.max_work)
+        overtime_dev = max(0, work - self.greedy.max_work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)

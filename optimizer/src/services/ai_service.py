@@ -211,6 +211,24 @@ class AiService:
         except Exception:
             return {}
 
+    def translate_rules_sync(self, rules: List[str]) -> Dict[str, Any]:
+        """Wrapper síncrono para translate_rules_async.
+
+        Mesma estratégia de generate_insight_sync: detecta event loop ativo e
+        executa em thread separada quando necessário. Sem chave API, retorna {}
+        imediatamente para que o caller use o fallback de regex.
+        """
+        if not self._settings.openrouter_api_key or not rules:
+            return {}
+        try:
+            asyncio.get_running_loop()
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(
+                    asyncio.run, self.translate_rules_async(rules)
+                ).result()
+        except RuntimeError:
+            return asyncio.run(self.translate_rules_async(rules))
+
     async def chat_async(self, metrics: Dict[str, Any], question: str) -> str:
         """Endpoint principal para o chat assíncrono."""
         if not self._settings.openrouter_api_key:

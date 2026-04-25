@@ -36,12 +36,42 @@ getcontext().rounding = ROUND_HALF_UP
 
 settings = get_settings()
 
-# Custo horário padrão caso o tipo de veículo não informe custo de tripulante
+# ── Constantes financeiras calibradas para transporte coletivo urbano brasileiro ──
+#
+# BASE SALARIAL (R$/h):
+#   Motorista: ~R$2.800–3.500/mês ÷ 220 h = ~R$13–16/h.
+#   Encargos sociais (FGTS 8 %, INSS patronal 20 %, férias, 13°, FGTS-multa) ≈ 70 %.
+#   Custo efetivo total: ~R$22–27/h  →  default R$25/h.
 _DEFAULT_CREW_COST_PER_HOUR = Decimal('25.0')
-_CCT_VIOLATION_PENALTY = Decimal('500.0')   # multa por violação de CCT (por ocorrência)
+
+# MULTA TRABALHISTA POR VIOLAÇÃO CCT (R$ por ocorrência):
+#   Autuação do MTE + indenização convencional: R$500–1000 por evento.
+#   Mantemos R$500 como piso conservador.
+_CCT_VIOLATION_PENALTY = Decimal('500.0')
+
+# INTERVALO IMPRODUTIVO (split-duty):
+#   Limite a partir do qual o intervalo não-pago começa a ser penalizado.
+#   90 min é o máximo típico negociado em CCT; acima disso o split custa caro.
 _LONG_UNPAID_BREAK_LIMIT_MINUTES = 90
-_LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal('0.05')
+
+# PESO DA PENALIDADE POR MINUTO DE INTERVALO EXCESSIVO (R$/min):
+#   Calibrado para que 60 min de excesso (150 min de break total) custe ≈ R$25,
+#   tornando o split competitivo com uma nova jornada (cost_duty ≈ R$500)
+#   apenas quando realmente vale a pena (break > ~6 h).
+#   Antes estava em 0.05 → splits longos custavam R$10 independente do tamanho.
+_LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal('0.25')
+
+# ADICIONAL PADRÃO DE HORA EXTRA (usado como fallback quando CCT não especifica):
+#   CLT art. 59: +50 % para primeiras 2 h; acima disso +100 %.
+#   O método _overtime_cost implementa a escada; este pct é o fallback flat.
 _DEFAULT_OVERTIME_EXTRA_PCT = Decimal('0.5')
+
+# CUSTO FIXO POR JORNADA (R$):
+#   Representa o overhead fixo diário por tripulante além do custo horário:
+#   administração, uniformes, treinamento, aviso prévio amortizado, etc.
+#   Default R$500 ≈ 20 h × R$25/h (custo-dia equivalente de um motorista).
+#   Anteriormente era 0 no __init__, o que zerava a penalidade por # de duties.
+_DEFAULT_COST_DUTY = Decimal('500.0')
 
 
 def _R(v) -> float:
@@ -69,11 +99,14 @@ class CostEvaluator(ICostEvaluator):
         self.idle_cost_per_minute = Decimal(str(idle_cost_per_minute))
         self.overtime_extra_pct = Decimal(str(overtime_extra_pct))
         self._dynamic_rules: list = []  # Populado externamente via set_dynamic_rules()
-        
+
         # Pesos de custo dinâmicos
+        # cost_vehicle: custo fixo de ativar 1 veículo (R$/bloco/dia)
+        # cost_km:      custo por km rodado (combustível + pneus + manutenção proporcional)
+        # cost_duty:    custo fixo por jornada além do custo horário (overhead diário por tripulante)
         self.cost_vehicle = Decimal(str(settings.default_vehicle_fixed_cost))
         self.cost_km = Decimal(str(settings.default_cost_per_km))
-        self.cost_duty = Decimal('0.0')  # Default 0 para compatibilidade
+        self.cost_duty = _DEFAULT_COST_DUTY  # R$500/jornada; antes era 0.0 (sem penalidade)
 
     def set_costs(self, cost_vehicle: float = 1000.0, cost_km: float = 1.0, cost_duty: float = 500.0) -> None:
         """Define os pesos de custo dinâmicos recebidos via API."""
@@ -126,6 +159,37 @@ class CostEvaluator(ICostEvaluator):
             + tier3 * 10.0
         )
 
+    def _overtime_cost(
+        self,
+        overtime_minutes: int,
+        extra_pct_override: Decimal | None = None,
+    ) -> Decimal:
+        """Adicional de hora extra com escada CLT (art. 59) ou pct flat via CCT.
+
+        Escada padrão (sem override):
+          - 0 a 120 min: +50 % sobre a hora normal  (CLT: primeiras 2 h extras)
+          - > 120 min:   +100 % sobre a hora normal  (CLT: horas adicionais)
+
+        Quando a CCT define um percentual diferente (ex: 60 %, 75 %), ele é passado
+        via extra_pct_override e aplicado flat sobre todo o bloco de overtime.
+        """
+        if overtime_minutes <= 0:
+            return Decimal('0.0')
+        if extra_pct_override is not None:
+            # Override por CCT/contrato: percentual flat negociado
+            return (
+                Decimal(str(overtime_minutes)) / Decimal('60.0')
+                * self.crew_cost_per_hour
+                * extra_pct_override
+            )
+        # Escada CLT: tier1 = primeiras 2h (+50 %); tier2 = além disso (+100 %)
+        tier1 = Decimal(str(min(overtime_minutes, 120)))
+        tier2 = Decimal(str(max(0, overtime_minutes - 120)))
+        return (
+            (tier1 / Decimal('60.0')) * self.crew_cost_per_hour * Decimal('0.50')
+            + (tier2 / Decimal('60.0')) * self.crew_cost_per_hour * Decimal('1.00')
+        )
+
     def set_dynamic_rules(self, rules: list) -> None:
         """Define regras dinâmicas para esta instância do avaliador.
 
@@ -175,6 +239,7 @@ class CostEvaluator(ICostEvaluator):
             has_boundary_buffers = "start_buffer_minutes" in block.meta or "end_buffer_minutes" in block.meta
             block_idle_cost = (start_buffer + end_buffer) * self.idle_cost_per_minute if has_boundary_buffers else Decimal('0.0')
 
+            block_deadhead_min = 0
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
                 block_distance += components["distance"]  # Já é Decimal
@@ -183,6 +248,21 @@ class CostEvaluator(ICostEvaluator):
                     idle_before = self._to_decimal(trip.idle_before_minutes)
                     idle_after = self._to_decimal(trip.idle_after_minutes)
                     block_idle_cost += (idle_before + idle_after) * self.idle_cost_per_minute
+
+            # Deadhead inter-viagens: retorno à garagem e transferências entre pontos.
+            # Ativado apenas quando o solver VSP não populou idle_before/idle_after
+            # (fallback para solvers que não modelam pull-out/pull-back explicitamente).
+            if not has_boundary_buffers and len(block.trips) > 1:
+                _any_idle_set = any(
+                    (t.idle_before_minutes or 0) + (t.idle_after_minutes or 0) > 0
+                    for t in block.trips
+                )
+                if not _any_idle_set:
+                    for k in range(len(block.trips) - 1):
+                        gap = block.trips[k + 1].start_time - block.trips[k].end_time
+                        if gap > 0:
+                            block_deadhead_min += gap
+                            block_idle_cost += self._to_decimal(gap) * self.idle_cost_per_minute
 
             activation += block_activation
             connection += block_connection
@@ -199,6 +279,7 @@ class CostEvaluator(ICostEvaluator):
                     "distance": _R(block_distance),
                     "time": _R(block_time),
                     "idle_cost": _R(block_idle_cost),
+                    "deadhead_minutes": block_deadhead_min,
                     "total": _R(block_activation + block_connection + block_distance + block_time + block_idle_cost),
                     "start_buffer_minutes": start_buffer,
                     "end_buffer_minutes": end_buffer,
@@ -207,6 +288,7 @@ class CostEvaluator(ICostEvaluator):
             )
 
         total = activation + connection + distance + time + idle_cost
+        total_deadhead_min = sum(b.get("deadhead_minutes", 0) for b in blocks)
         return {
             "total": _R(total),
             "activation": _R(activation),
@@ -214,6 +296,7 @@ class CostEvaluator(ICostEvaluator):
             "distance": _R(distance),
             "time": _R(time),
             "idle_cost": _R(idle_cost),
+            "total_deadhead_minutes": total_deadhead_min,
             "num_blocks": len(solution.blocks),
             "num_unassigned_trips": len(solution.unassigned_trips),
             "advisory_idle_proxy_cost": _R(idle_cost),
@@ -259,10 +342,15 @@ class CostEvaluator(ICostEvaluator):
             paid_waiting_minutes = max(Decimal('0.0'), paid_minutes - guaranteed_minutes)
             duty_guaranteed_cost = (guaranteed_extra_minutes / Decimal('60.0')) * self.crew_cost_per_hour
             duty_waiting_cost = (paid_waiting_minutes / Decimal('60.0')) * self.crew_cost_per_hour
-            duty_overtime_cost = (
-                (self._to_decimal(max(0, int(duty.overtime_minutes or 0))) / Decimal('60.0'))
-                * self.crew_cost_per_hour
-                * self._to_decimal(duty.meta.get("overtime_extra_pct", self.overtime_extra_pct))
+            # Adicional de hora extra: escada CLT ou override flat via CCT
+            _ot_pct_override = (
+                self._to_decimal(duty.meta["overtime_extra_pct"])
+                if "overtime_extra_pct" in (duty.meta or {})
+                else None
+            )
+            duty_overtime_cost = self._overtime_cost(
+                max(0, int(duty.overtime_minutes or 0)),
+                extra_pct_override=_ot_pct_override,
             )
             unpaid_break_minutes = max(
                 Decimal('0.0'),
@@ -399,6 +487,10 @@ class CostEvaluator(ICostEvaluator):
                 }
             )
 
+        # duty_overhead_cost: custo fixo por jornada (overhead administrativo).
+        # Exposto como componente nomeado para que o cliente da API consiga
+        # validar total = soma_dos_componentes (e não como termo "fantasma").
+        duty_overhead_cost = Decimal(str(len(solution.duties))) * self.cost_duty
         total = (
             work_cost
             + guaranteed_cost
@@ -408,7 +500,7 @@ class CostEvaluator(ICostEvaluator):
             + nocturnal_extra
             + holiday_extra
             + cct_penalties
-            + (len(solution.duties) * self.cost_duty)
+            + duty_overhead_cost
         )
         result = {
             "total": _R(total),
@@ -420,6 +512,7 @@ class CostEvaluator(ICostEvaluator):
             "nocturnal_extra": _R(nocturnal_extra),
             "holiday_extra": _R(holiday_extra),
             "cct_penalties": _R(cct_penalties),
+            "duty_overhead_cost": _R(duty_overhead_cost),
             "num_duties": len(solution.duties),
             "num_uncovered_blocks": len(solution.uncovered_blocks),
             "duties": duties,

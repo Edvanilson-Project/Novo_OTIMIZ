@@ -127,7 +127,9 @@ def test_csp_cost_breakdown_includes_guaranteed_waiting_and_overtime_components(
     assert duty_breakdown["guaranteed_cost"] == pytest.approx(75.0)
     assert duty_breakdown["waiting_cost"] == pytest.approx(25.0)
     assert duty_breakdown["overtime_cost"] == pytest.approx(6.25)
-    assert breakdown["total"] == pytest.approx(131.25)
+    # cost_duty default = 500.0 → overhead fixo por jornada (1 duty * 500 = 500)
+    assert breakdown["duty_overhead_cost"] == pytest.approx(500.0)
+    assert breakdown["total"] == pytest.approx(131.25 + 500.0)
 
 
 def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
@@ -158,7 +160,8 @@ def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
     assert payload["duties"][0]["guaranteed_cost"] == pytest.approx(75.0)
     assert payload["duties"][0]["waiting_cost"] == pytest.approx(25.0)
     assert payload["duties"][0]["overtime_cost"] == pytest.approx(6.25)
-    assert payload["duties"][0]["total_cost"] == pytest.approx(131.25)
+    # Per-duty total inclui cost_duty (500.0) por design — total = 131.25 + 500 = 631.25
+    assert payload["duties"][0]["total_cost"] == pytest.approx(631.25)
 
 
 def test_greedy_csp_computes_overtime_from_work_time_not_spread_time():
@@ -183,7 +186,9 @@ def test_csp_cost_breakdown_preserves_raw_precision_until_final_rounding():
     # 20 min at 25/h = 8.333..., twice = 16.666... -> 16.67.
     # If each duty were rounded first, the result would drift to 16.66.
     assert breakdown["work_cost"] == pytest.approx(16.67)
-    assert breakdown["total"] == pytest.approx(16.67)
+    # Duty overhead: 2 duties * 500.0 = 1000.0; total = 16.67 + 1000.0
+    assert breakdown["duty_overhead_cost"] == pytest.approx(1000.0)
+    assert breakdown["total"] == pytest.approx(1016.67)
 
 
 def test_csp_cost_breakdown_uses_piecewise_long_unpaid_break_penalty():

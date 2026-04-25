@@ -60,6 +60,15 @@ class TripInput(BaseModel):
     is_pull_back: bool = False
 
     @model_validator(mode="after")
+    def validate_times(self) -> "TripInput":
+        if self.start_time < 0:
+            raise ValueError("start_time deve ser >= 0 (minutos desde meia-noite)")
+        effective_duration = self.duration if self.duration > 0 else (self.end_time - self.start_time)
+        if effective_duration < 0:
+            raise ValueError("end_time deve ser >= start_time quando duration não for informado")
+        return self
+
+    @model_validator(mode="after")
     def validate_mid_trip_relief(self) -> "TripInput":
         has_point = self.mid_trip_relief_point_id is not None
         has_offset = self.mid_trip_relief_offset_minutes is not None
@@ -223,7 +232,10 @@ class OptimizeRequest(BaseModel):
     time_budget_s: Optional[float] = Field(None, ge=1, le=3600)
     wait_for_completion: bool = Field(False, description="Se True, a requisição aguarda o resultado e o retorna diretamente")
     trips: List[TripInput]
-    vehicle_types: List[VehicleTypeInput]
+    # vehicle_types tem default vazio; a obrigatoriedade é validada no route
+    # handler (POST /optimize) que devolve 400 quando lista está vazia. Manter
+    # o default permite testes de schema isolados sem montar VehicleType fake.
+    vehicle_types: List[VehicleTypeInput] = Field(default_factory=list)
     cct_params: Optional[CctParamsInput] = None
     vsp_params: Optional[VspParamsInput] = None
     optimization_params: Optional[OptimizationParametersDTO] = None

@@ -459,11 +459,12 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                             depth + 1       # Incrementa a profundidade
                         )
 
-        # Garantia de cobertura: cada viagem precisa ter pelo menos 1 caminho viável
-        # que a contenha, senão o ILP de set partitioning não consegue cobri-la.
-        covered = {id(p["trips"][0]) for p in paths if p.get("trips")}
+        # Garantia de cobertura: cada viagem precisa ter pelo menos 1 caminho viável.
+        # Usa t.id (ID de negócio) — id() seria identidade de objeto Python, quebraria
+        # após deepcopy ou quando o mesmo trip_id referenciar objetos distintos.
+        covered = {p["trips"][0].id for p in paths if p.get("trips")}
         for t in sorted_trips:
-            if id(t) in covered:
+            if t.id in covered:
                 continue
             paths.append(self._evaluate_path([t]))
 
@@ -478,18 +479,18 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         # Garantia pós-DFS: cada viagem aparece como primeira viagem de pelo menos um
         # caminho (single-trip fallback). MAX_PATHS pode cortar a recursão profunda,
         # mas a cobertura é mandatória para viabilidade do set partitioning.
-        seen_first = {id(p["trips"][0]) for p in paths if p.get("trips")}
+        seen_first = {p["trips"][0].id for p in paths if p.get("trips")}
         for t in sorted_trips:
-            if id(t) not in seen_first:
+            if t.id not in seen_first:
                 paths.append(self._evaluate_path([t]))
 
-        # Garantia final de cobertura: toda viagem deve estar em ao menos um caminho
+        # Garantia final de cobertura: toda viagem deve estar em ao menos um caminho.
         covered_trips: set[int] = set()
         for p in paths:
             for t in p.get("trips", []):
-                covered_trips.add(id(t))
+                covered_trips.add(t.id)
         for t in sorted_trips:
-            if id(t) not in covered_trips:
+            if t.id not in covered_trips:
                 paths.append(self._evaluate_path([t]))
 
         return paths
@@ -503,9 +504,9 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             "cct_compliance": True
         }
         
-        # 1. Verificar violações CCT
+        # 1. Verificar violações CCT (spread_time = jornada wall-clock; Duty não tem duration_minutes)
         for duty in result.csp.duties:
-            if duty.duration_minutes > 480:
+            if duty.spread_time > 480:
                 validation["constraint_violations"] += 1
                 validation["cct_compliance"] = False
                 

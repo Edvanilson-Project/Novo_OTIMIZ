@@ -53,25 +53,28 @@ try:
 except ImportError:
     _NUMBA_AVAILABLE = False
     
-# Função JIT para processamento ultrarrápido (Nível C++)
+# Fallback Python puro — sempre disponível, independente de numba.
+# Quando numba está presente, a função é JIT-compilada abaixo (nopython=True).
+def _jit_fast_feasibility(
+    task_end: int, task_day: int, task_last_dest: int, task_last_depot: int,
+    nxt_start: int, nxt_day: int, nxt_first_orig: int, nxt_first_depot: int,
+    max_shift: int, transfer_needed: int, check_terminals: bool
+) -> bool:
+    if nxt_start < task_end: return False
+    if nxt_day < task_day: return False
+    gap = nxt_start - task_end
+    if gap > max_shift: return False
+    if gap < transfer_needed: return False
+    if check_terminals:
+        if task_last_dest != nxt_first_orig:
+            if task_last_depot == -1 or nxt_first_depot == -1 or task_last_depot != nxt_first_depot:
+                return False
+    return True
+
 if _NUMBA_AVAILABLE:
-    @numba.jit(nopython=True, cache=True)
-    def _jit_fast_feasibility(
-        task_end: int, task_day: int, task_last_dest: int, task_last_depot: int,
-        nxt_start: int, nxt_day: int, nxt_first_orig: int, nxt_first_depot: int,
-        max_shift: int, transfer_needed: int, check_terminals: bool
-    ) -> bool:
-        if nxt_start < task_end: return False
-        if nxt_day < task_day: return False
-        gap = nxt_start - task_end
-        if gap > max_shift: return False
-        if gap < transfer_needed: return False
-        if check_terminals:
-            if task_last_dest != nxt_first_orig:
-                if task_last_depot == -1 or nxt_first_depot == -1 or task_last_depot != nxt_first_depot:
-                    return False
-        return True
-if _NUMBA_AVAILABLE:
+    # Sobrescreve a versão Python com a JIT-compilada (10x-50x mais rápida).
+    # A versão Python acima serve de fallback quando numba não está disponível.
+    _jit_fast_feasibility = numba.jit(nopython=True, cache=True)(_jit_fast_feasibility)
 
     @numba.jit(nopython=True, cache=True)
     def _jit_transfer_matrix(
@@ -84,53 +87,36 @@ if _NUMBA_AVAILABLE:
         """Matriz de transferência JIT-otimizada."""
         n = len(origin_ids)
         result = np.zeros(n, dtype=np.int32)
-        
+
         for i in range(n):
             if terminal_only:
                 if origin_ids[i] != dest_ids[i]:
-                    # Verificar se ambos têm depot_id
                     if depot_ids[i] != -1:
-                        result[i] = 0  # Mesmo terminal
+                        result[i] = 0
                     else:
                         result[i] = deadhead_matrix[origin_ids[i], dest_ids[i]]
                 else:
                     result[i] = 0
             else:
                 result[i] = deadhead_matrix[origin_ids[i], dest_ids[i]]
-        
+
         return result
-    
+
     @numba.jit(nopython=True, cache=True)
     def _jit_meal_break_check(
         work_times: np.ndarray,
         break_times: np.ndarray,
-        meal_threshold: int = 360  # 6 horas
+        meal_threshold: int = 360
     ) -> np.ndarray:
         """Verificação JIT de janelas de refeição."""
         n = len(work_times)
         needs_break = np.zeros(n, dtype=np.bool_)
-        
+
         for i in range(n):
             if work_times[i] >= meal_threshold and break_times[i] < 30:
                 needs_break[i] = True
-        
-        return needs_break
 
-    def _jit_fast_feasibility(
-        task_end: int, task_day: int, task_last_dest: int, task_last_depot: int,
-        nxt_start: int, nxt_day: int, nxt_first_orig: int, nxt_first_depot: int,
-        max_shift: int, transfer_needed: int, check_terminals: bool
-    ) -> bool:
-        if nxt_start < task_end: return False
-        if nxt_day < task_day: return False
-        gap = nxt_start - task_end
-        if gap > max_shift: return False
-        if gap < transfer_needed: return False
-        if check_terminals:
-            if task_last_dest != nxt_first_orig:
-                if task_last_depot == -1 or nxt_first_depot == -1 or task_last_depot != nxt_first_depot:
-                    return False
-        return True
+        return needs_break
 
 
 class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
@@ -1041,9 +1027,17 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         return additions
 
     def _validate_mathematical_assumptions(self, tasks: List[Block]) -> None:
+        """Valida premissas matemáticas — apenas para instâncias pequenas (debug/testes).
+
+        Complexidade: O(n²) subaditividade + O(n³) desigualdade triangular.
+        Não deve ser chamada em produção com n > 20.
         """
-        Valida premissas matemáticas para evitar 'alucinações'.
-        """
+        if len(tasks) > 20:
+            _log.debug(
+                "_validate_mathematical_assumptions ignorada: n=%d > 20 (operação O(n³))",
+                len(tasks),
+            )
+            return
         # 1. Verificar monotonicidade de custos
         for i in range(len(tasks)):
             for j in range(i + 1, len(tasks)):
@@ -1150,8 +1144,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             int(max(1.0, float(self.time_budget_s) * 0.3))  # 30% para pricing
         ))
 
-        # Custo Penalizador para variáveis Elásticas/Slack
-        BIG_M = 1000000.0
+        # Big-M dinâmico: tightened para evitar drift de ponto flutuante no LP.
+        # Suficientemente alto para dominar qualquer solução viável, mas não
+        # arbitrariamente grande (que degradaria a precisão numérica do CBC/GLPK).
+        _max_col_cost = max((cost for _, cost in columns), default=100.0)
+        BIG_M = max(_max_col_cost * len(task_ids) + 1.0, 1000.0)
 
         for iteration in range(pricing_rounds):
             _log.debug(f"Pricing iteração {iteration + 1}/{pricing_rounds}")

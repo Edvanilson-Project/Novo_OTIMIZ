@@ -47,26 +47,14 @@ class HybridPipeline(BaseAlgorithm):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> OptimizationResult:
-        best_vsp = None
-        self._start_timer()
-        # Early stopping por qualidade se atingir 80% do tempo
-        if self._elapsed_ms() > 0.8 * self.time_budget_s * 1000:
-            if hasattr(self, '_early_stop_count'):
-                self._early_stop_count += 1
-            return self._finalize(
-                best_vsp, trips, vehicle_types, 
-                {"early_stop": True, "elapsed_pct": 0.8}
-            )
         import random
         import time
+        best_vsp = None
+        self._start_timer()  # único ponto de início — elapsed medido a partir daqui
         # Se houver seed explícita, prioriza replay reprodutível; caso contrário mantém exploração estocástica.
         random_seed = self.vsp_params.get("random_seed")
         random.seed(int(random_seed) if random_seed is not None else int(time.time() * 1000))
         phase_timings_ms: dict[str, float] = {}
-        
-        # Removido: trips.sort(...) para não quebrar a vizinhança inicial do GreedyVSP.
-
-        self._start_timer()
         if not trips:
             raise InfeasibleProblemError("No trips for HybridPipeline")
 
