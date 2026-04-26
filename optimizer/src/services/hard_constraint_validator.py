@@ -8,7 +8,7 @@ Objetivo:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..domain.models import OptimizationResult, Trip
 
@@ -187,14 +187,33 @@ class HardConstraintValidator:
         }
 
     def _audit_operator_assignment(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> List[str]:
-        operator_profiles = list(cct_params.get("operator_profiles") or [])
-        if not operator_profiles:
-            return []
-
-        strict_union = bool(cct_params.get("strict_union_rules", True))
         operator_meta = ((result.csp.meta or {}).get("operator_assignment") or {})
         rosters = list(operator_meta.get("rosters") or [])
         issues: List[str] = []
+
+        # Quando a regra "operador fixo no veículo" está ativa, valida que cada
+        # operador atende blocks de um único veículo físico durante o turno.
+        if bool(cct_params.get("operator_single_vehicle_only", False)):
+            op_vehicles: Dict[Any, set] = {}
+            for roster in rosters:
+                op_id = roster.get("operator_id")
+                if op_id is None:
+                    continue
+                for blk in roster.get("blocks") or []:
+                    vid = blk.get("vehicle_id") if isinstance(blk, dict) else None
+                    if vid is None and isinstance(blk, dict):
+                        vid = blk.get("block_id")
+                    if vid is not None:
+                        op_vehicles.setdefault(op_id, set()).add(vid)
+            for op_id, vehicles in op_vehicles.items():
+                if len(vehicles) > 1:
+                    issues.append(f"OPERATOR_MULTIPLE_VEHICLES O{op_id} count={len(vehicles)}")
+
+        operator_profiles = list(cct_params.get("operator_profiles") or [])
+        if not operator_profiles:
+            return sorted(set(issues))
+
+        strict_union = bool(cct_params.get("strict_union_rules", True))
         profile_map = {int(profile.get("id")): profile for profile in operator_profiles if profile.get("id") is not None}
 
         for roster in rosters:

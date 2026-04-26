@@ -69,6 +69,18 @@ class OptimizerService:
         t0 = time.perf_counter()
         cct_params = self._normalize_rules(cct_params)
         vsp_params = self._normalize_rules(vsp_params)
+
+        # Frontend usa force_round_trip / allow_vehicle_swap (intent-level);
+        # solver Python espera enforce_trip_groups_hard / operator_single_vehicle_only
+        # (constraint-level). Traduzimos aqui para que o que o usuário marca na tela
+        # seja efetivamente aplicado.
+        if optimization_params is not None:
+            op_dict = optimization_params if isinstance(optimization_params, dict) else dict(optimization_params)
+            if op_dict.get("force_round_trip") and "enforce_trip_groups_hard" not in cct_params:
+                cct_params["enforce_trip_groups_hard"] = True
+            if op_dict.get("allow_vehicle_swap") is False and "operator_single_vehicle_only" not in cct_params:
+                cct_params["operator_single_vehicle_only"] = True
+
         self._align_vsp_params_with_cct(cct_params, vsp_params)
         normalized_time_budget_s = (
             float(time_budget_s)
@@ -1118,6 +1130,14 @@ class OptimizerService:
 
         if "same_depot_required" not in vsp_params and cct_params.get("enforce_same_depot_start_end") is not None:
             vsp_params["same_depot_required"] = bool(cct_params.get("enforce_same_depot_start_end"))
+
+        # min_break_minutes (descanso entre viagens do motorista) deve ser piso
+        # de min_layover_minutes (gap entre viagens no mesmo bloco do VSP).
+        # Sem isso o VSP greedy usa default 8 min e ignora o intervalo configurado.
+        min_break = cct_params.get("min_break_minutes")
+        if min_break is not None:
+            current_layover = int(vsp_params.get("min_layover_minutes") or 0)
+            vsp_params["min_layover_minutes"] = max(current_layover, int(min_break))
 
     def _ensure_deadhead_coverage(
         self,

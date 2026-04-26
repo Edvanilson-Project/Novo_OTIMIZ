@@ -1,13 +1,13 @@
 import time
 import logging
 import pulp
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 
 from ...domain.models import (
-    Duty, 
-    OperatorProfile, 
-    RosteringRule, 
-    NominalAssignment, 
+    Duty,
+    OperatorProfile,
+    RosteringRule,
+    NominalAssignment,
     NominalRosteringSolution
 )
 from .evaluator import RosteringEvaluator
@@ -17,18 +17,19 @@ logger = logging.getLogger(__name__)
 class NominalRosteringSolver:
     """
     Resolve o Problema de Atribuição Global (Linear Assignment Problem).
-    
-    Usa programação linear (PuLP) para encontrar o emparelhamento que 
+
+    Usa programação linear (PuLP) para encontrar o emparelhamento que
     maximiza a satisfação total dos motoristas e da empresa, respeitando
     as regras mandatórias.
     """
-    
+
     def solve(
-        self, 
-        operators: List[OperatorProfile], 
-        duties: List[Duty], 
+        self,
+        operators: List[OperatorProfile],
+        duties: List[Duty],
         rules: List[RosteringRule],
-        inter_shift_rest_minutes: int = 660
+        inter_shift_rest_minutes: int = 660,
+        cct_params: Optional[Dict[str, Any]] = None,
     ) -> NominalRosteringSolution:
         start_time = time.time()
         evaluator = RosteringEvaluator(rules)
@@ -77,6 +78,46 @@ class NominalRosteringSolver:
             possible_duties = [x[i_p, j_p] for (i_p, j_p) in valid_pairs if i_p == i]
             if possible_duties:
                 prob += pulp.lpSum(possible_duties) <= 1, f"operator_capacity_{i}"
+
+        # Restrição 3 (opcional/HARD): Operador fixo no veículo durante o turno.
+        # Cada Duty pode conter múltiplos Blocks (veículos físicos distintos).
+        # Quando operator_single_vehicle_only=True, garantimos que um operador
+        # só pode receber duties cujos blocks sejam de UM único veículo.
+        operator_single_vehicle_only = bool((cct_params or {}).get("operator_single_vehicle_only", False))
+        if operator_single_vehicle_only:
+            duty_vehicles: Dict[int, set] = {}
+            for j, duty in enumerate(duties):
+                vids = set()
+                for blk in duty.tasks:
+                    vid = blk.id  # block.id é proxy estável de "veículo físico"
+                    if vid is not None:
+                        vids.add(vid)
+                duty_vehicles[j] = vids
+
+            # Para cada operador i e cada veículo v, criamos y[i,v] binária:
+            # se y[i,v]=1, operador i pode atender duties que tocam v.
+            # Restrição: sum_v y[i,v] <= 1 (operador só toca 1 veículo).
+            # E: para cada (i,j) com v em vehicles(j), x[i,j] <= y[i,v].
+            ops_vehicles_seen: Dict[int, set] = {}
+            for (i, j) in valid_pairs:
+                ops_vehicles_seen.setdefault(i, set()).update(duty_vehicles.get(j, set()))
+
+            y_vars: Dict[Tuple[int, int], Any] = {}
+            for i, vehicles in ops_vehicles_seen.items():
+                for vid in vehicles:
+                    y_vars[(i, vid)] = pulp.LpVariable(f"y_op{i}_v{vid}", cat="Binary")
+
+            for (i, j) in valid_pairs:
+                vids = duty_vehicles.get(j, set())
+                if not vids:
+                    continue
+                # x[i,j] <= y[i,v] para cada veículo v que duty j toca
+                for vid in vids:
+                    prob += x[i, j] <= y_vars[(i, vid)], f"link_x{i}_{j}_v{vid}"
+
+            for i, vehicles in ops_vehicles_seen.items():
+                if vehicles:
+                    prob += pulp.lpSum(y_vars[(i, vid)] for vid in vehicles) <= 1, f"op_single_vehicle_{i}"
 
         # ── 3. Resolução ────────────────────────────────────────────────────
         try:

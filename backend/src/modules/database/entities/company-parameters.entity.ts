@@ -128,10 +128,10 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('float', { nullable: true })
   long_unpaid_break_penalty_weight: number;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: false })
   allow_relief_points: boolean;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: false })
   enforce_same_depot_start_end: boolean;
 
   @Column('float', { nullable: true })
@@ -146,10 +146,10 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('boolean', { nullable: true })
   operator_change_terminals_only: boolean;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: true })
   enforce_trip_groups_hard: boolean;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: false })
   operator_pairing_hard: boolean;
 
   @Column('float', { nullable: true })
@@ -158,10 +158,10 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('float', { nullable: true })
   holiday_extra_pct: number;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: false })
   enforce_single_line_duty: boolean;
 
-  @Column('boolean', { nullable: true })
+  @Column('boolean', { default: true })
   operator_single_vehicle_only: boolean;
 
   @Column('integer', { nullable: true })
