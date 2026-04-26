@@ -422,6 +422,7 @@ export interface TripDetail {
   destination_name?: string;
   duration?: number;
   line_id?: number | null;
+  trip_group_id?: number | null;
   is_pull_out?: boolean;
   is_pull_back?: boolean;
   is_paired?: boolean;

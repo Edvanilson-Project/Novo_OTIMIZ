@@ -172,7 +172,10 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             vsp_params=vsp_params,
             optimization_params=optimization_params,
         )
-        result_dict = result.as_dict()
+        # Usa uma representação compacta para reduzir o pico de memória e o
+        # tamanho do payload no Celery/Redis. O resultado completo continua
+        # disponível via `as_dict()` para testes e diagnósticos locais.
+        result_dict = result.as_compact_dict()
         result_dict.setdefault("meta", {})
         result_dict["meta"].update(
             {

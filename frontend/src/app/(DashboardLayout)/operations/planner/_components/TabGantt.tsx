@@ -35,10 +35,11 @@ const HEADER_HEIGHT = 44;
 const OVERNIGHT_START_MIN = 1440;
 const HORIZON_MINUTES = 1800;
 const SIDEBAR_WIDTH = 140;
-const DESCANSO_MIN_GAP = 5; // min gap to show as descanso event
+const DESCANSO_MIN_GAP = 5; // min gap to show as interval event
 
 // ─── Domain Interfaces ────────────────────────────────────────────────────────
 export type EventKind = 'soltura' | 'viagem' | 'recolhimento' | 'descanso';
+export type IntervalKind = 'espera' | 'descanso' | 'refeicao';
 
 export interface PlanEvent {
   kind: EventKind;
@@ -52,6 +53,7 @@ export interface PlanEvent {
   km: number;
   duracao: number;
   gapMinutes?: number;
+  intervalKind?: IntervalKind;
   vehicleId?: number;
   dutyId?: number | null;
   color?: string;
@@ -169,8 +171,11 @@ function buildEvents(
     if (next) {
       const gap = (next.start_time ?? 0) - (t.end_time ?? 0);
       if (gap >= DESCANSO_MIN_GAP) {
-        const isRefeicao = gap >= mealThreshold;
-        const isDescanso = gap >= breakThreshold;
+        const intervalKind: IntervalKind = gap >= mealThreshold
+          ? 'refeicao'
+          : gap >= breakThreshold
+            ? 'descanso'
+            : 'espera';
         events.push({
           kind: 'descanso',
           linha: '—',
@@ -182,9 +187,10 @@ function buildEvents(
           km: 0,
           duracao: gap,
           gapMinutes: gap,
+          intervalKind,
           vehicleId,
           dutyId: dutyIdOverride,
-          color: isRefeicao ? '#ff9800' : isDescanso ? '#ffc107' : '#90a4ae',
+          color: intervalKind === 'refeicao' ? '#2e7d32' : intervalKind === 'descanso' ? '#ffc107' : '#90a4ae',
         });
       }
     }
@@ -243,16 +249,24 @@ function ExportButtons({ rows, filename, sheet }: { rows: Record<string, unknown
 }
 
 // ─── EventKindChip ────────────────────────────────────────────────────────────
-function EventKindChip({ kind, gap }: { kind: EventKind; gap?: number }) {
+function eventDisplayLabel(event: Pick<PlanEvent, 'kind' | 'gapMinutes' | 'intervalKind'>): string {
+  if (event.kind !== 'descanso') return EVENT_CONFIG[event.kind].label;
+  const duration = event.gapMinutes != null ? ` (${minToDuration(event.gapMinutes)})` : '';
+  if (event.intervalKind === 'refeicao') return `Refeição${duration}`;
+  if (event.intervalKind === 'descanso') return `Descanso${duration}`;
+  return `Espera${duration}`;
+}
+
+function EventKindChip({ kind, gap, intervalKind }: { kind: EventKind; gap?: number; intervalKind?: IntervalKind }) {
   const cfg = EVENT_CONFIG[kind];
   if (kind === 'descanso' && gap != null) {
-    const isRefeicao = gap >= 60;
+    const resolvedKind: IntervalKind = intervalKind ?? (gap >= 60 ? 'refeicao' : 'espera');
     return (
       <Chip
         size="small"
-        icon={<IconCoffee size={12} />}
-        label={isRefeicao ? `Refeição (${minToDuration(gap)})` : `Descanso (${minToDuration(gap)})`}
-        color={isRefeicao ? 'success' : 'warning'}
+        icon={resolvedKind === 'espera' ? undefined : <IconCoffee size={12} />}
+        label={eventDisplayLabel({ kind, gapMinutes: gap, intervalKind: resolvedKind })}
+        color={resolvedKind === 'refeicao' ? 'success' : resolvedKind === 'descanso' ? 'warning' : 'default'}
         variant="outlined"
         sx={{ fontWeight: 700 }}
       />
@@ -345,11 +359,12 @@ function CollapsibleGroupRow({ group, showCost = false, defaultOpen = false }: C
 function EventSubRow({ event }: { event: PlanEvent }) {
   const theme = useTheme();
   const isDescanso = event.kind === 'descanso';
+  const isShortWait = isDescanso && event.intervalKind === 'espera';
 
   return (
     <TableRow sx={{
       bgcolor: isDescanso
-        ? alpha(theme.palette.warning.main, 0.06)
+        ? alpha(isShortWait ? theme.palette.text.secondary : theme.palette.warning.main, 0.06)
         : event.kind === 'soltura'
         ? alpha(theme.palette.success.main, 0.05)
         : event.kind === 'recolhimento'
@@ -357,7 +372,7 @@ function EventSubRow({ event }: { event: PlanEvent }) {
         : 'inherit',
     }}>
       <TableCell sx={{ py: 0.5, minWidth: 160 }}>
-        <EventKindChip kind={event.kind} gap={event.gapMinutes} />
+        <EventKindChip kind={event.kind} gap={event.gapMinutes} intervalKind={event.intervalKind} />
       </TableCell>
       <TableCell sx={{ py: 0.5 }}>
         {!isDescanso && event.color && (
@@ -495,55 +510,104 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const localBlocksRef = useRef<any[]>([]);
   const backupBlocksRef = useRef<any[]>([]);
   const baselineCostRef = useRef<number>(0);
+  const hydratedIdentityRef = useRef<string | null>(null);
 
-  const lineMap = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
   // índice por lineId (código alfanumérico) para lookup rápido no buildEvents
   const lineByCode = useMemo(() => new Map(lines.map((l) => [l.lineId ?? '', l])), [lines]);
   const terminalMap = useMemo(() => new Map(terminals.map((t) => [t.id, t])), [terminals]);
   const ppm = scale * BASE_PIXELS_PER_MINUTE;
   const totalWidth = HORIZON_MINUTES * ppm + SIDEBAR_WIDTH;
 
-  const presentLineCodes = useMemo(() => {
-    const codes = new Set<string>();
-    (localBlocks || []).forEach((b) =>
-      (b.items || []).forEach((t: any) => { const c = t.lineCode || t.line_code; if (c) codes.add(c); })
-    );
-    return [...codes].sort();
-  }, [localBlocks]);
+  const sourceBlocks = useMemo(() => {
+    if (Array.isArray((res as any)?.blocks)) return (res as any).blocks;
+    if (Array.isArray((res as any)?.result?.blocks)) return (res as any).result.blocks;
+    return [];
+  }, [res]);
 
-  // ─── Hydration ───
-  useEffect(() => {
-    if (!res || !res.blocks) return;
+  const hydrateBlocks = useCallback((rawBlocks: any[]) => {
+    if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return [];
 
     const codeColorMap = new Map<string, string>();
     let colorIdx = 0;
-    res.blocks.forEach((block) => {
+    rawBlocks.forEach((block) => {
       (block as any).trips?.forEach((trip: any) => {
         const code = trip.line_code ?? trip.lineCode ?? null;
-        if (code && !codeColorMap.has(code)) { codeColorMap.set(code, linePalette[colorIdx % linePalette.length]); colorIdx++; }
+        if (code && !codeColorMap.has(code)) {
+          codeColorMap.set(code, linePalette[colorIdx % linePalette.length]);
+          colorIdx += 1;
+        }
       });
     });
 
-    const hydrated = (res.blocks || []).map((block) => {
-      const b = block as any;
-      const blockId = b.block_id ?? b.blockId ?? b.id;
-      const items = (b.trips || []).map((trip: any) => {
-        const tripId = trip.id ?? trip.trip_id ?? getTripPublicId(trip);
-        const code = trip.line_code ?? trip.lineCode ?? null;
-        const color = code ? (codeColorMap.get(code) ?? linePalette[0]) : linePalette[0];
-        return {
-          ...trip, tripId,
-          lineId: trip.line_id ?? null, lineCode: code,
-          start_time: trip.start_time ?? 0, end_time: trip.end_time ?? 0,
-          color, kind: 'trip', block_id: blockId,
-        };
-      }).sort((a: any, z: any) => a.start_time - z.start_time);
+    return rawBlocks
+      .map((block) => {
+        const b = block as any;
+        const blockId = b.block_id ?? b.blockId ?? b.id;
+        const items = (b.trips || [])
+          .map((trip: any) => {
+            const tripId = trip.id ?? trip.trip_id ?? getTripPublicId(trip);
+            const code = trip.line_code ?? trip.lineCode ?? null;
+            const color = code ? (codeColorMap.get(code) ?? linePalette[0]) : linePalette[0];
+            return {
+              ...trip,
+              tripId,
+              lineId: trip.line_id ?? trip.lineId ?? null,
+              lineCode: code,
+              start_time: trip.start_time ?? trip.startTime ?? 0,
+              end_time: trip.end_time ?? trip.endTime ?? 0,
+              color,
+              kind: 'trip',
+              block_id: blockId,
+            };
+          })
+          .sort((a: any, z: any) => a.start_time - z.start_time);
 
-      return { ...block, id: blockId, block_id: blockId, start_time: b.start_time ?? 0, end_time: b.end_time ?? 0, items };
-    }).sort((a: any, b: any) => (a.block_id || 0) - (b.block_id || 0));
+        return {
+          ...block,
+          id: blockId,
+          block_id: blockId,
+          start_time: b.start_time ?? b.startTime ?? 0,
+          end_time: b.end_time ?? b.endTime ?? 0,
+          items,
+        };
+      })
+      .sort((a: any, b: any) => (a.block_id || 0) - (b.block_id || 0));
+  }, [linePalette]);
+
+  const hydratedBlocks = useMemo(() => hydrateBlocks(sourceBlocks), [sourceBlocks, hydrateBlocks]);
+  const hydratedIdentity = useMemo(() => {
+    const scheduleId = (res as any)?.id ?? (res as any)?.scheduleId ?? 'no-schedule';
+    const updatedAt = (res as any)?.updatedAt ?? (res as any)?.createdAt ?? 'no-date';
+    return `${scheduleId}:${updatedAt}:${hydratedBlocks.length}`;
+  }, [res, hydratedBlocks.length]);
+
+  const cloneBlocks = useCallback((blocks: any[]) => {
+    if (typeof structuredClone === 'function') {
+      return structuredClone(blocks);
+    }
+    return JSON.parse(JSON.stringify(blocks));
+  }, []);
+
+  const effectiveBlocks = useMemo(
+    () => (localBlocks.length > 0 ? localBlocks : hydratedBlocks),
+    [localBlocks, hydratedBlocks],
+  );
+
+  const presentLineCodes = useMemo(() => {
+    const codes = new Set<string>();
+    (effectiveBlocks || []).forEach((b) =>
+      (b.items || []).forEach((t: any) => { const c = t.lineCode || t.line_code; if (c) codes.add(c); })
+    );
+    return [...codes].sort();
+  }, [effectiveBlocks]);
+
+  // ─── Hydration ───
+  useEffect(() => {
+    if (!res || hydratedBlocks.length === 0) return;
+    if (hydratedIdentityRef.current === hydratedIdentity) return;
 
     const metadata = new Map<number, TripMetadata>();
-    hydrated.forEach((block) => {
+    hydratedBlocks.forEach((block) => {
       (block.items || []).forEach((item: any) => {
         metadata.set(item.tripId, { lineId: item.lineId ?? null, lineCode: item.lineCode ?? null, color: item.color });
       });
@@ -551,16 +615,19 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     tripMetadataRef.current = metadata;
 
     baselineCostRef.current = res ? ((res as any).totalCost ?? (res as any).total_cost ?? 0) : 0;
-    setLocalBlocks(hydrated);
-    setBackupBlocks(JSON.parse(JSON.stringify(hydrated)));
-    localBlocksRef.current = hydrated;
-    backupBlocksRef.current = JSON.parse(JSON.stringify(hydrated));
-  }, [res, lineMap, linePalette]);
+    const liveSnapshot = cloneBlocks(hydratedBlocks);
+    const backupSnapshot = cloneBlocks(hydratedBlocks);
+    setLocalBlocks(liveSnapshot);
+    setBackupBlocks(backupSnapshot);
+    localBlocksRef.current = liveSnapshot;
+    backupBlocksRef.current = backupSnapshot;
+    hydratedIdentityRef.current = hydratedIdentity;
+  }, [res, hydratedBlocks, hydratedIdentity, cloneBlocks]);
 
-  const resWithLocalBlocks = useMemo(() => ({ ...res, blocks: localBlocks }), [res, localBlocks]);
+  const resWithLocalBlocks = useMemo(() => ({ ...res, blocks: effectiveBlocks }), [res, effectiveBlocks]);
 
   const filteredBlocks = useMemo(() => {
-    return localBlocks.filter((block) => {
+    return effectiveBlocks.filter((block) => {
       if (filterLine && !block.items?.some((t: any) => (t.lineCode ?? t.line_code) === filterLine)) return false;
       if (filterSearch) {
         const q = filterSearch.toLowerCase();
@@ -570,7 +637,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       }
       return true;
     });
-  }, [localBlocks, filterLine, filterSearch]);
+  }, [effectiveBlocks, filterLine, filterSearch]);
 
   const unassignedTrips: any[] = useMemo(() => {
     if (!res) return [];
@@ -585,7 +652,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
   // ─── PlanGroups for Veículos tab ───
   const vehicleGroups = useMemo((): PlanGroup[] => {
-    return localBlocks.map((block) => {
+    return effectiveBlocks.map((block) => {
       const trips = (block.items || []).filter((t: any) => t.lineCode || t.lineId);
       const events = buildEvents(trips, terminalMap, lineByCode, intervalPolicy, block.block_id, undefined);
 
@@ -602,19 +669,19 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         events,
       };
     });
-  }, [localBlocks, terminalMap, lineByCode, intervalPolicy]);
+  }, [effectiveBlocks, terminalMap, lineByCode, intervalPolicy]);
 
   // ─── PlanGroups for Motoristas tab ───
   const tripById = useMemo(() => {
     const map = new Map<number, any>();
-    localBlocks.forEach((b) => (b.items || []).forEach((t: any) => map.set(t.tripId, t)));
+    effectiveBlocks.forEach((b) => (b.items || []).forEach((t: any) => map.set(t.tripId, t)));
     return map;
-  }, [localBlocks]);
+  }, [effectiveBlocks]);
 
   // Quais são a 1ª e última viagem de cada bloco (para decidir soltura/recolhimento do motorista)
   const blockFirstLastTrip = useMemo(() => {
     const map = new Map<number, { firstTripId: number; lastTripId: number }>();
-    localBlocks.forEach((b) => {
+    effectiveBlocks.forEach((b) => {
       const sorted = (b.items || [])
         .filter((t: any) => t.lineCode || t.lineId)
         .sort((a: any, z: any) => (a.start_time ?? 0) - (z.start_time ?? 0));
@@ -622,7 +689,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         map.set(b.block_id, { firstTripId: sorted[0].tripId, lastTripId: sorted[sorted.length - 1].tripId });
     });
     return map;
-  }, [localBlocks]);
+  }, [effectiveBlocks]);
 
   // tripId → dutyId (para a aba Viagens)
   const tripToDutyId = useMemo(() => {
@@ -676,7 +743,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         events,
       };
     });
-  }, [duties, tripById, terminalMap, lineByCode, intervalPolicy]);
+  }, [duties, tripById, terminalMap, lineByCode, intervalPolicy, blockFirstLastTrip]);
 
   // ─── Flat events for Viagens tab (all vehicle events sorted chronologically) ───
   const allEventsSorted = useMemo((): PlanEvent[] => {
@@ -701,7 +768,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         'Duração Total': minToDuration(g.endTime - g.startTime),
         'Num Viagens': g.tripCount,
         'Km Total Bloco': g.totalKm.toFixed(2),
-        Evento: EVENT_CONFIG[ev.kind].label,
+        Evento: eventDisplayLabel(ev),
         Linha: ev.linha || '—',
         Sentido: ev.sentido || '—',
         'Início Evento': minToHHMM(ev.inicio),
@@ -728,7 +795,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         'Custo': g.totalCost ? Number(g.totalCost) : 0,
         'Custo Formatado': fmtCurrency(g.totalCost ?? 0),
         'Violações': g.violations ?? 0,
-        Evento: EVENT_CONFIG[ev.kind].label,
+        Evento: eventDisplayLabel(ev),
         Linha: ev.linha || '—',
         Sentido: ev.sentido || '—',
         'Início Evento': minToHHMM(ev.inicio),
@@ -743,7 +810,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const viagensExportRows = useMemo(() =>
     allEventsSorted.map((ev) => ({
       'ID Viagem': ev.tripId || '—',
-      Evento: EVENT_CONFIG[ev.kind].label,
+      Evento: eventDisplayLabel(ev),
       Linha: ev.linha || '—',
       Sentido: ev.sentido || '—',
       'Início': minToHHMM(ev.inicio),
@@ -851,11 +918,11 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   // ─── Undo: revert all unsaved moves back to the last persisted baseline ───
   const handleUndo = useCallback(() => {
     const persisted = backupBlocksRef.current;
-    const restored = JSON.parse(JSON.stringify(persisted));
+    const restored = cloneBlocks(persisted);
     localBlocksRef.current = restored;
     setLocalBlocks(restored);
     setNotification({ msg: 'Alterações descartadas.', sev: 'info' });
-  }, []);
+  }, [cloneBlocks]);
 
   // ─── Save ───
   const handleSave = async () => {
@@ -884,8 +951,9 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       const scheduleId = (res as any).id || (res as any).scheduleId;
       for (const { tripId, targetBlockId } of moves)
         await operationsApi.reassignTrip({ scheduleId, tripId, targetBlockId });
-      backupBlocksRef.current = JSON.parse(JSON.stringify(current));
-      setBackupBlocks(JSON.parse(JSON.stringify(current)));
+      const persistedSnapshot = cloneBlocks(current);
+      backupBlocksRef.current = persistedSnapshot;
+      setBackupBlocks(persistedSnapshot);
       setNotification({ msg: `${moves.length} viagem(ns) salva(s)!`, sev: 'success' });
     } catch {
       setNotification({ msg: 'Erro ao salvar. Tente novamente.', sev: 'error' });
@@ -1035,7 +1103,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       {toolbarControls}
 
       <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ px: 2, borderBottom: `1px solid ${theme.palette.divider}` }}>
-        <Tab icon={<IconBus size={16} />} iconPosition="start" label={`Gantt (${localBlocks.length})`} />
+        <Tab icon={<IconBus size={16} />} iconPosition="start" label={`Gantt (${effectiveBlocks.length})`} />
         <Tab icon={<IconTable size={16} />} iconPosition="start" label={`Veículos (${vehicleGroups.length})`} />
         <Tab icon={<IconUsers size={16} />} iconPosition="start" label={`Motoristas (${dutyGroups.length})`} />
         <Tab icon={<IconRoute size={16} />} iconPosition="start" label={`Viagens (${allEventsSorted.length})`} />
@@ -1165,14 +1233,14 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                 {allEventsSorted.map((ev, idx) => (
                   <TableRow key={idx} sx={{
                     bgcolor: ev.kind === 'descanso'
-                      ? alpha(theme.palette.warning.main, 0.05)
+                      ? alpha(ev.intervalKind === 'espera' ? theme.palette.text.secondary : theme.palette.warning.main, 0.05)
                       : ev.kind === 'soltura'
                       ? alpha(theme.palette.success.main, 0.04)
                       : ev.kind === 'recolhimento'
                       ? alpha(theme.palette.error.main, 0.04)
                       : 'inherit',
                   }}>
-                    <TableCell sx={{ py: 0.75 }}><EventKindChip kind={ev.kind} gap={ev.gapMinutes} /></TableCell>
+                    <TableCell sx={{ py: 0.75 }}><EventKindChip kind={ev.kind} gap={ev.gapMinutes} intervalKind={ev.intervalKind} /></TableCell>
                     <TableCell>
                       {ev.kind !== 'descanso' && ev.color ? (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

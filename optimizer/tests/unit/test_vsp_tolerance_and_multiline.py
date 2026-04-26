@@ -10,14 +10,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.domain.models import Trip, Block, VSPSolution
 from src.algorithms.vsp.greedy import GreedyVSP
+from src.algorithms.vsp.assignment import AssignmentVSP
 from src.algorithms.vsp.mcnf import MCNFVSP
+from src.algorithms.vsp.greedy import build_preferred_pairs, pairing_stats
 from src.algorithms.joint_opt import _try_merge_vsp_blocks
 
 
 # ─── Helpers ─────────────────────────────────────────────
 
-def make_trip(id: int, start: int, end: int, origin: int, dest: int, line_id=16, deadhead_to_dest=10):
+def make_trip(
+    id: int,
+    start: int,
+    end: int,
+    origin: int,
+    dest: int,
+    line_id=16,
+    deadhead_to_dest=10,
+    deadheads: dict[int, int] | None = None,
+    trip_group_id: int | None = None,
+):
     """Cria uma Trip mínima para testes de grafo VSP."""
+    deadhead_times = {dest: deadhead_to_dest}
+    if deadheads:
+        deadhead_times.update(deadheads)
     return Trip(
         id=id,
         line_id=line_id,
@@ -26,7 +41,8 @@ def make_trip(id: int, start: int, end: int, origin: int, dest: int, line_id=16,
         origin_id=origin,
         destination_id=dest,
         duration=end - start,
-        deadhead_times={dest: deadhead_to_dest},
+        deadhead_times=deadhead_times,
+        trip_group_id=trip_group_id,
     )
 
 
@@ -124,6 +140,46 @@ class TestMCNFVSPConnectionTolerance:
         solver = MCNFVSP(vsp_params={"min_layover_minutes": 5})
         sol = solver.solve(trips, [])
         assert len(sol.unassigned_trips) == 0
+
+
+class TestPreferredPairPressureInBaselineVSP:
+    def _build_pair_pressure_case(self) -> list[Trip]:
+        return [
+            make_trip(1, 0, 60, 1, 2, deadheads={1: 120, 2: 8}, trip_group_id=700),
+            make_trip(2, 180, 240, 2, 1, deadheads={1: 8, 2: 8}, trip_group_id=700),
+            make_trip(3, 70, 130, 2, 2, deadheads={1: 8, 2: 8}),
+        ]
+
+    @pytest.mark.parametrize("solver_cls", [AssignmentVSP, MCNFVSP])
+    def test_preserve_preferred_pairs_reduces_boundary_split(self, solver_cls):
+        trips = self._build_pair_pressure_case()
+        preferred_pairs = build_preferred_pairs(trips, min_layover=8, max_pair_window=240)
+
+        unguarded = solver_cls(
+            vsp_params={
+                "min_layover_minutes": 8,
+                "preserve_preferred_pairs": False,
+                "allow_multi_line_block": True,
+            }
+        ).solve(trips, [])
+        guarded = solver_cls(
+            vsp_params={
+                "min_layover_minutes": 8,
+                "preserve_preferred_pairs": True,
+                "preferred_pair_window_minutes": 240,
+                "allow_multi_line_block": True,
+            }
+        ).solve(trips, [])
+
+        unguarded_stats = pairing_stats(unguarded.blocks, preferred_pairs)
+        guarded_stats = pairing_stats(guarded.blocks, preferred_pairs)
+
+        assert guarded_stats["preferred_pair_count"] == 1
+        assert guarded_stats["paired_connections_followed"] == 1
+        assert guarded_stats["preferred_pair_breaks"] == 0
+        assert unguarded_stats["preferred_pair_breaks"] == 1
+        assert guarded_stats["preferred_pair_breaks"] < unguarded_stats["preferred_pair_breaks"]
+        assert any([trip.id for trip in block.trips] == [1, 2] for block in guarded.blocks)
 
 
 # ─── _try_merge_vsp_blocks (joint_opt) ───────────────────

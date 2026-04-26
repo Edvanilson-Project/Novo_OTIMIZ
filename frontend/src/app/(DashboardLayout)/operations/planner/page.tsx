@@ -95,13 +95,20 @@ export default function PlannerPage() {
   const dynamicRules = useMemo(() => parameters?.dynamic_rules || [], [parameters?.dynamic_rules]);
 
   const intervalPolicy: TripIntervalPolicy = useMemo(
-    () => ({
-      minBreakMinutes: parameters?.min_break_minutes ?? 30,
-      mealBreakMinutes: parameters?.meal_break_minutes ?? 60,
-      minLayoverMinutes: parameters?.min_layover_minutes ?? 8,
-      connectionToleranceMinutes: parameters?.connection_tolerance_minutes ?? 0,
-    }),
-    [parameters]
+    () => {
+      const summary = schedule?.resultSummary ?? {};
+      const meta = summary.metadata ?? summary.meta ?? {};
+      const input = meta.input ?? summary.resolved_params ?? {};
+      const cct = input.cct_params ?? input.cct ?? {};
+      const vsp = input.vsp_params ?? input.vsp ?? {};
+      return {
+        minBreakMinutes: cct.min_break_minutes ?? parameters?.min_break_minutes ?? 30,
+        mealBreakMinutes: cct.meal_break_minutes ?? parameters?.meal_break_minutes ?? 60,
+        minLayoverMinutes: vsp.min_layover_minutes ?? cct.min_layover_minutes ?? parameters?.min_layover_minutes ?? 8,
+        connectionToleranceMinutes: cct.connection_tolerance_minutes ?? parameters?.connection_tolerance_minutes ?? 0,
+      };
+    },
+    [parameters, schedule]
   );
 
   useEffect(() => {
@@ -459,7 +466,8 @@ export default function PlannerPage() {
 
             <Suspense fallback={<CircularProgress />}>
               <TabGantt
-                res={schedule?.resultSummary ?? (schedule?.status === 'completed' ? schedule : null)}
+                key={schedule?.id ?? 'no-schedule'}
+                res={schedule?.status === 'completed' ? schedule : null}
                 lines={lines}
                 terminals={terminals}
                 intervalPolicy={intervalPolicy}

@@ -15,8 +15,11 @@ import { TenantContext } from '../../common/context/tenant-context';
 @Injectable()
 export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
+  private scheduleCache = new Map<number, { data: any; timestamp: number }>();
+  private readonly CACHE_TTL_MS = 15000;
   private readonly OPTIMIZER_URL = process.env.OPTIMIZER_URL || 'http://localhost:8000';
   private readonly INTERNAL_KEY: string;
+  private readonly DETAIL_LIMIT = 10;
 
   constructor(
     @InjectRepository(Trip) private tripRepo: Repository<Trip>,
@@ -78,6 +81,16 @@ export class OptimizationService implements OnModuleInit {
 
       if (!trips.length) throw new Error('Nenhuma viagem encontrada para otimização.');
 
+      const cctParams = this.buildCctParams(params);
+      const vspParams = this.buildVspParams(params, cctParams);
+      const forceRoundTrip =
+        Boolean(params?.force_round_trip) ||
+        Boolean(cctParams.enforce_trip_groups_hard) ||
+        Boolean(cctParams.operator_pairing_hard);
+      const allowVehicleSwap = cctParams.operator_single_vehicle_only
+        ? false
+        : (params?.allow_vehicle_swap ?? true);
+
       // 3. Chamar API Python (FastAPI/Celery)
       const payload = {
         trips: trips.map((t) => {
@@ -118,20 +131,15 @@ export class OptimizationService implements OnModuleInit {
             fixed_cost: Number(params?.vehicle_fixed_cost || 800),
           },
         ],
-        cct_params: this.buildCctParams(params),
+        cct_params: cctParams,
         optimization_params: {
           cost_vehicle: params?.cost_vehicle ?? 1000.0,
           cost_km: params?.cost_km ?? 1.0,
           cost_duty: params?.cost_duty ?? 500.0,
+          force_round_trip: forceRoundTrip,
+          allow_vehicle_swap: allowVehicleSwap,
         },
-        vsp_params: {
-          force_round_trip: params?.force_round_trip ?? true,
-          allow_vehicle_swap: params?.allow_vehicle_swap ?? true,
-          preferred_pair_window_minutes: params?.preferred_pair_window_minutes ?? 30,
-          preserve_preferred_pairs: params?.preserve_preferred_pairs ?? true,
-          vehicle_idle_gap_behavior: params?.vehicle_idle_gap_behavior ?? 'solver_decides',
-          vehicle_idle_gap_threshold_minutes: params?.vehicle_idle_gap_threshold_minutes ?? null,
-        },
+        vsp_params: vspParams,
         time_budget_s: params?.time_budget_s ?? null,
         algorithm: algorithm || 'hybrid_pipeline',
         company_id: companyId,
@@ -184,12 +192,37 @@ export class OptimizationService implements OnModuleInit {
 
   private async pollOptimizerTask(taskId: string, scheduleId: number, companyId: number) {
     const maxAttempts = 120; // 10 minutos (5s * 120)
-    const maxConsecutiveErrors = 5;
+    const maxConsecutiveErrors = 12;
+    const pollIntervalMs = 5000;
     let attempts = 0;
     let consecutiveErrors = 0;
     let done = false;
+    let nextTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const interval = setInterval(async () => {
+    const clearNextTimer = () => {
+      if (nextTimer) {
+        clearTimeout(nextTimer);
+        nextTimer = null;
+      }
+    };
+
+    const scheduleNextPoll = () => {
+      if (done) return;
+      if (attempts >= maxAttempts) {
+        done = true;
+        clearNextTimer();
+        void this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
+        this.gateway.notifyOptimizationStale(companyId, { scheduleId, taskId });
+        this.gateway.notifyOptimizationFailed(companyId, 'Timeout na otimização.');
+        return;
+      }
+
+      nextTimer = setTimeout(() => {
+        void runPoll();
+      }, pollIntervalMs);
+    };
+
+    const runPoll = async () => {
       if (done) return;
       attempts++;
       try {
@@ -202,12 +235,16 @@ export class OptimizationService implements OnModuleInit {
 
         if (data.status === 'completed') {
           done = true;
-          clearInterval(interval);
+          clearNextTimer();
           await this.persistResults(scheduleId, companyId, data.result);
-          this.gateway.notifyOptimizationFinished(companyId, scheduleId, data.result);
+          // Invalidar cache para que o usuário veja o novo resultado imediatamente
+          this.scheduleCache.delete(companyId);
+          // Enviamos apenas um sinal de conclusão leve via Socket.io para evitar OOM no envio.
+          // O Frontend buscará os dados completos via API (fetchData).
+          this.gateway.notifyOptimizationFinished(companyId, scheduleId, { status: 'completed' });
         } else if (data.status === 'failed') {
           done = true;
-          clearInterval(interval);
+          clearNextTimer();
           const errMsg = data.error?.message || data.error?.error_message || 'Erro no motor de otimização.';
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
           this.gateway.notifyOptimizationFailed(companyId, errMsg);
@@ -221,12 +258,8 @@ export class OptimizationService implements OnModuleInit {
           });
         }
 
-        if (attempts >= maxAttempts && !done) {
-          done = true;
-          clearInterval(interval);
-          await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
-          this.gateway.notifyOptimizationStale(companyId, { scheduleId, taskId });
-          this.gateway.notifyOptimizationFailed(companyId, 'Timeout na otimização.');
+        if (!done) {
+          scheduleNextPoll();
         }
       } catch (error) {
         if (done) return;
@@ -235,13 +268,20 @@ export class OptimizationService implements OnModuleInit {
 
         if (consecutiveErrors >= maxConsecutiveErrors) {
           done = true;
-          clearInterval(interval);
+          clearNextTimer();
           this.logger.error(`Falha permanente no polling do task ${taskId}`);
           await this.scheduleRepo.update(scheduleId, { status: ScheduleStatus.FAILED });
           this.gateway.notifyOptimizationFailed(companyId, 'Erro de comunicação com o solver.');
+          return;
+        }
+
+        if (!done) {
+          scheduleNextPoll();
         }
       }
-    }, 5000);
+    };
+
+    void runPoll();
   }
 
   private async persistResults(scheduleId: number, companyId: number, result: any) {
@@ -249,53 +289,97 @@ export class OptimizationService implements OnModuleInit {
 
     try {
     await this.dataSource.transaction(async (manager) => {
-      const solverExplanation = result.solver_explanation ?? null;
+      const solverExplanation = this.summarizeSolverExplanation(result.solver_explanation ?? null);
       const hardIssues = Array.isArray(solverExplanation?.issues?.hard) ? solverExplanation.issues.hard : [];
       const softIssues = Array.isArray(solverExplanation?.issues?.soft) ? solverExplanation.issues.soft : [];
+      const hardIssueCount = Number(solverExplanation?.issues?.hard_count ?? hardIssues.length ?? 0);
+      const softIssueCount = Number(solverExplanation?.issues?.soft_count ?? softIssues.length ?? 0);
       const reportedViolations = Math.max(Number(result.cct_violations ?? 0), hardIssues.length);
 
-      // 1. Salvar Blocos (Veículos)
-      const blocks = (result.blocks || []).map((b: any) =>
-        manager.create(BlockAssignment, {
-          companyId,
-          scheduleId,
-          blockId: b.block_id ?? b.id ?? 0,
-          tripIds: (b.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
-          cost: b.total_cost ?? b.activation_cost ?? 0,
-          metadata: b,
-        }),
-      );
-      await manager.save(BlockAssignment, blocks);
+      const BATCH_SIZE = 500;
 
-      // 2. Salvar Duties (Motoristas)
-      const duties = (result.duties || []).map((d: any) =>
-        manager.create(DutyAssignment, {
-          companyId,
-          scheduleId,
-          dutyId: d.duty_id ?? d.id ?? 0,
-          tripIds: (d.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
-          cost: d.total_cost ?? 0,
-          metadata: d,
-        }),
-      );
-      await manager.save(DutyAssignment, duties);
+      // 1. Salvar Blocos (Veículos) em lotes
+      const blocksRaw = result.blocks || [];
+      for (let i = 0; i < blocksRaw.length; i += BATCH_SIZE) {
+        const chunk = blocksRaw.slice(i, i + BATCH_SIZE);
+        const blocks = chunk.map((b: any) =>
+          manager.create(BlockAssignment, {
+            companyId,
+            scheduleId,
+            blockId: b.block_id ?? b.id ?? 0,
+            tripIds: (b.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
+            cost: b.total_cost ?? b.activation_cost ?? 0,
+            // CORREÇÃO: Apenas os campos essenciais, sem usar "...b"
+            metadata: {
+              start_time: b.start_time,
+              end_time: b.end_time,
+              activation_cost: b.activation_cost,
+              deadhead_minutes: b.deadhead_minutes,
+              idle_minutes: b.idle_minutes,
+              start_depot_id: b.start_depot_id,
+              end_depot_id: b.end_depot_id
+            },
+          }),
+        );
+        await manager.save(BlockAssignment, blocks);
+      }
+
+      // 2. Salvar Duties (Motoristas) em lotes
+      const dutiesRaw = result.duties || [];
+      for (let i = 0; i < dutiesRaw.length; i += BATCH_SIZE) {
+        const chunk = dutiesRaw.slice(i, i + BATCH_SIZE);
+        const duties = chunk.map((d: any) => {
+          const dutyTripIds = Array.isArray(d.trip_ids)
+            ? d.trip_ids
+            : (d.trips || []).map((t: any) => (typeof t === 'number' ? t : (t.trip_id ?? t.id)));
+          return manager.create(DutyAssignment, {
+            companyId,
+            scheduleId,
+            dutyId: d.duty_id ?? d.id ?? 0,
+            tripIds: dutyTripIds.filter((id: any) => Number.isFinite(Number(id)) && Number(id) > 0).map((id: any) => Number(id)),
+            cost: d.total_cost ?? 0,
+            // CORREÇÃO: Apenas os campos essenciais, sem usar "...d"
+            metadata: {
+              work_time: d.work_time,
+              spread_time: d.spread_time,
+              start_time: d.start_time,
+              end_time: d.end_time,
+              work_cost: d.work_cost,
+              overtime_cost: d.overtime_cost,
+              overtime_minutes: d.overtime_minutes,
+              shift_violations: d.shift_violations,
+              rest_violations: d.rest_violations
+            },
+          });
+        });
+        await manager.save(DutyAssignment, duties);
+      }
 
       // 3. Atualizar Header do Schedule
+      const scheduleMetadata: Record<string, any> = {
+        solver_explanation: solverExplanation,
+        hard_issue_count: hardIssueCount,
+        soft_issue_count: softIssueCount,
+        unassigned_trips: result.unassigned_trips ?? 0,
+        cost_breakdown: this.summarizeCostBreakdown(result.cost_breakdown ?? {}),
+        phase_summary: result.phase_summary ?? result.meta?.phase_summary ?? null,
+        trip_group_audit: this.summarizeTripGroupAudit(result.trip_group_audit ?? result.meta?.trip_group_audit ?? null),
+        reproducibility: result.reproducibility ?? result.meta?.reproducibility ?? null,
+        performance: result.performance ?? result.meta?.performance ?? null,
+        hard_constraint_report: result.meta?.hard_constraint_report ?? null,
+        operational_kpis: result.meta?.operational_kpis ?? null,
+        resolved_params: result.meta?.input ?? null,
+        num_vehicles: result.vehicles ?? 0,
+        num_duties: result.crew ?? 0,
+        total_trips: result.total_trips ?? 0,
+        algorithm: result.vsp_algorithm ?? '',
+      };
+
       await manager.update(Schedule, scheduleId, {
         status: ScheduleStatus.COMPLETED,
         totalCost: result.total_cost ?? 0,
         cctViolations: reportedViolations,
-        metadata: {
-          solver_explanation: solverExplanation,
-          hard_issue_count: hardIssues.length,
-          soft_issue_count: softIssues.length,
-          unassigned_trips: result.unassigned_trips ?? 0,
-          cost_breakdown: result.cost_breakdown ?? {},
-          num_vehicles: result.vehicles ?? 0,
-          num_duties: result.crew ?? 0,
-          total_trips: result.total_trips ?? 0,
-          algorithm: result.vsp_algorithm ?? '',
-        },
+        metadata: scheduleMetadata as any,
       });
     });
     } catch (err: any) {
@@ -376,6 +460,9 @@ export class OptimizationService implements OnModuleInit {
           await manager.update(Schedule, scheduleId, { totalCost });
         }
 
+        // CORREÇÃO: Limpar o cache para forçar a re-hidratação no próximo request
+        this.scheduleCache.delete(companyId);
+
         return {
           isValid: violations.length === 0,
           violations,
@@ -383,8 +470,9 @@ export class OptimizationService implements OnModuleInit {
           costBreakdown: whatIfResult.cost_breakdown,
         };
       } catch (error) {
-        this.logger.error(`Falha no What-If Python: ${error.message}`);
-        // Fallback: Mantém os dados locais mas avisa sobre a falha no recálculo
+        // CORREÇÃO: Limpar o cache para forçar a re-hidratação no próximo request
+        this.scheduleCache.delete(companyId);
+
         return {
           isValid: violations.length === 0,
           violations,
@@ -493,7 +581,16 @@ export class OptimizationService implements OnModuleInit {
 
   private buildCctParams(params: CompanyParameters | null): Record<string, any> {
     if (!params) {
-      return { max_work_minutes: 480, max_shift_minutes: 720, meal_break_minutes: 60 };
+      return {
+        max_work_minutes: 480,
+        max_shift_minutes: 720,
+        meal_break_minutes: 60,
+        enforce_trip_groups_hard: true,
+        operator_single_vehicle_only: true,
+        apply_cct: true,
+        strict_hard_validation: true,
+        strict_union_rules: true,
+      };
     }
 
     // Envia para o Python APENAS campos com valor preenchido (non-null).
@@ -533,30 +630,160 @@ export class OptimizationService implements OnModuleInit {
     if (!result.max_work_minutes) result.max_work_minutes = params.max_driving_time_minutes || 480;
     if (!result.max_shift_minutes) result.max_shift_minutes = params.max_shift_minutes || 720;
     if (!result.meal_break_minutes) result.meal_break_minutes = params.meal_break_minutes || 60;
+    if (params.force_round_trip) {
+      result.enforce_trip_groups_hard = true;
+      result.operator_pairing_hard = true;
+    }
+    if (params.allow_vehicle_swap === false) {
+      result.operator_single_vehicle_only = true;
+    }
+    if (result.apply_cct === undefined) result.apply_cct = true;
+    if (result.strict_hard_validation === undefined) result.strict_hard_validation = true;
+    if (result.strict_union_rules === undefined) result.strict_union_rules = true;
+
+    return result;
+  }
+
+  private buildVspParams(params: CompanyParameters | null, cctParams: Record<string, any> = {}): Record<string, any> {
+    if (!params) {
+      return {
+        force_round_trip: true,
+        allow_vehicle_swap: true,
+        preferred_pair_window_minutes: 30,
+        preserve_preferred_pairs: true,
+      };
+    }
+
+    const vspFields: (keyof CompanyParameters)[] = [
+      'time_budget_s', 'random_seed', 'max_vehicle_shift_minutes', 'max_vehicles',
+      'min_layover_minutes', 'deadhead_cost_per_minute', 'idle_cost_per_minute',
+      'allow_multi_line_block', 'allow_vehicle_split_shifts',
+      'split_shift_min_gap_minutes', 'split_shift_max_gap_minutes',
+      'max_simultaneous_chargers', 'enable_column_generation', 'pricing_enabled',
+      'use_set_covering', 'min_workpiece_minutes', 'max_workpiece_minutes',
+      'min_trips_per_piece', 'max_trips_per_piece', 'peak_energy_cost_per_kwh',
+      'offpeak_energy_cost_per_kwh', 'preferred_pair_window_minutes',
+      'preserve_preferred_pairs', 'pair_break_penalty', 'paired_trip_bonus',
+      'max_connection_cost_for_reuse_ratio', 'max_candidate_successors_per_task',
+      'max_generated_columns', 'max_pricing_iterations', 'max_pricing_additions',
+      'vehicle_idle_gap_behavior', 'vehicle_idle_gap_threshold_minutes',
+      'goal_weights',
+    ];
+
+    const result: Record<string, any> = {
+      force_round_trip: params.force_round_trip ?? true,
+      allow_vehicle_swap: params.allow_vehicle_swap ?? true,
+      fixed_vehicle_activation_cost: params.vehicle_fixed_cost ?? 800.0,
+      preferred_pair_window_minutes: params.preferred_pair_window_minutes ?? 30,
+      preserve_preferred_pairs: params.preserve_preferred_pairs ?? true,
+      vehicle_idle_gap_behavior: params.vehicle_idle_gap_behavior ?? 'solver_decides',
+    };
+
+    for (const field of vspFields) {
+      const value = params[field];
+      if (value !== null && value !== undefined) {
+        result[field] = value;
+      }
+    }
+
+    if (cctParams.connection_tolerance_minutes !== undefined && result.connection_tolerance_minutes === undefined) {
+      result.connection_tolerance_minutes = cctParams.connection_tolerance_minutes;
+    }
+    if (cctParams.strict_hard_validation !== undefined && result.strict_hard_validation === undefined) {
+      result.strict_hard_validation = cctParams.strict_hard_validation;
+    }
+    if (cctParams.enforce_same_depot_start_end !== undefined && result.same_depot_required === undefined) {
+      result.same_depot_required = Boolean(cctParams.enforce_same_depot_start_end);
+    }
+    if (cctParams.max_shift_minutes !== undefined && result.max_vehicle_shift_minutes === undefined) {
+      result.max_vehicle_shift_minutes = cctParams.max_shift_minutes;
+    }
+    if (cctParams.min_layover_minutes !== undefined) {
+      result.min_layover_minutes = cctParams.min_layover_minutes;
+    }
+    if (cctParams.min_break_minutes !== undefined) {
+      result.min_layover_minutes = Math.max(
+        Number(result.min_layover_minutes ?? 0),
+        Number(cctParams.min_break_minutes),
+      );
+    }
+    if (cctParams.enforce_trip_groups_hard || cctParams.operator_pairing_hard) {
+      result.force_round_trip = true;
+      result.preserve_preferred_pairs = true;
+    }
+    if (cctParams.operator_single_vehicle_only) {
+      result.allow_vehicle_swap = false;
+    }
 
     return result;
   }
 
   async getLatestSchedule(companyId: number) {
+    const cached = this.scheduleCache.get(companyId);
+    const now = Date.now();
+    if (cached) {
+      if ((now - cached.timestamp) < this.CACHE_TTL_MS) {
+        return cached.data; // Cache válido
+      } else {
+        this.scheduleCache.delete(companyId); // CORREÇÃO: Remove ativamente da RAM se expirou
+      }
+    }
+
     const schedule = await this.scheduleRepo.findOne({
       where: { companyId, status: ScheduleStatus.COMPLETED },
-      relations: ['blocks', 'duties'],
       order: { createdAt: 'DESC' },
     });
 
     if (!schedule) return null;
 
+    const [blocks, duties] = await Promise.all([
+      this.dataSource.getRepository(BlockAssignment).find({
+        where: { scheduleId: schedule.id, companyId },
+        order: { blockId: 'ASC' },
+      }),
+      this.dataSource.getRepository(DutyAssignment).find({
+        where: { scheduleId: schedule.id, companyId },
+        order: { dutyId: 'ASC' },
+      }),
+    ]);
+
     // Hidratar trips completos dentro de cada block
-    const allTripIds = schedule.blocks.flatMap((b) => b.tripIds || []);
+    const allTripIds = blocks.flatMap((b) => b.tripIds || []);
     const uniqueTripIds = [...new Set(allTripIds)];
     const tripMap = new Map<number, Trip>();
 
     if (uniqueTripIds.length > 0) {
-      const trips = await this.tripRepo.find({ where: { id: In(uniqueTripIds) } });
+      const CHUNK_SIZE = 1000;
+      const trips: Trip[] = [];
+
+      // Busca em lotes e apenas com colunas necessárias para reduzir memória.
+      for (let i = 0; i < uniqueTripIds.length; i += CHUNK_SIZE) {
+        const chunk = uniqueTripIds.slice(i, i + CHUNK_SIZE);
+        const chunkTrips = await this.tripRepo.find({
+          where: { id: In(chunk) },
+          select: {
+            id: true,
+            tripId: true,
+            lineId: true,
+            lineCode: true,
+            pairId: true,
+            tripGroupId: true,
+            direction: true,
+            startTime: true,
+            endTime: true,
+            originId: true,
+            destinationId: true,
+            distanceKm: true,
+            duration: true,
+          },
+        });
+        trips.push(...chunkTrips);
+      }
+
       trips.forEach((t) => tripMap.set(t.id, t));
     }
 
-    const hydratedBlocks = (schedule.blocks || []).map((block) => {
+    const hydratedBlocks = blocks.map((block) => {
       const meta = (block.metadata || {}) as any;
       const st = meta.start_time ?? 0;
       const et = meta.end_time ?? 0;
@@ -571,6 +798,11 @@ export class OptimizationService implements OnModuleInit {
           end_time: Number(t.endTime) < Number(t.startTime) ? Number(t.endTime) + 1440 : Number(t.endTime),
           line_id: this.resolveLineId(t.lineId, t.lineCode, null),
           line_code: t.lineCode ?? null,
+          trip_group_id: t.tripGroupId
+            ? Number(t.tripGroupId)
+            : t.pairId
+              ? parseInt(t.pairId.replace(/\D/g, ''), 10) || null
+              : null,
           origin_id: Number(t.originId),
           destination_id: Number(t.destinationId),
           duration: Number(t.duration),
@@ -589,12 +821,26 @@ export class OptimizationService implements OnModuleInit {
         end_time: et,
         total_cost: Number(block.cost),
         trips: hydratedTrips,
-        metadata: meta,
+        // Limpeza agressiva: enviamos apenas o necessário para o Gantt
+        metadata: {
+          activation_cost: meta.activation_cost,
+          deadhead_minutes: meta.deadhead_minutes,
+          idle_minutes: meta.idle_minutes,
+          start_depot_id: meta.start_depot_id,
+          end_depot_id: meta.end_depot_id,
+          // ...meta // Comentado para evitar carregar dumps pesados do solver no Gantt
+        },
       };
     }).sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
 
     // Monta resultSummary a partir do metadata salvo
     const meta = (schedule.metadata || {}) as any;
+    const rawMeta = (meta.meta || {}) as any;
+    const resolvedParams = meta.resolved_params ?? rawMeta.input ?? null;
+    const lightMetadata = {
+      input: resolvedParams,
+      solver_version: meta.solver_version ?? rawMeta.solver_version ?? null,
+    };
     const resultSummary = {
       num_vehicles: meta.num_vehicles ?? 0,
       vehicles: meta.num_vehicles ?? 0,
@@ -610,10 +856,17 @@ export class OptimizationService implements OnModuleInit {
       softIssueCount: meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length,
       hasHardViolations: (((meta.solver_explanation || {}).issues || {}).hard || []).length > 0,
       solverStatus: (meta.solver_explanation || {}).status ?? null,
-      costBreakdown: meta.cost_breakdown ?? null,
-      solverExplanation: meta.solver_explanation ?? null,
-      blocks: hydratedBlocks,
-      duties: schedule.duties.map((d) => {
+      costBreakdown: this.summarizeCostBreakdown(meta.cost_breakdown ?? null),
+      solverExplanation: null, // meta.solver_explanation ?? null, // Removido do polling por ser muito pesado
+      phaseSummary: null, // meta.phase_summary ?? null,
+      tripGroupAudit: null, // meta.trip_group_audit ?? null,
+      reproducibility: null,
+      performance: null,
+      hardConstraintReport: null,
+      metadata: lightMetadata,
+      meta: lightMetadata,
+      // blocks: hydratedBlocks, // REMOVIDO: Já enviado na raiz do objeto finalResult
+      duties: duties.map((d) => {
         const dm = (d.metadata || {}) as any;
         return {
           duty_id: d.dutyId,
@@ -632,7 +885,7 @@ export class OptimizationService implements OnModuleInit {
       }),
     };
 
-    return {
+    const finalResult = {
       id: schedule.id,
       companyId: schedule.companyId,
       status: schedule.status,
@@ -643,6 +896,11 @@ export class OptimizationService implements OnModuleInit {
       blocks: hydratedBlocks,
       resultSummary,
     };
+
+    // 4. Salvar no Cache antes de retornar
+    this.scheduleCache.set(companyId, { data: finalResult, timestamp: Date.now() });
+
+    return finalResult;
   }
 
   private resolveLineId(lineId: unknown, lineCode: unknown, fallback: number | null): number | null {
@@ -685,5 +943,74 @@ export class OptimizationService implements OnModuleInit {
 
     const parsed = Number(digits);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private summarizeCostBreakdown(costBreakdown: any) {
+    if (!costBreakdown || typeof costBreakdown !== 'object') return {};
+
+    const summary: Record<string, any> = {};
+    for (const [key, value] of Object.entries(costBreakdown)) {
+      if (key === 'total') {
+        summary[key] = value;
+        continue;
+      }
+      if (key === 'shares' && value && typeof value === 'object') {
+        summary[key] = { ...value };
+        continue;
+      }
+      if (!value || typeof value !== 'object') continue;
+      summary[key] = Object.fromEntries(
+        Object.entries(value).filter(([bucketKey]) => bucketKey !== 'blocks' && bucketKey !== 'duties')
+      );
+    }
+    return summary;
+  }
+
+  private summarizeSolverExplanation(explanation: any) {
+    if (!explanation || typeof explanation !== 'object') return null;
+
+    const hard = Array.isArray(explanation?.issues?.hard) ? explanation.issues.hard : [];
+    const soft = Array.isArray(explanation?.issues?.soft) ? explanation.issues.soft : [];
+    const trimIssue = (issue: any) => {
+      if (!issue || typeof issue !== 'object') return issue;
+      return {
+        raw: issue.raw ?? null,
+        code: issue.code ?? null,
+        severity: issue.severity ?? null,
+        phase: issue.phase ?? null,
+        message: issue.message ?? null,
+        refs: Array.isArray(issue.refs) ? issue.refs.slice(0, 3) : [],
+      };
+    };
+
+    return {
+      status: explanation.status ?? null,
+      headline: explanation.headline ?? null,
+      summary: Array.isArray(explanation.summary) ? explanation.summary.slice(0, 5) : [],
+      issues: {
+        hard: hard.slice(0, this.DETAIL_LIMIT).map(trimIssue),
+        soft: soft.slice(0, this.DETAIL_LIMIT).map(trimIssue),
+        hard_count: Number(explanation?.issues?.hard_count ?? hard.length ?? 0),
+        soft_count: Number(explanation?.issues?.soft_count ?? soft.length ?? 0),
+      },
+      recommendations: Array.isArray(explanation.recommendations)
+        ? explanation.recommendations.slice(0, 5)
+        : [],
+    };
+  }
+
+  private summarizeTripGroupAudit(audit: any) {
+    if (!audit || typeof audit !== 'object') return null;
+    return {
+      groups_total: audit.groups_total ?? null,
+      groups_fully_assigned: audit.groups_fully_assigned ?? null,
+      same_block_groups: audit.same_block_groups ?? null,
+      same_duty_groups: audit.same_duty_groups ?? null,
+      same_roster_groups: audit.same_roster_groups ?? null,
+      split_groups: audit.split_groups ?? null,
+      missing_groups: audit.missing_groups ?? null,
+      same_roster_ratio: audit.same_roster_ratio ?? null,
+      sample_splits: Array.isArray(audit.sample_splits) ? audit.sample_splits.slice(0, this.DETAIL_LIMIT) : [],
+    };
   }
 }

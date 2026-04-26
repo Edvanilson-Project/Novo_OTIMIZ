@@ -181,7 +181,13 @@ def _build_post_opt_metrics(
     cross_day_duties = 0
     preferred_pair_count = 0
     preferred_pair_breaks = 0
+    boundary_preferred_pair_breaks = 0
     duty_pair_splits = 0
+    trip_group_total = 0
+    trip_group_same_roster = 0
+    trip_group_same_duty = 0
+    trip_group_same_block = 0
+    trip_group_split_groups = 0
 
     for duty in duties:
         unique_sources: List[int] = []
@@ -224,10 +230,14 @@ def _build_post_opt_metrics(
         preferred_pair_breaks = len(unique_pairs - consecutive_pairs)
 
         duty_by_trip: Dict[int, int] = {}
+        trip_positions: Dict[int, Tuple[int, int, int]] = {}
         for duty in duties:
             for task in getattr(duty, "tasks", []):
                 for trip in task.trips:
                     duty_by_trip[int(trip.id)] = int(duty.id)
+        for block in (vsp_sol.blocks or []):
+            for index, trip in enumerate(block.trips):
+                trip_positions[int(trip.id)] = (int(block.id), int(index), int(len(block.trips)))
         seen_pairs: Set[Tuple[int, int]] = set()
         for trip_id, pair_id in preferred_pairs.items():
             signature = tuple(sorted((int(trip_id), int(pair_id))))
@@ -236,6 +246,56 @@ def _build_post_opt_metrics(
             seen_pairs.add(signature)
             if duty_by_trip.get(signature[0]) != duty_by_trip.get(signature[1]):
                 duty_pair_splits += 1
+            pos_a = trip_positions.get(signature[0])
+            pos_b = trip_positions.get(signature[1])
+            if pos_a is not None and pos_b is not None:
+                same_block = pos_a[0] == pos_b[0]
+                boundary_a = pos_a[1] == 0 or pos_a[1] == pos_a[2] - 1
+                boundary_b = pos_b[1] == 0 or pos_b[1] == pos_b[2] - 1
+                if not same_block and (boundary_a or boundary_b):
+                    boundary_preferred_pair_breaks += 1
+
+        group_map: Dict[int, Dict[str, set[int]]] = {}
+        for trip in trips:
+            group_id = getattr(trip, "trip_group_id", None)
+            if group_id is None:
+                continue
+            parsed_group_id = int(group_id)
+            entry = group_map.setdefault(
+                parsed_group_id,
+                {"blocks": set(), "duties": set(), "rosters": set()},
+            )
+            trip_block = trip_positions.get(int(trip.id))
+            if trip_block is not None:
+                entry["blocks"].add(int(trip_block[0]))
+            duty_id = duty_by_trip.get(int(trip.id))
+            if duty_id is not None:
+                entry["duties"].add(int(duty_id))
+                for duty in duties:
+                    if int(duty.id) == int(duty_id):
+                        roster_id = duty.meta.get("roster_id")
+                        if roster_id is not None:
+                            entry["rosters"].add(int(roster_id))
+                        break
+
+        trip_group_total = len(group_map)
+        for entry in group_map.values():
+            same_block = len(entry["blocks"]) <= 1
+            same_duty = len(entry["duties"]) <= 1
+            same_roster = len(entry["rosters"]) <= 1 if entry["rosters"] else False
+            if same_block:
+                trip_group_same_block += 1
+            if same_duty:
+                trip_group_same_duty += 1
+            if same_roster:
+                trip_group_same_roster += 1
+            if not same_roster and trip_group_total > 0:
+                trip_group_split_groups += 1
+
+    preferred_pair_pressure = (
+        preferred_pair_breaks * 1000
+        + boundary_preferred_pair_breaks * 3000
+    )
 
     fragmentation_score = (
         len(duties) * 10000
@@ -263,31 +323,87 @@ def _build_post_opt_metrics(
         "csp_cost": round(evaluator.csp_cost(csp_sol), 2),
         "preferred_pair_count": preferred_pair_count,
         "preferred_pair_breaks": preferred_pair_breaks,
+        "boundary_preferred_pair_breaks": boundary_preferred_pair_breaks,
+        "preferred_pair_pressure": preferred_pair_pressure,
         "duty_pair_splits": duty_pair_splits,
+        "trip_group_total": trip_group_total,
+        "trip_group_same_block": trip_group_same_block,
+        "trip_group_same_duty": trip_group_same_duty,
+        "trip_group_same_roster": trip_group_same_roster,
+        "trip_group_split_groups": trip_group_split_groups,
     }
 
 
 def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    current_pair_pressure = int(
+        current.get(
+            "preferred_pair_pressure",
+            current.get("preferred_pair_breaks", 0) * 1000 + current.get("boundary_preferred_pair_breaks", 0) * 3000,
+        )
+    )
+    candidate_pair_pressure = int(
+        candidate.get(
+            "preferred_pair_pressure",
+            candidate.get("preferred_pair_breaks", 0) * 1000 + candidate.get("boundary_preferred_pair_breaks", 0) * 3000,
+        )
+    )
+
     if candidate["unassigned_trips"] > current["unassigned_trips"]:
         return False
     if candidate["uncovered_blocks"] > current["uncovered_blocks"]:
         return False
     if candidate["violations"] > current["violations"]:
         return False
-    if candidate["vehicles"] > current["vehicles"]:
+    if candidate.get("trip_group_split_groups", 0) > current.get("trip_group_split_groups", 0):
         return False
-    if candidate["crew"] > current["crew"]:
+    if candidate["vehicles"] > current["vehicles"] + 1:
         return False
-    if candidate.get("preferred_pair_breaks", 0) > current.get("preferred_pair_breaks", 0):
+    if candidate["crew"] > current["crew"] and candidate["vehicles"] <= current["vehicles"]:
+        return False
+    if candidate["vehicles"] > current["vehicles"] and candidate["crew"] > current["crew"] + 1:
+        return False
+    if candidate_pair_pressure > current_pair_pressure:
         return False
     if candidate.get("duty_pair_splits", 0) > current.get("duty_pair_splits", 0):
         return False
+
+    if candidate["vehicles"] > current["vehicles"]:
+        if candidate_pair_pressure >= current_pair_pressure:
+            return False
+        current_rank = (
+            current["violations"],
+            current.get("trip_group_split_groups", 0),
+            current_pair_pressure,
+            current.get("duty_pair_splits", 0),
+            current["crew"],
+            current["fragmentation_score"],
+            current["vehicles"],
+            current["short_duties"],
+            current["split_duties"],
+            current["vehicle_switches"],
+            current["csp_cost"],
+        )
+        candidate_rank = (
+            candidate["violations"],
+            candidate.get("trip_group_split_groups", 0),
+            candidate_pair_pressure,
+            candidate.get("duty_pair_splits", 0),
+            candidate["crew"],
+            candidate["fragmentation_score"],
+            candidate["vehicles"],
+            candidate["short_duties"],
+            candidate["split_duties"],
+            candidate["vehicle_switches"],
+            candidate["csp_cost"],
+        )
+        return candidate_rank < current_rank
 
     current_rank = (
         current["violations"],
         current["vehicles"],
         current["crew"],
-        current.get("preferred_pair_breaks", 0),
+        current.get("trip_group_split_groups", 0),
+        current_pair_pressure,
         current.get("duty_pair_splits", 0),
         current["fragmentation_score"],
         current["short_duties"],
@@ -299,7 +415,8 @@ def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, 
         candidate["violations"],
         candidate["vehicles"],
         candidate["crew"],
-        candidate.get("preferred_pair_breaks", 0),
+        candidate.get("trip_group_split_groups", 0),
+        candidate_pair_pressure,
         candidate.get("duty_pair_splits", 0),
         candidate["fragmentation_score"],
         candidate["short_duties"],
@@ -415,6 +532,205 @@ def _generate_tail_relocation_candidates(
             -int(item["details"].get("tail_size", 0)),
             int(item["details"].get("recipient_block_id", 0)),
             int(item["details"].get("donor_block_id", 0)),
+        )
+    )
+    return candidates[:limit], stats
+
+
+def _generate_split_pair_repair_candidates(
+    vsp_sol: VSPSolution,
+    trips: List[Trip],
+    vsp_params: Dict[str, Any],
+    *,
+    limit: int = 16,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Gera reparos conservadores para pares preferenciais que ficaram em blocos distintos.
+
+    A heurística só tenta o caso em que o trip inicial do par está no fim do bloco de origem
+    e o parceiro começa o bloco destino. Nesse cenário, o prefixo anterior ao par é destacado
+    como um novo bloco para encurtar a janela operacional e permitir que o par volte ao mesmo
+    veículo sem violar `max_vehicle_shift`.
+    """
+    if limit <= 0 or not trips:
+        return [], {"considered": 0, "generated": 0, "reasons": {}}
+    if not bool(vsp_params.get("preserve_preferred_pairs", True)):
+        return [], {"considered": 0, "generated": 0, "reasons": {}}
+
+    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
+    max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+    allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
+    connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", 0) or 0)
+    pair_window = int(vsp_params.get("preferred_pair_window_minutes", 120) or 120)
+    preferred_pairs = build_preferred_pairs(list(trips), min_layover, pair_window)
+    if not preferred_pairs:
+        return [], {"considered": 0, "generated": 0, "reasons": {}}
+
+    trip_map: Dict[int, Trip] = {int(trip.id): trip for trip in trips}
+    base_blocks = sorted(copy.deepcopy(vsp_sol.blocks), key=lambda block: (block.start_time, block.id))
+    trip_to_block: Dict[int, Block] = {}
+    for block in base_blocks:
+        for trip in block.trips:
+            trip_to_block[int(trip.id)] = block
+
+    def _block_is_feasible(trips_seq: List[Trip]) -> bool:
+        if not trips_seq:
+            return True
+        if max_vehicle_shift > 0 and trips_seq[-1].end_time - trips_seq[0].start_time > max_vehicle_shift:
+            return False
+        if not allow_multi_line:
+            lines = {int(trip.line_id) for trip in trips_seq}
+            if len(lines) > 1:
+                return False
+        for index in range(len(trips_seq) - 1):
+            current = trips_seq[index]
+            nxt = trips_seq[index + 1]
+            gap = int(nxt.start_time - current.end_time)
+            if gap < 0:
+                return False
+            if (
+                gap == 0
+                and getattr(current, "trip_group_id", None) is not None
+                and current.trip_group_id == getattr(nxt, "trip_group_id", None)
+            ):
+                continue
+            needed = max(min_layover, int(current.deadhead_times.get(nxt.origin_id, 0)))
+            if gap + connection_tolerance < needed:
+                return False
+        return True
+
+    def _signature(blocks: List[Block]) -> Tuple[Tuple[int, ...], ...]:
+        ordered = sorted((block for block in blocks if block.trips), key=lambda block: (block.start_time, block.id))
+        return tuple(tuple(int(trip.id) for trip in block.trips) for block in ordered)
+
+    stats: Dict[str, Any] = {"considered": 0, "generated": 0, "reasons": {}}
+    candidates: List[Dict[str, Any]] = []
+    seen_signatures: Set[Tuple[Tuple[int, ...], ...]] = set()
+    seen_pairs: Set[Tuple[int, int]] = set()
+
+    for trip_id, pair_id in preferred_pairs.items():
+        if trip_id >= pair_id:
+            continue
+        pair_signature = (int(trip_id), int(pair_id))
+        if pair_signature in seen_pairs:
+            continue
+        seen_pairs.add(pair_signature)
+        stats["considered"] = int(stats.get("considered", 0)) + 1
+
+        trip_a = trip_map.get(int(trip_id))
+        trip_b = trip_map.get(int(pair_id))
+        if trip_a is None or trip_b is None:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["missing_trip"] = int(reason_counts.get("missing_trip", 0)) + 1
+            continue
+
+        if trip_a.start_time <= trip_b.start_time:
+            first_id, second_id = int(trip_a.id), int(trip_b.id)
+        else:
+            first_id, second_id = int(trip_b.id), int(trip_a.id)
+
+        src_block = trip_to_block.get(first_id)
+        dst_block = trip_to_block.get(second_id)
+        if src_block is None or dst_block is None or src_block.id == dst_block.id:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["not_split"] = int(reason_counts.get("not_split", 0)) + 1
+            continue
+        if not src_block.trips or not dst_block.trips:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["empty_block"] = int(reason_counts.get("empty_block", 0)) + 1
+            continue
+        if src_block.trips[-1].id != first_id:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["source_not_boundary"] = int(reason_counts.get("source_not_boundary", 0)) + 1
+            continue
+        if dst_block.trips[0].id != second_id:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["target_not_boundary"] = int(reason_counts.get("target_not_boundary", 0)) + 1
+            continue
+
+        src_idx = len(src_block.trips) - 1
+        prefix = list(src_block.trips[:src_idx])
+        source_suffix = list(src_block.trips[src_idx:])
+        if not prefix or not source_suffix:
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["no_prefix"] = int(reason_counts.get("no_prefix", 0)) + 1
+            continue
+
+        candidate_prefix = Block(
+            id=0,
+            trips=list(prefix),
+            vehicle_type_id=src_block.vehicle_type_id,
+            warnings=list(src_block.warnings),
+            meta=dict(src_block.meta),
+        )
+        candidate_source = Block(
+            id=0,
+            trips=[*source_suffix, copy.deepcopy(dst_block.trips[0])],
+            vehicle_type_id=src_block.vehicle_type_id,
+            warnings=list(src_block.warnings),
+            meta=dict(src_block.meta),
+        )
+        candidate_target = Block(
+            id=0,
+            trips=list(dst_block.trips[1:]),
+            vehicle_type_id=dst_block.vehicle_type_id,
+            warnings=list(dst_block.warnings),
+            meta=dict(dst_block.meta),
+        )
+
+        if not _block_is_feasible(candidate_prefix.trips):
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["prefix_infeasible"] = int(reason_counts.get("prefix_infeasible", 0)) + 1
+            continue
+        if not _block_is_feasible(candidate_source.trips):
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["source_infeasible"] = int(reason_counts.get("source_infeasible", 0)) + 1
+            continue
+        if candidate_target.trips and not _block_is_feasible(candidate_target.trips):
+            reason_counts = stats.setdefault("reasons", {})
+            reason_counts["target_infeasible"] = int(reason_counts.get("target_infeasible", 0)) + 1
+            continue
+
+        candidate_blocks: List[Block] = []
+        for block in base_blocks:
+            if block.id == src_block.id:
+                candidate_blocks.append(copy.deepcopy(candidate_prefix))
+                candidate_blocks.append(copy.deepcopy(candidate_source))
+            elif block.id == dst_block.id:
+                if candidate_target.trips:
+                    candidate_blocks.append(copy.deepcopy(candidate_target))
+            else:
+                candidate_blocks.append(copy.deepcopy(block))
+
+        candidate_vsp = copy.deepcopy(vsp_sol)
+        candidate_vsp.blocks = _renumber_blocks(candidate_blocks)
+        signature = _signature(candidate_vsp.blocks)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        candidates.append(
+            {
+                "phase": "pair_repair",
+                "vsp": candidate_vsp,
+                "details": {
+                    "pair_trip_ids": [first_id, second_id],
+                    "source_block_id": int(src_block.id),
+                    "target_block_id": int(dst_block.id),
+                    "prefix_trip_ids": [int(trip.id) for trip in prefix],
+                    "source_trip_ids": [int(trip.id) for trip in candidate_source.trips],
+                    "target_trip_ids": [int(trip.id) for trip in candidate_target.trips],
+                    "prefix_size": len(prefix),
+                },
+            }
+        )
+        stats["generated"] = int(stats.get("generated", 0)) + 1
+        if len(candidates) >= limit:
+            break
+
+    candidates.sort(
+        key=lambda item: (
+            -int(item["details"].get("prefix_size", 0)),
+            int(item["details"].get("source_block_id", 0)),
+            int(item["details"].get("target_block_id", 0)),
         )
     )
     return candidates[:limit], stats
@@ -895,6 +1211,46 @@ def joint_duty_vehicle_swap(
             )
             tail_candidates = tail_candidates[:tail_candidate_limit]
             candidate_vsps.extend(tail_candidates)
+
+        pair_repair_enabled = bool(vsp_params.get("enable_pair_repair_postopt", True))
+        pair_repair_candidates: List[Dict[str, Any]] = []
+        if pair_repair_enabled and trips:
+            pair_seed_vsps = [vsp_sol]
+            if _vsp_signature(base_candidate_vsp) != _vsp_signature(vsp_sol):
+                pair_seed_vsps.append(base_candidate_vsp)
+
+            seen_pair_signatures: set[Tuple[Tuple[int, ...], ...]] = set()
+            expanded_limit = max(32, tail_candidate_limit * len(pair_seed_vsps) * 2)
+            for seed_index, seed_vsp in enumerate(pair_seed_vsps):
+                seed_candidates, seed_stats = _generate_split_pair_repair_candidates(
+                    seed_vsp,
+                    trips,
+                    vsp_params,
+                    limit=expanded_limit,
+                )
+                for candidate in seed_candidates:
+                    signature = _vsp_signature(candidate["vsp"])
+                    if signature in seen_pair_signatures:
+                        continue
+                    seen_pair_signatures.add(signature)
+                    candidate_details = dict(candidate.get("details") or {})
+                    candidate_details["source_seed"] = "original_vsp" if seed_index == 0 else "joint_swap_seed"
+                    pair_repair_candidates.append(
+                        {
+                            **candidate,
+                            "details": candidate_details,
+                        }
+                    )
+
+            pair_repair_candidates.sort(
+                key=lambda item: (
+                    -int(item["details"].get("prefix_size", 0)),
+                    int(item["details"].get("source_block_id", 0)),
+                    int(item["details"].get("target_block_id", 0)),
+                )
+            )
+            pair_repair_candidates = pair_repair_candidates[:tail_candidate_limit]
+            candidate_vsps.extend(pair_repair_candidates)
 
         best_csp = csp_sol
         best_vsp = vsp_sol

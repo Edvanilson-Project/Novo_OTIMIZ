@@ -187,6 +187,8 @@ class CctParamsInput(BaseModel):
 class VspParamsInput(BaseModel):
     time_budget_s: Optional[float] = None
     random_seed: Optional[int] = None
+    force_round_trip: Optional[bool] = None
+    allow_vehicle_swap: Optional[bool] = None
     max_vehicle_shift_minutes: Optional[int] = None
     max_vehicles: Optional[int] = None
     maxVehicles: Optional[int] = None
@@ -211,6 +213,8 @@ class VspParamsInput(BaseModel):
     offpeak_energy_cost_per_kwh: Optional[float] = None
     preserve_preferred_pairs: Optional[bool] = None
     preferred_pair_window_minutes: Optional[int] = None
+    vehicle_idle_gap_behavior: Optional[str] = None
+    vehicle_idle_gap_threshold_minutes: Optional[int] = None
     pair_break_penalty: Optional[float] = None
     paired_trip_bonus: Optional[float] = None
     max_connection_cost_for_reuse_ratio: Optional[float] = None

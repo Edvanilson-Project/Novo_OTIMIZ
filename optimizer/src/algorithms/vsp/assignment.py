@@ -52,6 +52,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
 settings = get_settings()
@@ -100,10 +101,21 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
         max_successors = int(self._p("assignment_max_successors_per_trip", 64))
+        preserve_preferred_pairs = bool(self._p("preserve_preferred_pairs", True))
+        preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
+        pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
+        paired_trip_bonus = float(self._p("paired_trip_bonus", fixed_cost * 0.05))
 
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
         starts = np.fromiter((t.start_time for t in trips_sorted), dtype=np.int64, count=N)
         ends = np.fromiter((t.end_time for t in trips_sorted), dtype=np.int64, count=N)
+        preferred_pairs = build_preferred_pairs(trips_sorted, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        trip_order = {int(trip.id): idx for idx, trip in enumerate(trips_sorted)}
+        preferred_next = {
+            int(trip_id): int(pair_id)
+            for trip_id, pair_id in preferred_pairs.items()
+            if trip_order.get(int(trip_id), 0) < trip_order.get(int(pair_id), 0)
+        }
 
         # ─────────────────────────────────────────────────────────────────
         # Constrói (rows, cols, costs) esparsos
@@ -118,13 +130,17 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         for i in range(N):
             rows.append(i)
             cols.append(i)
-            costs.append(fixed_cost)
+            solo_cost = fixed_cost
+            if int(trips_sorted[i].id) in preferred_next:
+                solo_cost += pair_break_penalty
+            costs.append(solo_cost)
 
         t0 = time.perf_counter()
         edge_count = 0
         for i in range(N):
             ti = trips_sorted[i]
             ei = ends[i]
+            pair_target = preferred_next.get(int(ti.id))
             # Busca binária: primeiro j > i com starts[j] >= ei
             lo, hi = i + 1, N
             while lo < hi:
@@ -136,6 +152,7 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
             j_start = lo
 
             successors_added = 0
+            preferred_edge: Optional[tuple[int, float]] = None
             for j in range(j_start, N):
                 gap = int(starts[j] - ei)
                 if gap > max_shift:
@@ -153,17 +170,38 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
                 if ti.destination_id == tj.origin_id:
                     cost -= fixed_cost * 0.05
-                # Garantir custo positivo estritamente menor que diagonal
-                # Caso contrário, matcher prefere diagonal (= solo).
-                cost = max(0.001, min(cost, fixed_cost - 0.001))
+                if pair_target is not None:
+                    if int(tj.id) == pair_target:
+                        cost -= paired_trip_bonus * 3.0
+                        preferred_edge = (j, max(0.001, cost))
+                    else:
+                        cost += pair_break_penalty
+                cost = max(0.001, cost)
+
+                if preferred_edge is not None and j == preferred_edge[0]:
+                    # Preserve the preferred edge even if the successor cap is reached.
+                    continue
+
+                if successors_added >= max_successors:
+                    if preferred_edge is not None:
+                        break
+                    continue
 
                 rows.append(i)
                 cols.append(j)
                 costs.append(cost)
                 edge_count += 1
                 successors_added += 1
-                if successors_added >= max_successors:
+                if successors_added >= max_successors and preferred_edge is not None:
                     break
+
+            if preferred_edge is not None:
+                pref_j, pref_cost = preferred_edge
+                rows.append(i)
+                cols.append(pref_j)
+                costs.append(pref_cost)
+                edge_count += 1
+                successors_added += 1
 
         build_ms = (time.perf_counter() - t0) * 1000
         _log.info(
@@ -297,6 +335,8 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 last_a = ba.trips[-1]
                 ea = last_a.end_time
                 cap_added = 0
+                pair_target = preferred_next.get(int(last_a.id))
+                preferred_edge: Optional[tuple[float, int, int]] = None
                 for b in range(a + 1, B):
                     bb = blocks_sorted[b]
                     first_b = bb.trips[0]
@@ -315,10 +355,25 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                         continue
                     idle = max(0, gap - dh)
                     cost = (dh * deadhead_cost) + (idle * idle_cost)
+                    if pair_target is not None:
+                        if int(first_b.id) == pair_target:
+                            cost -= paired_trip_bonus * 3.0
+                            preferred_edge = (cost, a, b)
+                        else:
+                            cost += pair_break_penalty
+
+                    if cap_added >= 16:
+                        if preferred_edge is not None:
+                            break
+                        continue
+
                     edges.append((cost, a, b))
                     cap_added += 1
-                    if cap_added >= 16:  # cap candidatos por cadeia
+                    if cap_added >= 16 and preferred_edge is not None:
                         break
+
+                if preferred_edge is not None:
+                    edges.append(preferred_edge)
 
             if not edges:
                 merge_ms_total += (time.perf_counter() - tm0) * 1000
@@ -395,6 +450,11 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 break
 
         total_packed = sum(len(b.trips) for b in blocks)
+        pair_meta = pairing_stats(blocks, preferred_pairs) if preferred_pairs else {
+            "preferred_pair_count": 0,
+            "paired_connections_followed": 0,
+            "preferred_pair_breaks": 0,
+        }
         _log.info(
             f"AssignmentVSP: {total_packed}/{N} trips em {len(blocks)} blocos "
             f"(build={build_ms:.0f}ms, match={match_ms:.0f}ms, "
@@ -415,6 +475,9 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 "chain_merges_total": merge_total,
                 "merge_time_ms_total": round(merge_ms_total, 1),
                 "max_successors_per_trip": max_successors,
+                "preserve_preferred_pairs": preserve_preferred_pairs,
+                "preferred_pair_window_minutes": preferred_pair_window,
+                **pair_meta,
                 "engine": "scipy.sparse.csgraph.min_weight_full_bipartite_matching",
             },
         )

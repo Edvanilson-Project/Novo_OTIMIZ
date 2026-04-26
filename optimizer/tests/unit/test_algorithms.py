@@ -239,6 +239,65 @@ def test_optimizer_service_passes_time_budget_to_joint_solver(monkeypatch):
 
     assert captured["budget"] == 12.0
 
+
+def test_optimizer_service_hybrid_fallback_prefers_lower_split_groups(monkeypatch):
+    trips = make_trips(4)
+    vehicle_types = make_vehicle_types()
+    service = OptimizerService()
+    calls: list[str] = []
+
+    primary = OptimizationResult(vsp=VSPSolution(blocks=[]), csp=CSPSolution())
+    primary.total_cost = 100.0
+    primary.cct_violations = 0
+    primary.meta = {"marker": "primary"}
+
+    fallback = OptimizationResult(vsp=VSPSolution(blocks=[]), csp=CSPSolution())
+    fallback.total_cost = 120.0
+    fallback.cct_violations = 0
+    fallback.meta = {"marker": "fallback"}
+
+    def fake_dispatch(algorithm, *args, **kwargs):
+        calls.append(str(algorithm.value if hasattr(algorithm, "value") else algorithm))
+        if algorithm == AlgorithmType.HYBRID_PIPELINE:
+            return primary
+        if algorithm == AlgorithmType.SIMULATED_ANNEALING:
+            return fallback
+        raise AssertionError(f"Unexpected algorithm: {algorithm}")
+
+    def fake_trip_group_audit(result, _trips):
+        if result.meta.get("marker") == "primary":
+            return {"split_groups": 2, "same_roster_ratio": 0.5}
+        return {"split_groups": 0, "same_roster_ratio": 1.0}
+
+    monkeypatch.setattr(service, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(service, "_build_trip_group_audit", fake_trip_group_audit)
+    monkeypatch.setattr(service, "_ensure_vsp_operational_warnings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_build_operational_kpis", lambda *args, **kwargs: {"vehicles": 0, "crew": 0})
+    monkeypatch.setattr(service, "_build_phase_summary", lambda *args, **kwargs: {"vsp": {}, "csp": {}})
+    monkeypatch.setattr(service, "_build_reproducibility_snapshot", lambda *args, **kwargs: {"random_seed": None})
+    monkeypatch.setattr(service, "_build_solver_explanation", lambda *args, **kwargs: {"status": "feasible", "issues": {"hard": [], "soft": []}})
+    monkeypatch.setattr(service.validator, "audit_input", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.validator, "audit_result", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.evaluator, "set_dynamic_rules", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service.evaluator, "set_costs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service.evaluator, "total_cost_breakdown", lambda result, _vehicle_types: {"total": result.total_cost or 0.0, "vsp": {"total": 0.0}, "csp": {"total": 0.0}})
+    monkeypatch.setattr(service, "_align_vsp_params_with_cct", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_inject_trip_group_constraints", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_ensure_deadhead_coverage", lambda *args, **kwargs: None)
+
+    result = service.run(
+        trips,
+        vehicle_types,
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        time_budget_s=120.0,
+        cct_params={},
+        vsp_params={},
+    )
+
+    assert calls == ["hybrid_pipeline", "simulated_annealing", "simulated_annealing"]
+    assert result.meta["trip_group_audit"]["split_groups"] == 0
+    assert result.total_cost == 120.0
+
 def test_falls_back_to_configured_pullout_and_pullback_without_flags():
     trip = Trip(
         id=1,

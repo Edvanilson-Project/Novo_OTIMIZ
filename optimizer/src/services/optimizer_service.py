@@ -74,12 +74,20 @@ class OptimizerService:
         # solver Python espera enforce_trip_groups_hard / operator_single_vehicle_only
         # (constraint-level). Traduzimos aqui para que o que o usuário marca na tela
         # seja efetivamente aplicado.
+        intent_params: Dict[str, Any] = {}
         if optimization_params is not None:
-            op_dict = optimization_params if isinstance(optimization_params, dict) else dict(optimization_params)
-            if op_dict.get("force_round_trip") and "enforce_trip_groups_hard" not in cct_params:
-                cct_params["enforce_trip_groups_hard"] = True
-            if op_dict.get("allow_vehicle_swap") is False and "operator_single_vehicle_only" not in cct_params:
-                cct_params["operator_single_vehicle_only"] = True
+            intent_params.update(
+                optimization_params if isinstance(optimization_params, dict) else dict(optimization_params)
+            )
+        for key in ("force_round_trip", "allow_vehicle_swap"):
+            if key in vsp_params and key not in intent_params:
+                intent_params[key] = vsp_params.get(key)
+        if intent_params.get("force_round_trip"):
+            cct_params["enforce_trip_groups_hard"] = True
+            cct_params.setdefault("operator_pairing_hard", True)
+            vsp_params.setdefault("preserve_preferred_pairs", True)
+        if intent_params.get("allow_vehicle_swap") is False:
+            cct_params["operator_single_vehicle_only"] = True
 
         self._align_vsp_params_with_cct(cct_params, vsp_params)
         normalized_time_budget_s = (
@@ -131,6 +139,85 @@ class OptimizerService:
             cct_params,
             vsp_params,
         )
+        primary_trip_group_audit = self._build_trip_group_audit(result, trips)
+
+        def _group_audit_rank(sol: OptimizationResult, audit: Dict[str, Any]) -> tuple:
+            return (
+                int(audit.get("split_groups", 0)),
+                -float(audit.get("same_roster_ratio", 0.0) or 0.0),
+                int(sol.cct_violations or 0),
+                float(sol.total_cost or 0.0),
+                len(sol.vsp.blocks or []),
+                len(sol.csp.duties or []),
+            )
+
+        if primary_trip_group_audit:
+            result.meta["trip_group_audit"] = primary_trip_group_audit
+
+        fallback_max_trips = int(vsp_params.get("group_audit_fallback_max_trips", 220) or 220)
+        fallback_max_blocks = int(vsp_params.get("group_audit_fallback_max_blocks", 160) or 160)
+        fallback_allowed = len(trips) <= fallback_max_trips and len(result.vsp.blocks or []) <= fallback_max_blocks
+
+        if (
+            str(algorithm.value if hasattr(algorithm, "value") else algorithm) == AlgorithmType.HYBRID_PIPELINE.value
+            and int(primary_trip_group_audit.get("split_groups", 0)) > 0
+            and not bool(vsp_params.get("disable_group_audit_fallback", False))
+            and fallback_allowed
+        ):
+            fallback_runs = 2
+            fallback_time_budget_s = max(45.0, normalized_time_budget_s * 0.25)
+            fallback_seed_base_raw = replay_fingerprint.get("input_hash")
+            try:
+                fallback_seed_base = int(str(fallback_seed_base_raw), 16) if fallback_seed_base_raw else int(time.time() * 1000)
+            except (TypeError, ValueError):
+                fallback_seed_base = int(time.time() * 1000)
+
+            best_fallback_result = None
+            best_fallback_audit = None
+            best_fallback_rank = None
+            for attempt in range(fallback_runs):
+                fallback_vsp_params = dict(vsp_params)
+                fallback_vsp_params["random_seed"] = fallback_seed_base + (attempt * 97)
+                fallback_result = self._dispatch(
+                    AlgorithmType.SIMULATED_ANNEALING,
+                    trips,
+                    vehicle_types,
+                    depot_id,
+                    fallback_time_budget_s,
+                    cct_params,
+                    fallback_vsp_params,
+                )
+                fallback_trip_group_audit = self._build_trip_group_audit(fallback_result, trips)
+                fallback_result.meta["trip_group_audit"] = fallback_trip_group_audit
+                fallback_rank = _group_audit_rank(fallback_result, fallback_trip_group_audit)
+                if best_fallback_rank is None or fallback_rank < best_fallback_rank:
+                    best_fallback_result = fallback_result
+                    best_fallback_audit = fallback_trip_group_audit
+                    best_fallback_rank = fallback_rank
+
+            if best_fallback_result is not None and best_fallback_audit is not None and best_fallback_rank is not None:
+                if best_fallback_rank < _group_audit_rank(result, primary_trip_group_audit):
+                    logger.info(
+                        "[OptimizerService] Hybrid fallback accepted: split_groups %d -> %d",
+                        int(primary_trip_group_audit.get("split_groups", 0)),
+                        int(best_fallback_audit.get("split_groups", 0)),
+                    )
+                    result = best_fallback_result
+                    primary_trip_group_audit = best_fallback_audit
+        elif (
+            str(algorithm.value if hasattr(algorithm, "value") else algorithm) == AlgorithmType.HYBRID_PIPELINE.value
+            and int(primary_trip_group_audit.get("split_groups", 0)) > 0
+            and not fallback_allowed
+        ):
+            result.meta.setdefault("performance", {})
+            result.meta["performance"]["group_audit_fallback_skipped"] = {
+                "reason": "instance_scale_guard",
+                "trip_count": len(trips),
+                "block_count": len(result.vsp.blocks or []),
+                "max_trips": fallback_max_trips,
+                "max_blocks": fallback_max_blocks,
+            }
+
         self._ensure_vsp_operational_warnings(result, vehicle_types, vsp_params)
         solver_ms = (time.perf_counter() - t_solver) * 1000
         result.total_elapsed_ms = (time.perf_counter() - t0) * 1000

@@ -10,6 +10,19 @@ interface TripWithTimes {
   is_paired?: boolean;
 }
 
+function resolvedPolicy(res: OptimizationResultSummary) {
+  const summary = res as any;
+  const meta = summary.metadata ?? summary.meta ?? {};
+  const input = meta.input ?? summary.resolved_params ?? {};
+  const cct = input.cct_params ?? input.cct ?? {};
+  const vsp = input.vsp_params ?? input.vsp ?? {};
+  return {
+    minBreakMinutes: Number(cct.min_break_minutes ?? 30),
+    mealBreakMinutes: Number(cct.meal_break_minutes ?? cct.min_break_minutes ?? 30),
+    minLayoverMinutes: Number(vsp.min_layover_minutes ?? cct.min_layover_minutes ?? cct.min_break_minutes ?? 8),
+  };
+}
+
 export interface OperationalConflict {
   type: 'overlap' | 'time-violation' | 'no-return' | 'break-violation' | 'unrealistic' | 'paired-orphan' | 'layover-violation';
   severity: 'error' | 'warning';
@@ -25,6 +38,7 @@ export interface OperationalConflict {
 export function detectOperationalConflicts(res: OptimizationResultSummary): OperationalConflict[] {
   const conflicts: OperationalConflict[] = [];
   const { blocks = [] } = res;
+  const policy = resolvedPolicy(res);
 
   // Check each block for conflicts
   blocks.forEach((block) => {
@@ -64,7 +78,7 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
       }
     }
 
-    // Detect break violations (no break > 15 min in 6-hour window)
+    // Detect break violations using the same break parameters sent to the solver.
     if (trips.length >= 2) {
       const blockStart = trips[0].start_time;
       const blockEnd = trips[trips.length - 1].end_time;
@@ -77,12 +91,13 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
           maxGap = Math.max(maxGap, gap);
         }
 
-        if (maxGap < 15 && blockDuration >= 360) {
+        const requiredBreak = Math.max(policy.minBreakMinutes, policy.mealBreakMinutes);
+        if (maxGap < requiredBreak && blockDuration >= 360) {
           conflicts.push({
             type: 'break-violation',
             severity: 'warning',
             blockId: block.block_id,
-            message: `Bloco ${block.block_id}: Nenhum intervalo ≥15min em jornada de ${Math.round(blockDuration / 60)}h`,
+            message: `Bloco ${block.block_id}: Nenhum intervalo ≥${requiredBreak}min em jornada de ${Math.round(blockDuration / 60)}h`,
             count: 1,
           });
         }
@@ -105,8 +120,8 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
       }
     }
 
-    // Detect layover-violation: gap at same terminal outside [5, 90] minutes
-    const LAYOVER_MIN = 5;
+    // Detect layover-violation: gap at same terminal outside configured VSP window.
+    const LAYOVER_MIN = policy.minLayoverMinutes;
     const LAYOVER_MAX = 90;
     for (let i = 0; i < trips.length - 1; i++) {
       const curr = trips[i];

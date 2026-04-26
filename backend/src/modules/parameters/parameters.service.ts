@@ -47,10 +47,21 @@ export class ParametersService {
       driver_cost_per_minute: 0.5,
       collector_cost_per_minute: 0.4,
       force_round_trip: true,
-      allow_vehicle_swap: true,
+      allow_vehicle_swap: false,
       max_driving_time_minutes: 480,
       meal_break_minutes: 60,
       vehicle_fixed_cost: 800.0,
+      enforce_trip_groups_hard: true,
+      operator_pairing_hard: true,
+      operator_single_vehicle_only: true,
+      operator_change_terminals_only: true,
+      allow_relief_points: false,
+      enforce_same_depot_start_end: false,
+      enforce_single_line_duty: false,
+      apply_cct: true,
+      strict_hard_validation: true,
+      strict_union_rules: true,
+      preserve_preferred_pairs: true,
     });
 
     return this.parametersRepository.save(newParams);

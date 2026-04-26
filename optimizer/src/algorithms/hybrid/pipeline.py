@@ -27,6 +27,8 @@ evaluator = CostEvaluator()
 MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
 DEFAULT_MAX_CSP_ILP_TRIPS = 250
 DEFAULT_MAX_CSP_ILP_BLOCKS = 180
+DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 220
+DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS = 180
 
 
 class HybridPipeline(BaseAlgorithm):
@@ -115,6 +117,38 @@ class HybridPipeline(BaseAlgorithm):
             logger.info("[PIPELINE] Solução ideal encontrada para dataset reduzido. Finalizando.")
             return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
+        max_metaheuristic_trips = int(
+            self.vsp_params.get("max_vsp_metaheuristic_trips", DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS)
+            or DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS
+        )
+        max_metaheuristic_blocks = int(
+            self.vsp_params.get("max_vsp_metaheuristic_blocks", DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS)
+            or DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS
+        )
+        force_metaheuristics = bool(self.vsp_params.get("force_vsp_metaheuristics", False))
+        should_skip_metaheuristics = (
+            not force_metaheuristics
+            and (n > max_metaheuristic_trips or len(best_vsp.blocks) > max_metaheuristic_blocks)
+        )
+        if should_skip_metaheuristics:
+            logger.info(
+                "[PIPELINE] Skipping VSP metaheuristics: trips=%d blocks=%d limits=(%d,%d)",
+                n,
+                len(best_vsp.blocks),
+                max_metaheuristic_trips,
+                max_metaheuristic_blocks,
+            )
+            best_vsp.meta.setdefault("performance", {})
+            best_vsp.meta["performance"]["vsp_metaheuristics_skipped"] = {
+                "reason": "instance_scale_guard",
+                "trip_count": n,
+                "block_count": len(best_vsp.blocks),
+                "max_trips": max_metaheuristic_trips,
+                "max_blocks": max_metaheuristic_blocks,
+                "selected_vsp_algorithm": getattr(best_vsp, "algorithm", "mcnf_vsp"),
+            }
+            return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
+
         elapsed = time.perf_counter() - self._start_time
         remaining_budget = max(1.0, budget - elapsed)
 
@@ -134,24 +168,40 @@ class HybridPipeline(BaseAlgorithm):
             return False
 
         remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
-        sa = SimulatedAnnealingVSP(vsp_params=self.vsp_params)
-        sa_budget = remaining_budget * 0.35
-        sa.time_budget_s = sa_budget
-        t_phase = time.perf_counter()
-        sa_sol = sa.solve(trips, vehicle_types, depot_id)
-        phase_timings_ms["vsp_sa_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-        sa_elapsed_s = (sa_sol.elapsed_ms or 0) / 1000.0
-        sa_saved = max(0, sa_budget - sa_elapsed_s)
-        sa_cost = _vsp_cost(sa_sol, self.vsp_params, cached_pairs)
-        sa_issues = _vsp_hard_issue_count(sa_sol, self.vsp_params)
-        sa_iters = getattr(sa_sol, 'iterations', 0)
-        sa_restarts = (sa_sol.meta or {}).get('restarts', 0)
-        logger.info(f"[PIPELINE] SA: {len(sa_sol.blocks)} veículos, cost={sa_cost:.0f}, issues={sa_issues}, iters={sa_iters}, restarts={sa_restarts}, elapsed={sa_sol.elapsed_ms}ms")
-        if _is_better(sa_sol, sa_cost, sa_issues):
-            best_vsp = sa_sol
-            best_cost = sa_cost
-            best_issues = sa_issues
-            best_vehicles = len(sa_sol.blocks)
+        sa_runs = 2 if bool(self.vsp_params.get("preserve_preferred_pairs", True)) and n >= 100 else 1
+        sa_budget_total = remaining_budget * 0.35
+        sa_budget_each = max(1.0, sa_budget_total / sa_runs)
+        sa_seed_base = int(random_seed) if random_seed is not None else int(time.time() * 1000)
+        total_sa_elapsed = 0.0
+        sa_saved = 0.0
+
+        for sa_run in range(sa_runs):
+            sa_params = dict(self.vsp_params)
+            sa_params["random_seed"] = sa_seed_base + sa_run
+            sa = SimulatedAnnealingVSP(vsp_params=sa_params)
+            sa.time_budget_s = sa_budget_each
+            t_phase = time.perf_counter()
+            sa_sol = sa.solve(trips, vehicle_types, depot_id)
+            phase_timings_ms.setdefault("vsp_sa_ms", 0.0)
+            phase_timings_ms["vsp_sa_ms"] += round((time.perf_counter() - t_phase) * 1000, 2)
+            sa_elapsed_s = (sa_sol.elapsed_ms or 0) / 1000.0
+            total_sa_elapsed += sa_elapsed_s
+            sa_cost = _vsp_cost(sa_sol, self.vsp_params, cached_pairs)
+            sa_issues = _vsp_hard_issue_count(sa_sol, self.vsp_params)
+            sa_iters = getattr(sa_sol, 'iterations', 0)
+            sa_restarts = (sa_sol.meta or {}).get('restarts', 0)
+            logger.info(
+                f"[PIPELINE] SA[{sa_run + 1}/{sa_runs}]: {len(sa_sol.blocks)} veículos, "
+                f"cost={sa_cost:.0f}, issues={sa_issues}, iters={sa_iters}, restarts={sa_restarts}, "
+                f"elapsed={sa_sol.elapsed_ms}ms"
+            )
+            if _is_better(sa_sol, sa_cost, sa_issues):
+                best_vsp = sa_sol
+                best_cost = sa_cost
+                best_issues = sa_issues
+                best_vehicles = len(sa_sol.blocks)
+
+        sa_saved = max(0.0, sa_budget_total - total_sa_elapsed)
 
         if self._check_timeout():
             return self._finalize(best_vsp, trips, vehicle_types)

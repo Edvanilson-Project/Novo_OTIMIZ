@@ -8,6 +8,7 @@ from src.algorithms.csp.greedy import GreedyCSP
 from src.algorithms.joint_opt import (
     _build_post_opt_metrics,
     _generate_tail_relocation_candidates,
+    _generate_split_pair_repair_candidates,
     _is_better_post_opt_candidate,
     joint_duty_vehicle_swap,
 )
@@ -23,6 +24,7 @@ def _trip(
     origin: int = 1,
     dest: int = 2,
     depot_id: int = 1,
+    trip_group_id: int | None = None,
     extra_deadheads: dict[int, int] | None = None,
 ) -> Trip:
     deadheads = {origin: 8, dest: 8, 1: 8, 2: 8, 3: 8}
@@ -39,6 +41,7 @@ def _trip(
         distance_km=max(1.0, duration / 3.0),
         deadhead_times=deadheads,
         depot_id=depot_id,
+        trip_group_id=trip_group_id,
     )
 
 
@@ -138,6 +141,45 @@ def test_tail_relocation_candidate_moves_suffix_between_blocks():
     assert any(candidate["details"]["tail_trip_ids"] == [7, 8] for candidate in candidates)
 
 
+def test_split_pair_repair_candidate_reunites_boundary_pair():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2),
+        _trip(2, 430, 60, origin=2, dest=1),
+        _trip(3, 520, 60, origin=1, dest=2),
+        _trip(4, 590, 60, origin=2, dest=1),
+        _trip(5, 1200, 60, origin=1, dest=2, trip_group_id=700),
+        _trip(6, 1260, 60, origin=2, dest=1, trip_group_id=700),
+        _trip(7, 1350, 60, origin=1, dest=2),
+    ]
+    vsp = VSPSolution(
+        blocks=[
+            _block(1, [trips[0], trips[1], trips[2], trips[3], trips[4]]),
+            _block(2, [trips[5], trips[6]]),
+        ],
+        algorithm="test",
+    )
+
+    candidates, stats = _generate_split_pair_repair_candidates(
+        vsp,
+        trips,
+        {
+            "min_layover_minutes": 0,
+            "max_vehicle_shift_minutes": 960,
+            "preserve_preferred_pairs": True,
+            "preferred_pair_window_minutes": 120,
+        },
+        limit=10,
+    )
+
+    assert stats["generated"] > 0
+    candidate = next(item for item in candidates if item["details"]["pair_trip_ids"] == [5, 6])
+    block_trip_ids = [[trip.id for trip in block.trips] for block in candidate["vsp"].blocks]
+
+    assert [5, 6] in block_trip_ids
+    assert len(candidate["vsp"].blocks) == 3
+    assert [1, 2, 3, 4] in block_trip_ids
+
+
 def test_post_opt_comparator_accepts_fragmentation_gain_with_same_crew():
     vsp = VSPSolution(
         blocks=[
@@ -169,6 +211,160 @@ def test_post_opt_comparator_accepts_fragmentation_gain_with_same_crew():
     assert baseline["duties"] == 3
     assert candidate["duties"] == 2
     assert _is_better_post_opt_candidate(baseline, candidate) is True
+
+
+def test_post_opt_comparator_accepts_pair_repair_with_one_extra_vehicle():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2),
+        _trip(2, 430, 60, origin=2, dest=1),
+        _trip(3, 520, 60, origin=1, dest=2),
+        _trip(4, 590, 60, origin=2, dest=1),
+        _trip(5, 1200, 60, origin=1, dest=2, trip_group_id=700),
+        _trip(6, 1260, 60, origin=2, dest=1, trip_group_id=700),
+        _trip(7, 1350, 60, origin=1, dest=2),
+    ]
+    current_vsp = VSPSolution(
+        blocks=[
+            _block(1, [trips[0], trips[1], trips[2], trips[3], trips[4]]),
+            _block(2, [trips[5], trips[6]]),
+        ],
+        algorithm="test",
+    )
+    candidate_vsp = VSPSolution(
+        blocks=[
+            _block(1, [trips[0], trips[1], trips[2], trips[3]]),
+            _block(2, [trips[4], trips[5]]),
+            _block(3, [trips[6]]),
+        ],
+        algorithm="test",
+    )
+
+    base_csp = CSPSolution()
+    baseline = _build_post_opt_metrics(
+        base_csp,
+        current_vsp,
+        min_work=0,
+        trips=trips,
+        vsp_params={
+            "preserve_preferred_pairs": True,
+            "min_layover_minutes": 0,
+            "preferred_pair_window_minutes": 120,
+        },
+    )
+    candidate = _build_post_opt_metrics(
+        base_csp,
+        candidate_vsp,
+        min_work=0,
+        trips=trips,
+        vsp_params={
+            "preserve_preferred_pairs": True,
+            "min_layover_minutes": 0,
+            "preferred_pair_window_minutes": 120,
+        },
+    )
+
+    assert baseline["vehicles"] == 2
+    assert candidate["vehicles"] == 3
+    assert baseline["preferred_pair_breaks"] == 1
+    assert candidate["preferred_pair_breaks"] == 0
+    assert _is_better_post_opt_candidate(baseline, candidate) is True
+
+
+def test_post_opt_comparator_prefers_lower_trip_group_split_groups():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2, trip_group_id=701),
+        _trip(2, 430, 60, origin=2, dest=1, trip_group_id=701),
+    ]
+    vsp = VSPSolution(
+        blocks=[
+            _block(1, [trips[0]]),
+            _block(2, [trips[1]]),
+        ],
+        algorithm="test",
+    )
+
+    baseline_csp = CSPSolution(
+        duties=[
+            Duty(id=1, meta={"roster_id": 1, "source_block_ids": [1]}),
+            Duty(id=2, meta={"roster_id": 2, "source_block_ids": [2]}),
+        ],
+    )
+    baseline_csp.duties[0].add_task(_block(1, [trips[0]]))
+    baseline_csp.duties[1].add_task(_block(2, [trips[1]]))
+
+    candidate_csp = CSPSolution(
+        duties=[
+            Duty(id=10, meta={"roster_id": 1, "source_block_ids": [1]}),
+            Duty(id=11, meta={"roster_id": 1, "source_block_ids": [2]}),
+        ],
+    )
+    candidate_csp.duties[0].add_task(_block(1, [trips[0]]))
+    candidate_csp.duties[1].add_task(_block(2, [trips[1]]))
+
+    baseline = _build_post_opt_metrics(
+        baseline_csp,
+        vsp,
+        min_work=0,
+        trips=trips,
+        vsp_params={
+            "preserve_preferred_pairs": True,
+            "min_layover_minutes": 0,
+            "preferred_pair_window_minutes": 120,
+        },
+    )
+    candidate = _build_post_opt_metrics(
+        candidate_csp,
+        vsp,
+        min_work=0,
+        trips=trips,
+        vsp_params={
+            "preserve_preferred_pairs": True,
+            "min_layover_minutes": 0,
+            "preferred_pair_window_minutes": 120,
+        },
+    )
+
+    assert baseline["trip_group_split_groups"] == 1
+    assert candidate["trip_group_split_groups"] == 0
+    assert _is_better_post_opt_candidate(baseline, candidate) is True
+
+
+def test_joint_post_opt_prefers_pair_repair_when_tail_move_is_too_long():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2),
+        _trip(2, 430, 60, origin=2, dest=1),
+        _trip(3, 520, 60, origin=1, dest=2),
+        _trip(4, 590, 60, origin=2, dest=1),
+        _trip(5, 1200, 60, origin=1, dest=2, trip_group_id=700),
+        _trip(6, 1260, 60, origin=2, dest=1, trip_group_id=700),
+        _trip(7, 1350, 60, origin=1, dest=2),
+    ]
+    blocks = [
+        _block(1, [trips[0], trips[1], trips[2], trips[3], trips[4]]),
+        _block(2, [trips[5], trips[6]]),
+    ]
+    vsp = VSPSolution(blocks=copy.deepcopy(blocks), algorithm="test", meta={"max_vehicle_shift_minutes": 960, "min_layover_minutes": 0})
+    csp = GreedyCSP(max_shift_minutes=560, max_work_minutes=480, min_break_minutes=30, inter_shift_rest_minutes=660).solve(copy.deepcopy(blocks), trips)
+
+    new_csp, new_vsp = joint_duty_vehicle_swap(
+        csp,
+        vsp,
+        trips,
+        cct_params={"max_shift_minutes": 560, "max_work_minutes": 480, "min_break_minutes": 30, "inter_shift_rest_minutes": 660},
+        kwargs={
+            "vsp_params": {
+                "min_layover_minutes": 0,
+                "max_vehicle_shift_minutes": 960,
+                "preserve_preferred_pairs": True,
+                "preferred_pair_window_minutes": 120,
+                "enable_pair_repair_postopt": True,
+            },
+        },
+    )
+
+    assert new_csp.meta["post_optimization"]["selected_phase"] == "pair_repair"
+    assert new_csp.meta["post_optimization"]["outcome"] == "accepted_improvement"
+    assert any([trip.id for trip in block.trips] == [5, 6] for block in new_vsp.blocks)
 
 
 def test_joint_post_opt_accepts_tail_relocation_that_reduces_fragmentation():

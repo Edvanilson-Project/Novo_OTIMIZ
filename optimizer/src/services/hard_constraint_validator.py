@@ -79,6 +79,7 @@ class HardConstraintValidator:
         max_shift = min(int(cct_params.get("max_shift_minutes", 480) or 480), 720)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
+        meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
         min_layover = int(cct_params.get("min_layover_minutes", vsp_params.get("min_layover_minutes", 8)) or 8)
         connection_tolerance = int(
             vsp_params.get(
@@ -126,6 +127,7 @@ class HardConstraintValidator:
                     max_shift,
                     max_driving,
                     min_break,
+                    meal_break,
                     enforce_same_depot,
                     enforce_single_line_duty,
                     operator_change_terminals_only,
@@ -168,7 +170,13 @@ class HardConstraintValidator:
         )
 
         # Separar violações hard (bloqueantes) de soft (avisos)
-        _SOFT_PREFIXES = ("MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED", "MANDATORY_GROUP_SPLIT")
+        soft_prefixes = ["MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED"]
+        hard_pairing = bool(cct_params.get("enforce_trip_groups_hard", False)) or bool(
+            cct_params.get("operator_pairing_hard", False)
+        )
+        if not hard_pairing:
+            soft_prefixes.append("MANDATORY_GROUP_SPLIT")
+        _SOFT_PREFIXES = tuple(soft_prefixes)
         hard_issues = [i for i in issues if not any(i.startswith(p) for p in _SOFT_PREFIXES)]
         soft_issues = [i for i in issues if any(i.startswith(p) for p in _SOFT_PREFIXES)]
 
@@ -385,6 +393,7 @@ class HardConstraintValidator:
         max_shift: int,
         max_driving: int,
         min_break: int,
+        meal_break: int,
         enforce_same_depot: bool,
         enforce_single_line_duty: bool,
         operator_change_terminals_only: bool,
@@ -402,13 +411,19 @@ class HardConstraintValidator:
         if duty.continuous_driving_violation or meta_drive > max_driving:
             issues.append(f"CONTINUOUS_DRIVING_EXCEEDED D{duty.id}")
 
-        # Checar ausência de intervalo a partir das tarefas (não apenas via string em warnings).
-        # min_break é o mínimo legal de pausa entre blocos de uma mesma jornada.
+        # Checar ausência de intervalo a partir das viagens reais da duty.
+        # Folgas menores que meal_break não contam como refeição, mesmo que
+        # ultrapassem o min_break usado apenas para reset operacional.
         tasks = list(getattr(duty, "tasks", []))
+        required_meal_break = max(int(min_break), int(meal_break))
+        trips = sorted(
+            [trip for task in tasks for trip in getattr(task, "trips", [])],
+            key=lambda item: (item.start_time, item.id),
+        )
         meal_break_found = any(
-            tasks[k + 1].start_time - tasks[k].end_time >= min_break
-            for k in range(len(tasks) - 1)
-        ) if len(tasks) > 1 else True  # jornadas de bloco único não precisam de pausa
+            trips[k + 1].start_time - trips[k].end_time >= required_meal_break
+            for k in range(len(trips) - 1)
+        ) if len(trips) > 1 else True  # jornadas de viagem única não precisam de pausa
         work_needs_break = duty.work_time >= 360  # 6h de direção exigem intervalo (CCT/CLT)
         if work_needs_break and not meal_break_found:
             issues.append(f"MEAL_BREAK_MISSING D{duty.id}")

@@ -29,6 +29,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
 settings = get_settings()
@@ -249,6 +250,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
+        preserve_preferred_pairs = bool(self._p("preserve_preferred_pairs", True))
+        preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
+        pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
+        paired_trip_bonus = float(self._p("paired_trip_bonus", fixed_cost * 0.05))
         
         INF = 1e9
         N = len(trips)
@@ -259,6 +264,13 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
+        preferred_pairs = build_preferred_pairs(trips_sorted, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        trip_order = {int(trip.id): idx for idx, trip in enumerate(trips_sorted)}
+        preferred_next = {
+            int(trip_id): int(pair_id)
+            for trip_id, pair_id in preferred_pairs.items()
+            if trip_order.get(int(trip_id), 0) < trip_order.get(int(pair_id), 0)
+        }
 
         # Ensure we have at least one virtual depot if none provided
         local_depots = depots if depots else [{"id": -1, "capacity": 999999}]
@@ -287,6 +299,12 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
                     cost -= (fixed_cost * 0.05)
+                pair_target = preferred_next.get(int(trips_sorted[i].id))
+                if pair_target is not None:
+                    if int(trips_sorted[j].id) == pair_target:
+                        cost -= paired_trip_bonus * 3.0
+                    else:
+                        cost += pair_break_penalty
 
                 valid_X[(i, j)] = {
                     "cost": max(0.0, cost),
@@ -304,6 +322,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             for i in range(N):
                 dh_to_depot = int(trips_sorted[i].deadhead_times.get(did, 0))
                 pullin_costs[(i, did)] = dh_to_depot * deadhead_cost
+                if int(trips_sorted[i].id) in preferred_next:
+                    pullin_costs[(i, did)] += pair_break_penalty
                 pullout_costs[(did, i)] = fixed_cost + (dh_to_depot * deadhead_cost)
 
         # If PuLP isn't available, fallback to greedy
@@ -442,11 +462,16 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             blocks.append(block)
             block_id_counter += 1
 
-        total_trips_packed = sum(len(b.trips) for b in blocks)
-        _log.info(f"MCNF Subproblem (MILP): {total_trips_packed}/{N} trips em {len(blocks)} blocos; solve_time_s={(milp_end-milp_start):.3f}")
-
         if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
+
+        total_trips_packed = sum(len(b.trips) for b in blocks)
+        pair_meta = pairing_stats(blocks, preferred_pairs) if preferred_pairs else {
+            "preferred_pair_count": 0,
+            "paired_connections_followed": 0,
+            "preferred_pair_breaks": 0,
+        }
+        _log.info(f"MCNF Subproblem (MILP): {total_trips_packed}/{N} trips em {len(blocks)} blocos; solve_time_s={(milp_end-milp_start):.3f}")
 
         # Unassigned (should be none if MILP foi factível)
         unassigned_trips = [t for t in trips_sorted if t.id not in {tr.id for b in blocks for tr in b.trips}]
@@ -461,6 +486,9 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 "milp_solve_time_s": (milp_end - milp_start) if 'milp_end' in locals() else None,
                 "multi_depot": bool(depots),
                 "depot_count": len(depots) if depots else 0,
+                "preserve_preferred_pairs": preserve_preferred_pairs,
+                "preferred_pair_window_minutes": preferred_pair_window,
+                **pair_meta,
             },
         )
 

@@ -145,9 +145,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.operator_change_terminals_only = bool(params.get("operator_change_terminals_only", True))
         self.strict_union_rules = bool(params.get("strict_union_rules", True))
         self.operator_profiles = list(params.get("operator_profiles") or [])
-        self.trip_group_keep_bonus = float(params.get("trip_group_keep_bonus", 180.0))
+        self.trip_group_keep_bonus = float(params.get("trip_group_keep_bonus", 240.0))
         self.trip_group_split_penalty = float(
-            params.get("trip_group_split_penalty", max(self.trip_group_keep_bonus * 1.5, 240.0))
+            params.get("trip_group_split_penalty", max(self.trip_group_keep_bonus * 4.0, 1000.0))
         )
         self._extension_diagnostics = self._empty_extension_diagnostics()
 
@@ -2063,10 +2063,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         original_blocks: Optional[List[Block]],
     ) -> Tuple[List[Duty], Dict[str, Any]]:
         enabled = bool(self.params.get("enable_soft_issue_reassignment_postopt", True))
-        max_passes = max(1, int(self.params.get("soft_issue_reassignment_max_passes", 3) or 3))
-        target_limit = max(1, int(self.params.get("soft_issue_reassignment_target_limit", 8) or 8))
-        candidate_limit = max(4, int(self.params.get("soft_issue_reassignment_candidate_limit", 16) or 16))
-        sample_limit = max(10, int(self.params.get("soft_issue_reassignment_sample_limit", 24) or 24))
+        max_passes = max(1, int(self.params.get("soft_issue_reassignment_max_passes", 5) or 5))
+        target_limit = max(1, int(self.params.get("soft_issue_reassignment_target_limit", 12) or 12))
+        candidate_limit = max(4, int(self.params.get("soft_issue_reassignment_candidate_limit", 24) or 24))
+        sample_limit = max(10, int(self.params.get("soft_issue_reassignment_sample_limit", 48) or 48))
         audit: Dict[str, Any] = {
             "enabled": enabled,
             "passes": 0,

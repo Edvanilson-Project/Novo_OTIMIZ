@@ -194,10 +194,88 @@ export class CompanyParameters extends TenantBaseEntity {
   time_budget_s: number;
 
   @Column('integer', { nullable: true })
+  random_seed: number;
+
+  @Column('integer', { nullable: true })
+  max_vehicle_shift_minutes: number;
+
+  @Column('integer', { nullable: true })
+  max_vehicles: number;
+
+  @Column('float', { nullable: true })
+  deadhead_cost_per_minute: number;
+
+  @Column('float', { nullable: true })
+  idle_cost_per_minute: number;
+
+  @Column('boolean', { nullable: true })
+  allow_multi_line_block: boolean;
+
+  @Column('boolean', { nullable: true })
+  allow_vehicle_split_shifts: boolean;
+
+  @Column('integer', { nullable: true })
+  split_shift_min_gap_minutes: number;
+
+  @Column('integer', { nullable: true })
+  split_shift_max_gap_minutes: number;
+
+  @Column('integer', { nullable: true })
+  max_simultaneous_chargers: number;
+
+  @Column('boolean', { nullable: true })
+  enable_column_generation: boolean;
+
+  @Column('boolean', { nullable: true })
+  pricing_enabled: boolean;
+
+  @Column('boolean', { nullable: true })
+  use_set_covering: boolean;
+
+  @Column('integer', { nullable: true })
+  min_workpiece_minutes: number;
+
+  @Column('integer', { nullable: true })
+  max_workpiece_minutes: number;
+
+  @Column('integer', { nullable: true })
+  min_trips_per_piece: number;
+
+  @Column('integer', { nullable: true })
+  max_trips_per_piece: number;
+
+  @Column('float', { nullable: true })
+  peak_energy_cost_per_kwh: number;
+
+  @Column('float', { nullable: true })
+  offpeak_energy_cost_per_kwh: number;
+
+  @Column('integer', { nullable: true })
   preferred_pair_window_minutes: number;
 
   @Column('boolean', { nullable: true })
   preserve_preferred_pairs: boolean;
+
+  @Column('float', { nullable: true })
+  pair_break_penalty: number;
+
+  @Column('float', { nullable: true })
+  paired_trip_bonus: number;
+
+  @Column('float', { nullable: true })
+  max_connection_cost_for_reuse_ratio: number;
+
+  @Column('integer', { nullable: true })
+  max_candidate_successors_per_task: number;
+
+  @Column('integer', { nullable: true })
+  max_generated_columns: number;
+
+  @Column('integer', { nullable: true })
+  max_pricing_iterations: number;
+
+  @Column('integer', { nullable: true })
+  max_pricing_additions: number;
 
   // Comportamento do veículo em intervalos longos:
   // 'solver_decides' | 'stay_at_terminal' | 'return_to_garage'

@@ -12,7 +12,8 @@ from src.algorithms.csp.set_partitioning import SetPartitioningCSP
 from src.algorithms.utils import preferred_pair_penalty
 from src.algorithms.vsp.greedy import GreedyVSP, build_preferred_pairs
 from src.core.exceptions import HardConstraintViolationError
-from src.domain.models import AlgorithmType, Block, Trip, VehicleType
+from src.domain.models import AlgorithmType, Block, CSPSolution, Duty, OptimizationResult, Trip, VehicleType, VSPSolution
+from src.services.hard_constraint_validator import HardConstraintValidator
 from src.services.optimizer_service import OptimizerService
 
 
@@ -550,6 +551,46 @@ def test_hard_validation_rejects_mandatory_group_split():
         all_issues = output_report.get("issues", [])
         assert not any("MANDATORY_GROUP_SPLIT" in issue for issue in all_issues), \
             "MANDATORY_GROUP_SPLIT deve ser soft, não hard"
+
+
+def test_vsp_force_round_trip_intent_enables_hard_group_split_validation():
+    trips = [
+        _trip(1, 360, 90, line=31, origin=10, dest=20, depot=1, trip_group_id=9901, direction="IDA"),
+        _trip(2, 390, 90, line=31, origin=20, dest=10, depot=1, trip_group_id=9901, direction="VOLTA"),
+    ]
+
+    with pytest.raises(HardConstraintViolationError) as exc:
+        OptimizerService().run(
+            trips,
+            _vehicle(),
+            algorithm=AlgorithmType.GREEDY,
+            cct_params={"allow_relief_points": True},
+            vsp_params={"force_round_trip": True, "preserve_preferred_pairs": True},
+            time_budget_s=2.0,
+        )
+
+    assert "MANDATORY_GROUP_SPLIT" in str(exc.value)
+
+
+def test_hard_validator_uses_meal_break_parameter_not_min_break_only():
+    first = Block(id=1, trips=[_trip(1, 360, 180, origin=10, dest=20)])
+    second = Block(id=2, trips=[_trip(2, 570, 180, origin=20, dest=10)])
+    duty = Duty(id=1)
+    duty.add_task(first)
+    duty.add_task(second)
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[first, second]),
+        csp=CSPSolution(duties=[duty]),
+    )
+
+    report = HardConstraintValidator().audit_result(
+        result,
+        trips=[*first.trips, *second.trips],
+        cct_params={"min_break_minutes": 30, "meal_break_minutes": 60, "max_driving_minutes": 600},
+        vsp_params={"min_layover_minutes": 30},
+    )
+
+    assert any(issue.startswith("MEAL_BREAK_MISSING") for issue in report["soft_issues"])
 
 
 def test_run_cutting_splits_inside_trip_at_explicit_mid_trip_relief():

@@ -40,8 +40,9 @@ celery_app.conf.update(
     # soft_time_limit dispara SoftTimeLimitExceeded (capturável); time_limit envia SIGKILL.
     task_soft_time_limit=1200,      # 20 min: orçamento 15 min + 5 min de overhead
     task_time_limit=1500,           # 25 min: SIGKILL caso soft limit seja ignorado
-    # Limpa fragmentação de memória: reinicia o processo após N tarefas concluídas
-    worker_max_tasks_per_child=10,
+    # Reinicia o processo após cada otimização pesada para devolver RAM ao SO.
+    worker_max_tasks_per_child=1,
+    worker_max_memory_per_child=800000,  # ~800 MB em KB
     # Resultados e Caching
     result_expires=43200,           # 12 horas de retenção no Redis para habilitar Smart Caching
     result_extended=True,           # Guarda traceback e estado estendido
@@ -51,4 +52,3 @@ celery_app.conf.update(
     # Nome da fila padrão
     task_default_queue="optimizer",
 )
-

@@ -10,9 +10,11 @@ from src.api.routes.optimize import router as optimize_router
 from fastapi import FastAPI
 from src.algorithms.csp.greedy import GreedyCSP
 from src.algorithms.evaluator import CostEvaluator
+from src.algorithms.hybrid.pipeline import HybridPipeline
 from src.core.exceptions import HardConstraintViolationError
 from src.domain.models import AlgorithmType, Block, Duty, OptimizationResult, Trip, VehicleType, VSPSolution, CSPSolution
 from src.services.optimizer_service import OptimizerService
+from src.services.optimizer_tasks import run_optimization_task
 
 
 def _trip(
@@ -162,6 +164,172 @@ def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
     assert payload["duties"][0]["overtime_cost"] == pytest.approx(6.25)
     # Per-duty total inclui cost_duty (500.0) por design — total = 131.25 + 500 = 631.25
     assert payload["duties"][0]["total_cost"] == pytest.approx(631.25)
+
+
+def test_optimizer_result_compact_payload_avoids_trip_object_duplication():
+    trip = _trip(1, 360, 60, trip_group_id=77, direction="outbound")
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+    duty.meta["covered_original_trip_ids"] = [77]
+
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block], meta={"input": {"min_layover_minutes": 8}}),
+        csp=CSPSolution(duties=[duty], meta={"input": {"meal_break_minutes": 60}}),
+        meta={
+            "solver_version": "test",
+            "performance": {"solver_ms": 12},
+            "solver_explanation": {
+                "status": "soft_violation",
+                "issues": {
+                    "hard": [],
+                    "soft": [{"raw": "MANDATORY_GROUP_SPLIT [1,2]", "code": "MANDATORY_GROUP_SPLIT"} for _ in range(12)],
+                },
+            },
+            "trip_group_audit": {
+                "groups_total": 20,
+                "split_groups": 3,
+                "sample_splits": [{"trip_group_id": idx} for idx in range(12)],
+            },
+        },
+    )
+    breakdown = CostEvaluator().total_cost_breakdown(result, _vehicle())
+    breakdown["vsp"]["blocks"] = [{"block_id": 1, "total": 123.0}]
+    breakdown["csp"]["duties"] = [{"duty_id": 1, "total": 456.0}]
+    result.total_cost = breakdown["total"]
+    result.meta["cost_breakdown"] = breakdown
+    result.meta["hard_constraint_report"] = {"strict": True, "input": {"ok": True}}
+    result.meta["operational_kpis"] = {"vehicles": 1}
+
+    payload = result.as_compact_dict()
+
+    assert payload["blocks"][0]["trips"] == [1]
+    assert payload["blocks"][0]["trip_ids"] == [1]
+    assert payload["duties"][0]["trips"] == [77]
+    assert payload["duties"][0]["trip_ids"] == [77]
+    assert "segments" not in payload["duties"][0]
+    assert payload["meta"]["solver_version"] == "test"
+    assert payload["meta"]["performance"] == {"solver_ms": 12}
+    assert "blocks" not in payload["cost_breakdown"]["vsp"]
+    assert "duties" not in payload["cost_breakdown"]["csp"]
+    assert payload["solver_explanation"]["issues"]["soft_count"] == 12
+    assert len(payload["solver_explanation"]["issues"]["soft"]) == 10
+    assert len(payload["trip_group_audit"]["sample_splits"]) == 5
+
+
+def test_run_optimization_task_returns_compact_payload(monkeypatch):
+    trip = _trip(1, 360, 60)
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block], meta={"input": {"min_layover_minutes": 8}}),
+        csp=CSPSolution(duties=[duty], meta={"input": {"meal_break_minutes": 60}}),
+        meta={"solver_version": "test"},
+    )
+    breakdown = CostEvaluator().total_cost_breakdown(result, _vehicle())
+    result.total_cost = breakdown["total"]
+    result.meta["cost_breakdown"] = breakdown
+
+    class DummyService:
+        def run(self, *args, **kwargs):
+            return result
+
+    monkeypatch.setattr("src.services.optimizer_tasks.OptimizerService", lambda: DummyService())
+
+    response = run_optimization_task(
+        {
+            "trips": [trip.__dict__],
+            "vehicle_types": [VehicleType(
+                id=1,
+                name="Standard",
+                passenger_capacity=40,
+            ).__dict__],
+            "algorithm": "greedy",
+            "run_id": 99,
+            "line_id": 1,
+            "company_id": 1,
+        }
+    )
+
+    assert response["_is_error"] is False
+    compact = response["result"]
+    assert compact["blocks"][0]["trips"] == [1]
+    assert compact["duties"][0]["trips"] == [1]
+    assert compact["meta"]["run_id"] == 99
+
+
+def test_hybrid_group_audit_fallback_is_skipped_for_large_instances(monkeypatch):
+    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 222)]
+    blocks = [Block(id=idx, trips=[trip]) for idx, trip in enumerate(trips, start=1)]
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=blocks, algorithm="hybrid_pipeline"),
+        csp=CSPSolution(duties=[]),
+    )
+
+    service = OptimizerService()
+    dispatch_calls: list[AlgorithmType] = []
+
+    def fake_dispatch(algorithm, *args, **kwargs):
+        dispatch_calls.append(algorithm)
+        return result
+
+    monkeypatch.setattr(service, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(service, "_build_trip_group_audit", lambda *args, **kwargs: {"split_groups": 5, "same_roster_ratio": 0.4})
+    monkeypatch.setattr(service, "_ensure_deadhead_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_inject_trip_group_constraints", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_ensure_vsp_operational_warnings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service.validator, "audit_input", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.validator, "audit_result", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.evaluator, "total_cost_breakdown", lambda *args, **kwargs: {"total": 0.0, "vsp": {"total": 0.0}, "csp": {"total": 0.0}})
+    monkeypatch.setattr(service, "_build_operational_kpis", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_phase_summary", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_reproducibility_snapshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_solver_explanation", lambda *args, **kwargs: {})
+
+    service.run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        cct_params={"strict_hard_validation": False},
+        vsp_params={},
+        time_budget_s=30.0,
+    )
+
+    assert dispatch_calls == [AlgorithmType.HYBRID_PIPELINE]
+    assert result.meta["performance"]["group_audit_fallback_skipped"]["reason"] == "instance_scale_guard"
+
+
+def test_hybrid_pipeline_skips_vsp_metaheuristics_for_scaled_instances(monkeypatch):
+    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 230)]
+    baseline_blocks = [Block(id=idx, trips=[trip]) for idx, trip in enumerate(trips, start=1)]
+    baseline_vsp = VSPSolution(blocks=baseline_blocks, algorithm="mcnf_vsp")
+
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.MCNFVSP.solve", lambda self, *args, **kwargs: baseline_vsp)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_cost", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_hard_issue_count", lambda *args, **kwargs: 0)
+
+    def _should_not_run(*args, **kwargs):
+        raise AssertionError("metaheuristic should have been skipped")
+
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.SimulatedAnnealingVSP.solve", _should_not_run)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.TabuSearchVSP.solve", _should_not_run)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.GeneticVSP.solve", _should_not_run)
+    monkeypatch.setattr(
+        "src.algorithms.hybrid.pipeline.HybridPipeline._finalize",
+        lambda self, vsp_sol, trips, vehicle_types, phase_timings_ms=None: OptimizationResult(
+            vsp=vsp_sol,
+            csp=CSPSolution(duties=[]),
+            total_elapsed_ms=1.0,
+            meta={"phase_timings_ms": phase_timings_ms or {}},
+        ),
+    )
+
+    result = HybridPipeline(time_budget_s=30.0, cct_params={}, vsp_params={}).solve(trips, _vehicle())
+
+    assert result.vsp.algorithm == "mcnf_vsp"
+    assert baseline_vsp.meta["performance"]["vsp_metaheuristics_skipped"]["reason"] == "instance_scale_guard"
 
 
 def test_greedy_csp_computes_overtime_from_work_time_not_spread_time():
