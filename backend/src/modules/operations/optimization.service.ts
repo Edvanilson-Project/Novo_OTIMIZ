@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, ConflictException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import axios from 'axios';
@@ -13,7 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { TenantContext } from '../../common/context/tenant-context';
 
 @Injectable()
-export class OptimizationService {
+export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
   private readonly OPTIMIZER_URL = process.env.OPTIMIZER_URL || 'http://localhost:8000';
   private readonly INTERNAL_KEY: string;
@@ -29,6 +29,16 @@ export class OptimizationService {
     private tenantContext: TenantContext,
   ) {
     this.INTERNAL_KEY = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY') || 'internal-key-123456';
+  }
+
+  async onModuleInit() {
+    const stale = await this.scheduleRepo.update(
+      { status: ScheduleStatus.PROCESSING },
+      { status: ScheduleStatus.FAILED },
+    );
+    if (stale.affected && stale.affected > 0) {
+      this.logger.warn(`Cleared ${stale.affected} stale PROCESSING lock(s) on startup`);
+    }
   }
 
   async runOptimization(companyId: number, algorithm?: string) {
