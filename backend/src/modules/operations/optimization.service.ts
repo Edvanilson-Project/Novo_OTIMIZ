@@ -84,9 +84,18 @@ export class OptimizationService implements OnModuleInit {
           const st = Number(t.startTime);
           // Normaliza virada de meia-noite: se end < start, soma 1440
           const et = Number(t.endTime) < st ? Number(t.endTime) + 1440 : Number(t.endTime);
+          // Deriva trip_group_id a partir do pairId (ex: "P097" → 97) para que
+          // pares IDA-VOLTA com gap=0 sejam tratados como grupo forçado pelo optimizer.
+          const tripGroupId = t.tripGroupId
+            ? Number(t.tripGroupId)
+            : t.pairId
+              ? parseInt(t.pairId.replace(/\D/g, ''), 10) || null
+              : null;
           return {
-            id: t.id,                     // sempre DB id para que persistResults possa fazer lookup
+            id: t.id,
             line_id: Number(t.lineId) || 0,
+            trip_group_id: tripGroupId,
+            direction: t.direction ?? null,
             start_time: st,
             end_time: et,
             origin_id: Number(t.originId),

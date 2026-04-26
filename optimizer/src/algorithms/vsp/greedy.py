@@ -447,8 +447,12 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     pairing_delta -= paired_trip_bonus
                     pairing_state = "preferred_pair"
                 elif expected_pair is not None and expected_pair != trip.id:
-                    pairing_delta += pair_break_penalty
-                    pairing_state = "pair_break"
+                    # If the preferred pair is already completed in this block, don't penalize
+                    if trip_to_block.get(expected_pair) is blk:
+                        pairing_state = "pair_completed_neutral"
+                    else:
+                        pairing_delta += pair_break_penalty
+                        pairing_state = "pair_break"
                 else:
                     if last.line_id == trip.line_id:
                         if last.destination_id == trip.origin_id and last.origin_id == trip.destination_id:
