@@ -31,7 +31,9 @@ const SidebarItems = () => {
   const [userRole, setUserRole] = useState<string>('operator');
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     const u = getSessionUser();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (u?.role) setUserRole(u.role);
   }, []);
 

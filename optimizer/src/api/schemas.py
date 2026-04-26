@@ -228,6 +228,10 @@ class OptimizeRequest(BaseModel):
     line_id: Optional[int] = None
     company_id: Optional[int] = None
     algorithm: AlgorithmType = AlgorithmType.HYBRID_PIPELINE
+    algorithm_preference: Optional[str] = Field(
+        None,
+        description="Preferência de motor VSP: 'assignment_vsp' ativa o solver esparso de alta escala (40k+ viagens)",
+    )
     depot_id: Optional[int] = None
     time_budget_s: Optional[float] = Field(None, ge=1, le=3600)
     wait_for_completion: bool = Field(False, description="Se True, a requisição aguarda o resultado e o retorna diretamente")

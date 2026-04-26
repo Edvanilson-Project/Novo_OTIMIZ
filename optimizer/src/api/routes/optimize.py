@@ -133,6 +133,7 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True) if body.cct_params else {},
             "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
             "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
+            "algorithm_preference": body.algorithm_preference,
             "version": "v2.0",  # Adicionar versionamento explícito
             "timestamp": int(time.time())  # Para evitar cache de execuções antigas
         }

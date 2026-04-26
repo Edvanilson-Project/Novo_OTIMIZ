@@ -19,6 +19,7 @@ class AlgorithmType(str, Enum):
     JOINT_SOLVER = "joint_solver"
     HYBRID_PIPELINE = "hybrid_pipeline"
     VCSP_PULP = "vcsp_pulp"
+    ASSIGNMENT_VSP = "assignment_vsp"
 
 
 class SolverPhase(str, Enum):

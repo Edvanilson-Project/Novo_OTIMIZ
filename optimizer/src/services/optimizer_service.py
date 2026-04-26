@@ -19,6 +19,7 @@ from ..algorithms.evaluator import CostEvaluator
 from ..algorithms.hybrid.pipeline import HybridPipeline
 from ..algorithms.integrated.joint_solver import JointSolver
 from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
+from ..algorithms.vsp.assignment import AssignmentVSP
 from ..algorithms.vsp.genetic import GeneticVSP
 from ..algorithms.vsp.greedy import GreedyVSP
 from ..algorithms.vsp.mcnf import MCNFVSP
@@ -47,6 +48,7 @@ class OptimizerService:
             AlgorithmType.JOINT_SOLVER: self._run_joint,
             AlgorithmType.HYBRID_PIPELINE: self._run_hybrid,
             AlgorithmType.VCSP_PULP: self._run_vcsp_pulp,
+            AlgorithmType.ASSIGNMENT_VSP: self._run_assignment_vsp,
         }
 
     def run(
@@ -887,8 +889,9 @@ class OptimizerService:
         # Mapa de alocação de tempo otimizada
         TIME_ALLOCATION = {
             AlgorithmType.GENETIC: 0.4,
-            AlgorithmType.HYBRID_PIPELINE: 0.7, 
-            AlgorithmType.VCSP_PULP: 0.9
+            AlgorithmType.HYBRID_PIPELINE: 0.7,
+            AlgorithmType.VCSP_PULP: 0.9,
+            AlgorithmType.ASSIGNMENT_VSP: 0.3
         }
         budget = TIME_ALLOCATION.get(algorithm, 1.0) * time_budget_s
         handler = self._solver_registry.get(algorithm)
@@ -951,6 +954,11 @@ class OptimizerService:
     def _run_vcsp_pulp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
         return VCSPJointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+
+    def _run_assignment_vsp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+        csp = self._make_csp(cct_params, vsp_params)
+        vsp = AssignmentVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
     def _as_dict(self, params: Any) -> Dict[str, Any]:
         if params is None:

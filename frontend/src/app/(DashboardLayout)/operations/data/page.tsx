@@ -477,6 +477,7 @@ export default function OperationsDataPage() {
   ];
 
   // ─── Subformulário reutilizável de campos de viagem (memoizado para evitar perda de foco) ───
+  // eslint-disable-next-line react/display-name
   const TripFields = useMemo(() => ({
     prefix, startTime, endTime, duration, originId, destinationId, distanceKm, direction,
     onStartTime, onEndTime, onDuration, onOriginId, onDestinationId, onDistanceKm, onDirection,

@@ -364,7 +364,7 @@ export default function PlannerPage() {
                 sx={{ fontWeight: 500 }}
               >
                 <Stack spacing={0.5}>
-                  <Typography variant="body2" fontWeight={600}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {optimizationProgress?.phaseLabel || "Motor de otimização em execução."}
                   </Typography>
                   {optimizationProgress?.taskId && (
@@ -474,7 +474,6 @@ export default function PlannerPage() {
         open={aiDrawerOpen}
         onClose={() => setAiDrawerOpen(false)}
         result={schedule?.resultSummary ?? null}
-        parameters={parameters}
       />
 
       <Snackbar

@@ -61,6 +61,21 @@ class HybridPipeline(BaseAlgorithm):
         budget = self.time_budget_s
         n = len(trips)
 
+        # Fast path: AssignmentVSP para grandes datasets ou preferência explícita
+        use_assignment = (
+            self.vsp_params.get("algorithm_preference") == "assignment_vsp"
+            or n > 5000
+        )
+        if use_assignment:
+            from ..vsp.assignment import AssignmentVSP
+            from ..joint_opt_boundary import stitch_chunk_boundaries
+            t_phase = time.perf_counter()
+            best_vsp = AssignmentVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+            phase_timings_ms["vsp_assignment_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+            best_vsp = stitch_chunk_boundaries(best_vsp, self.vsp_params)
+            logger.info("[PIPELINE] AssignmentVSP: %d blocos → _finalize", len(best_vsp.blocks))
+            return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
+
         # Pré-calcular preferred_pairs UMA vez — O(n²) evitado em cada _vsp_cost call
         min_layover = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
         if bool(self.vsp_params.get("preserve_preferred_pairs", True)):
@@ -204,39 +219,46 @@ class HybridPipeline(BaseAlgorithm):
                 total_elapsed_ms=self._elapsed_ms(),
             )
 
-        t_phase = time.perf_counter()
-        csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
-        phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-        # Dar mais budget ao ILP para gerar colunas melhores
-        ilp_budget = max(60.0, self.time_budget_s * 0.25)
-        if not self._check_timeout():
-            ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
-            ilp.time_budget_s = ilp_budget
+        if len(vsp_sol.blocks) > 1500:
+            from ..csp.chunked_orchestrator import ChunkedCSPOrchestrator
             t_phase = time.perf_counter()
-            csp_ilp = ilp.solve(vsp_sol.blocks, trips)
-            phase_timings_ms["csp_set_partitioning_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-            ilp_better = csp_ilp.cct_violations < csp_greedy.cct_violations
-            ilp_tie_and_not_worse_crew = (
-                csp_ilp.cct_violations == csp_greedy.cct_violations
-                and csp_ilp.num_crew <= csp_greedy.num_crew
-            )
-            # Also check short duty count: prefer solution with fewer shorts
-            min_work = int(kwargs.get("min_work_minutes", 0))
-            if min_work > 0 and csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew):
-                greedy_shorts = sum(1 for d in csp_greedy.duties if d.work_time < min_work)
-                ilp_shorts = sum(1 for d in csp_ilp.duties if d.work_time < min_work)
-                if ilp_shorts > greedy_shorts:
-                    logger.info(
-                        "[PIPELINE] ILP has more short duties (%d vs %d), keeping greedy",
-                        ilp_shorts, greedy_shorts,
-                    )
-                    csp_final = csp_greedy
-                else:
-                    csp_final = csp_ilp
-            else:
-                csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
+            csp_final = ChunkedCSPOrchestrator(
+                vsp_params=self.vsp_params, chunk_threshold=1500, **kwargs,
+            ).solve(vsp_sol.blocks, trips)
+            phase_timings_ms["csp_chunked_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         else:
-            csp_final = csp_greedy                
+            t_phase = time.perf_counter()
+            csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
+            phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+            # Dar mais budget ao ILP para gerar colunas melhores
+            ilp_budget = max(60.0, self.time_budget_s * 0.25)
+            if not self._check_timeout():
+                ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
+                ilp.time_budget_s = ilp_budget
+                t_phase = time.perf_counter()
+                csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                phase_timings_ms["csp_set_partitioning_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+                ilp_better = csp_ilp.cct_violations < csp_greedy.cct_violations
+                ilp_tie_and_not_worse_crew = (
+                    csp_ilp.cct_violations == csp_greedy.cct_violations
+                    and csp_ilp.num_crew <= csp_greedy.num_crew
+                )
+                min_work = int(kwargs.get("min_work_minutes", 0))
+                if min_work > 0 and csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew):
+                    greedy_shorts = sum(1 for d in csp_greedy.duties if d.work_time < min_work)
+                    ilp_shorts = sum(1 for d in csp_ilp.duties if d.work_time < min_work)
+                    if ilp_shorts > greedy_shorts:
+                        logger.info(
+                            "[PIPELINE] ILP has more short duties (%d vs %d), keeping greedy",
+                            ilp_shorts, greedy_shorts,
+                        )
+                        csp_final = csp_greedy
+                    else:
+                        csp_final = csp_ilp
+                else:
+                    csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
+            else:
+                csp_final = csp_greedy
         from ..joint_opt import joint_duty_vehicle_swap
         t_phase = time.perf_counter()
         csp_final, vsp_sol = joint_duty_vehicle_swap(

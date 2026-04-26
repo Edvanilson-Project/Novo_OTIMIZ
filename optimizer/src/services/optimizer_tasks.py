@@ -130,8 +130,11 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     depot_id = payload.get("depot_id")
     time_budget_s = payload.get("time_budget_s")
     cct_params = payload.get("cct_params") or {}
-    vsp_params = payload.get("vsp_params") or {}
+    vsp_params = dict(payload.get("vsp_params") or {})
     optimization_params = payload.get("optimization_params") or {}
+    algorithm_preference = payload.get("algorithm_preference")
+    if algorithm_preference:
+        vsp_params["algorithm_preference"] = algorithm_preference
 
     # Metadados para o payload de erro (se necessário)
     run_id = payload.get("run_id")
