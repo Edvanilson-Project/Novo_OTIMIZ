@@ -359,7 +359,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
         """Gera caminhos viáveis com podas agressivas e limite de expansão."""
         MAX_PATHS = 20000  # Limite absoluto de caminhos a gerar
-        MAX_DEPTH = 10    # Máximo de viagens por caminho
+        MAX_DEPTH = 30    # Máximo de viagens por caminho (dia completo ~20 viagens/veículo)
         # Budget por trip-inicial: evita que DFS consuma todos os slots começando
         # apenas nos primeiros trips e deixe trips tardios sem multi-trip paths.
         PER_START_BUDGET = max(50, MAX_PATHS // max(1, len(trips)))
@@ -375,7 +375,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         elif _threshold:
             max_idle_gap = int(_threshold)
         else:
-            max_idle_gap = self.meal_break_minutes + 180  # comportamento padrão do solver
+            max_idle_gap = self.meal_break_minutes + 480  # comportamento padrão do solver (até 8h ociosas)
         
         # Ordenar viagens por start_time para poda temporal precoce
         sorted_trips = sorted(trips, key=lambda t: t.start_time)
