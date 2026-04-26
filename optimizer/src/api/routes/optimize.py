@@ -41,6 +41,7 @@ from ..schemas import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 settings = get_settings()
+CACHE_VERSION = "v2.0"
 
 def _to_vt(v) -> VehicleType:
     return VehicleType(
@@ -134,24 +135,40 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
             "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
             "algorithm_preference": body.algorithm_preference,
-            "version": "v2.0",  # Adicionar versionamento explícito
-            "timestamp": int(time.time())  # Para evitar cache de execuções antigas
+            "version": CACHE_VERSION,
         }
     except Exception as e:
         logger.error(f"Erro ao construir payload: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Erro ao processar parâmetros: {str(e)}")
 
+    if body.wait_for_completion:
+        try:
+            # Execução síncrona direta (ignora fila Celery/Redis para resposta imediata)
+            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos
+            result_raw = run_optimization_task(payload)
+
+            if isinstance(result_raw, dict) and result_raw.get("_is_error"):
+                err = result_raw.get("error_payload", {})
+                raise HTTPException(status_code=400, detail=err.get("message", "Erro na execução da otimização"))
+
+            final_result = result_raw.get("result", result_raw)
+            return _build_optimize_response(final_result, len(body.trips))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Erro na execução síncrona: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Erro ao processar otimização síncrona: {str(e)}")
+
     # Calcula Fingerprint Determinístico para o Smart Cache com versionamento
     try:
-        # Incluir versão e timestamp no cálculo do fingerprint
         cache_payload = {
             **payload,
-            "cache_version": "v2.0",
-            "timestamp": int(time.time() // 3600)  # Muda a cada hora
+            "cache_version": CACHE_VERSION,
+            "cache_bucket_hour": int(time.time() // 3600),
         }
         payload_str = json.dumps(cache_payload, sort_keys=True)
         fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
-        cache_key = f"optimizer:cache:v2.0:{fingerprint}"
+        cache_key = f"optimizer:cache:{CACHE_VERSION}:{fingerprint}"
     except Exception as e:
         logger.error(f"Erro ao calcular fingerprint do cache: {str(e)}")
         raise HTTPException(
@@ -187,25 +204,6 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
     except Exception as exc:
         logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
         # Continuar sem cache em caso de erro
-
-    if body.wait_for_completion:
-        try:
-            # Execução síncrona direta (ignora fila Celery para resposta imediata)
-            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos
-            result_raw = run_optimization_task(payload)
-            
-            if isinstance(result_raw, dict) and result_raw.get("_is_error"):
-                 err = result_raw.get("error_payload", {})
-                 raise HTTPException(status_code=400, detail=err.get("message", "Erro na execução da otimização"))
-            
-            # Ajuste: A task retorna {"_is_error": False, "result": {...}}
-            final_result = result_raw.get("result", result_raw)
-            return _build_optimize_response(final_result, len(body.trips))
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Erro na execução síncrona: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Erro ao processar otimização síncrona: {str(e)}")
 
     try:
         task = run_optimization_task.delay(payload)

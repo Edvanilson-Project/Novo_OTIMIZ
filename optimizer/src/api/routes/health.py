@@ -14,6 +14,7 @@ settings = get_settings()
 async def health_check(response: Response) -> HealthResponse:
     health_data = HealthResponse(
         status="ok",
+        version=settings.app_version,
         redis_status="unknown",
         celery_status="unknown",
         active_workers=0

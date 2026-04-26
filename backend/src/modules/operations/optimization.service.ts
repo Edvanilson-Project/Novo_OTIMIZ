@@ -93,7 +93,7 @@ export class OptimizationService implements OnModuleInit {
               : null;
           return {
             id: t.id,
-            line_id: Number(t.lineId) || 0,
+            line_id: this.resolveLineId(t.lineId, t.lineCode, 0),
             trip_group_id: tripGroupId,
             direction: t.direction ?? null,
             start_time: st,
@@ -249,6 +249,11 @@ export class OptimizationService implements OnModuleInit {
 
     try {
     await this.dataSource.transaction(async (manager) => {
+      const solverExplanation = result.solver_explanation ?? null;
+      const hardIssues = Array.isArray(solverExplanation?.issues?.hard) ? solverExplanation.issues.hard : [];
+      const softIssues = Array.isArray(solverExplanation?.issues?.soft) ? solverExplanation.issues.soft : [];
+      const reportedViolations = Math.max(Number(result.cct_violations ?? 0), hardIssues.length);
+
       // 1. Salvar Blocos (Veículos)
       const blocks = (result.blocks || []).map((b: any) =>
         manager.create(BlockAssignment, {
@@ -279,9 +284,11 @@ export class OptimizationService implements OnModuleInit {
       await manager.update(Schedule, scheduleId, {
         status: ScheduleStatus.COMPLETED,
         totalCost: result.total_cost ?? 0,
-        cctViolations: result.cct_violations ?? 0,
+        cctViolations: reportedViolations,
         metadata: {
-          solver_explanation: result.solver_explanation ?? null,
+          solver_explanation: solverExplanation,
+          hard_issue_count: hardIssues.length,
+          soft_issue_count: softIssues.length,
           unassigned_trips: result.unassigned_trips ?? 0,
           cost_breakdown: result.cost_breakdown ?? {},
           num_vehicles: result.vehicles ?? 0,
@@ -411,7 +418,7 @@ export class OptimizationService implements OnModuleInit {
         id: t.id ?? t.tripId,
         start_time: t.start_time ?? t.startTime,
         end_time: t.end_time ?? t.endTime,
-        line_id: t.line_id ?? t.lineId ?? 0,
+        line_id: this.resolveLineId(t.line_id ?? t.lineId, t.line_code ?? t.lineCode, 0),
         origin_id: t.origin_id ?? t.originId ?? 0,
         destination_id: t.destination_id ?? t.destinationId ?? 0,
         duration: t.duration ?? 0,
@@ -457,7 +464,7 @@ export class OptimizationService implements OnModuleInit {
         id: t.id ?? t.tripId,
         start_time: t.start_time ?? t.startTime,
         end_time: t.end_time ?? t.endTime,
-        line_id: t.line_id ?? t.lineId ?? 0,
+        line_id: this.resolveLineId(t.line_id ?? t.lineId, t.line_code ?? t.lineCode, 0),
         origin_id: t.origin_id ?? t.originId ?? 0,
         destination_id: t.destination_id ?? t.destinationId ?? 0,
         duration: t.duration ?? 0,
@@ -562,7 +569,7 @@ export class OptimizationService implements OnModuleInit {
           trip_id: t.tripId,
           start_time: Number(t.startTime),
           end_time: Number(t.endTime) < Number(t.startTime) ? Number(t.endTime) + 1440 : Number(t.endTime),
-          line_id: Number(t.lineId) || null,
+          line_id: this.resolveLineId(t.lineId, t.lineCode, null),
           line_code: t.lineCode ?? null,
           origin_id: Number(t.originId),
           destination_id: Number(t.destinationId),
@@ -599,6 +606,10 @@ export class OptimizationService implements OnModuleInit {
       cctViolations: schedule.cctViolations ?? 0,
       total_trips: meta.total_trips ?? uniqueTripIds.length,
       unassigned_trips: meta.unassigned_trips ?? [],
+      hardIssueCount: meta.hard_issue_count ?? (((meta.solver_explanation || {}).issues || {}).hard || []).length,
+      softIssueCount: meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length,
+      hasHardViolations: (((meta.solver_explanation || {}).issues || {}).hard || []).length > 0,
+      solverStatus: (meta.solver_explanation || {}).status ?? null,
       costBreakdown: meta.cost_breakdown ?? null,
       solverExplanation: meta.solver_explanation ?? null,
       blocks: hydratedBlocks,
@@ -632,5 +643,47 @@ export class OptimizationService implements OnModuleInit {
       blocks: hydratedBlocks,
       resultSummary,
     };
+  }
+
+  private resolveLineId(lineId: unknown, lineCode: unknown, fallback: number | null): number | null {
+    const numericLineId = this.toPositiveInteger(lineId);
+    if (numericLineId !== null) {
+      return numericLineId;
+    }
+
+    const numericLineCode = this.parseLineCode(lineCode);
+    if (numericLineCode !== null) {
+      return numericLineCode;
+    }
+
+    return fallback;
+  }
+
+  private toPositiveInteger(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    const normalized = Math.round(parsed);
+    return normalized > 0 ? normalized : null;
+  }
+
+  private parseLineCode(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const digits = String(value).replace(/\D/g, '');
+    if (!digits) {
+      return null;
+    }
+
+    const parsed = Number(digits);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }
 }

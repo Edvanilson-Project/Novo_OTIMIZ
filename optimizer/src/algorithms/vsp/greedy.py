@@ -772,6 +772,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 peak = max(peak, concurrent)
             if peak > max_chargers:
                 warnings.append(f"CHARGER_CAPACITY_EXCEEDED peak={peak}>{max_chargers}")
+        else:
+            peak = 0
         if pair_meta["preferred_pair_breaks"] > 0:
             warnings.append(
                 f"PREFERRED_PAIR_BREAKS matched={pair_meta['paired_connections_followed']}/{pair_meta['preferred_pair_count']}"
@@ -793,6 +795,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "crew_block_limit_minutes": crew_block_limit,
                 "same_depot_required": same_depot_required,
                 "max_simultaneous_chargers": max_chargers,
+                "charger_peak_concurrency": peak,
+                "charger_capacity_exceeded": peak > max_chargers if max_chargers < 999999 else False,
                 "preserve_preferred_pairs": preserve_preferred_pairs,
                 "preferred_pair_window_minutes": preferred_pair_window,
                 "enable_single_trip_compaction": enable_single_trip_compaction,

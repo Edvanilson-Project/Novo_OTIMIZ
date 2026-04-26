@@ -1,14 +1,19 @@
 """Configuração central via variáveis de ambiente (Pydantic BaseSettings)."""
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+OPTIMIZER_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="allow"
+        env_file=str(OPTIMIZER_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="allow",
     )
 
     # ── App ───────────────────────────────────────────────────────────────────
@@ -115,7 +120,27 @@ class Settings(BaseSettings):
     routing_cache_ttl: int = 86400  # 24 horas
 
     # ── Segurança Interna (Security Bridge) ──────────────────────────────────
-    internal_security_key: str = Field(default="internal-key-123456", env="INTERNAL_OPTIMIZER_KEY")
+    internal_security_key: str = Field(
+        default="internal-key-123456",
+        validation_alias=AliasChoices("INTERNAL_OPTIMIZER_KEY", "internal_security_key"),
+    )
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+            return False
+        return value
 
 
 @lru_cache

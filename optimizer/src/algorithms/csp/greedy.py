@@ -374,6 +374,70 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             return self.trip_group_split_penalty * external_matches
         return 0.0
 
+    def _task_group_ids(self, task: Block) -> set[int]:
+        cached = task.meta.get("covered_trip_group_ids")
+        if cached:
+            return {int(item) for item in cached}
+        return {
+            int(trip.trip_group_id)
+            for trip in task.trips
+            if getattr(trip, "trip_group_id", None) is not None
+        }
+
+    def _duty_has_meal_break(self, duty: Duty) -> bool:
+        if "meal_break_found" in duty.meta:
+            return bool(duty.meta.get("meal_break_found"))
+        _, meal_break_found = self._continuous_drive_stats(duty)
+        return meal_break_found
+
+    def _duty_needs_meal_break(
+        self,
+        duty: Duty,
+        *,
+        projected_spread: Optional[int] = None,
+        projected_has_break: Optional[bool] = None,
+    ) -> bool:
+        if self.meal_break_minutes <= 0:
+            return False
+        spread = int(duty.spread_time if projected_spread is None else projected_spread)
+        has_break = self._duty_has_meal_break(duty) if projected_has_break is None else bool(projected_has_break)
+        return spread >= 360 and not has_break
+
+    def _meal_break_score(self, duty: Duty, candidate_task: Block, data: Dict[str, Any]) -> float:
+        if self.meal_break_minutes <= 0:
+            return 0.0
+
+        projected_spread = int(data.get("new_spread", duty.spread_time))
+        if projected_spread < 360:
+            return 0.0
+
+        had_break = self._duty_has_meal_break(duty)
+        projected_has_break = self._would_have_meal_break(duty, candidate_task)
+        raw_gap = int(data.get("gap", 0))
+        effective_gap = int(data.get("effective_gap", raw_gap))
+
+        if projected_has_break:
+            if not had_break:
+                return -min(240.0, float(max(effective_gap, self.meal_break_minutes)))
+            if effective_gap >= self.meal_break_minutes:
+                return -20.0
+            return 0.0
+
+        current_continuous = int(duty.meta.get("continuous_drive", duty.work_time))
+        projected_continuous = int(data.get("new_cont", current_continuous + self._block_drive(candidate_task)))
+        meal_trigger = max(240, self.mandatory_break_after - max(0, self.meal_break_minutes))
+
+        penalty = 200.0 + max(0.0, float(projected_spread - 360)) * 0.15
+        if current_continuous >= meal_trigger:
+            penalty += 80.0
+        if projected_continuous >= self.mandatory_break_after:
+            penalty += 120.0
+        if raw_gap > 0 and effective_gap < self.meal_break_minutes:
+            penalty += min(60.0, float(self.meal_break_minutes - effective_gap))
+        if len(duty.tasks) <= 1:
+            penalty += 20.0
+        return penalty
+
     def _boundary_idle_minutes(self, trip: Optional[Trip], *, start: bool) -> int:
         if trip is None:
             return 0
@@ -439,6 +503,17 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         last_trip_id = int(source_block.meta.get("vehicle_last_trip_id", trips[-1].id if trips else 0))
         is_source_block_start = bool(trips) and int(trips[0].id) == first_trip_id
         is_source_block_end = bool(trips) and int(trips[-1].id) == last_trip_id
+        internal_gaps = [
+            max(0, int(trips[index + 1].start_time) - int(trips[index].end_time))
+            for index in range(len(trips) - 1)
+        ]
+        task_group_ids = list(
+            dict.fromkeys(
+                int(trip.trip_group_id)
+                for trip in trips
+                if getattr(trip, "trip_group_id", None) is not None
+            )
+        )
         task = Block(id=task_id, trips=list(trips), vehicle_type_id=source_block.vehicle_type_id)
         task.meta.update(
             {
@@ -460,6 +535,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "task_end_buffer_minutes": source_end_buffer if is_source_block_end else 0,
                 "source_start_buffer_minutes": source_start_buffer,
                 "source_end_buffer_minutes": source_end_buffer,
+                "covered_trip_group_ids": task_group_ids,
+                "max_internal_gap_minutes": max(internal_gaps, default=0),
+                "meal_break_inside_task": bool(
+                    self.meal_break_minutes > 0 and max(internal_gaps, default=0) >= self.meal_break_minutes
+                ),
             }
         )
         return task
@@ -704,6 +784,12 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         duty.meta["waiting_minutes"] = int(duty.meta.get("waiting_minutes", 0)) + max(0, gap - int(data.get("transfer_needed", 0)))
         duty.meta["passive_transfer_minutes"] = int(duty.meta.get("passive_transfer_minutes", 0)) + int(data.get("passive_transfer", 0))
         duty.meta["connection_tolerance_minutes"] = self.connection_tolerance
+        meal_break_found = bool(duty.meta.get("meal_break_found", False))
+        if len(duty.tasks) > 1 and self.meal_break_minutes > 0 and self._effective_gap(gap) >= self.meal_break_minutes:
+            meal_break_found = True
+        if bool(block.meta.get("meal_break_inside_task", False)):
+            meal_break_found = True
+        duty.meta["meal_break_found"] = meal_break_found
         duty.meta.setdefault("service_day", self._service_day(block))
         current_service_day = int(data.get("next_service_day", self._service_day(block)))
         duty.meta["last_service_day"] = current_service_day
@@ -750,10 +836,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             if original_trip_id not in duty.meta["covered_original_trip_ids"]:
                 duty.meta["covered_original_trip_ids"].append(original_trip_id)
         duty.meta.setdefault("covered_trip_group_ids", [])
-        for trip in block.trips:
-            group_id = getattr(trip, "trip_group_id", None)
-            if group_id is None:
-                continue
+        for group_id in self._task_group_ids(block):
             if group_id not in duty.meta["covered_trip_group_ids"]:
                 duty.meta["covered_trip_group_ids"].append(group_id)
 
@@ -1084,20 +1167,24 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             preferred_roster = next((group_to_roster[group_id] for group_id in duty_groups if group_id in group_to_roster), None)
             assigned_roster: Optional[Dict[str, Any]] = None
             sorted_rosters = sorted(roster_state, key=lambda item: item["last_end"], reverse=True)
+
+            def roster_is_compatible(roster: Dict[str, Any]) -> bool:
+                if roster["last_end"] + self.inter_shift_rest > duty_start:
+                    return False
+                week = duty_start // (7 * 1440)
+                fortnight = duty_start // (14 * 1440)
+                week_drive = roster["week_drive"].get(week, 0) + daily_drive
+                fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
+                if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
+                    return False
+                return True
+
             # First pass: try preferred roster only
             if preferred_roster is not None:
                 for roster in sorted_rosters:
                     if roster["id"] != preferred_roster:
                         continue
-                    if roster["last_end"] + self.inter_shift_rest > duty_start:
-                        continue
-                    week = duty_start // (7 * 1440)
-                    fortnight = duty_start // (14 * 1440)
-                    month = duty_start // (30 * 1440)
-                    week_drive = roster["week_drive"].get(week, 0) + daily_drive
-                    fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
-                    month_drive = roster["month_drive"].get(month, 0) + daily_drive
-                    if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
+                    if not roster_is_compatible(roster):
                         continue
                     assigned_roster = roster
                     break
@@ -1105,19 +1192,16 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             if assigned_roster is None:
                 if preferred_roster is not None:
                     warnings.append(f"PAIR_GROUP_ROSTER_SPLIT D{duty.id} expected_roster={preferred_roster}")
-                for roster in sorted_rosters:
-                    if roster["last_end"] + self.inter_shift_rest > duty_start:
-                        continue
-                    week = duty_start // (7 * 1440)
-                    fortnight = duty_start // (14 * 1440)
-                    month = duty_start // (30 * 1440)
-                    week_drive = roster["week_drive"].get(week, 0) + daily_drive
-                    fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
-                    month_drive = roster["month_drive"].get(month, 0) + daily_drive
-                    if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
-                        continue
-                    assigned_roster = roster
-                    break
+                compatible_rosters = [roster for roster in sorted_rosters if roster_is_compatible(roster)]
+                if compatible_rosters:
+                    compatible_rosters.sort(
+                        key=lambda roster: (
+                            -len(set(duty_groups) & set(int(item) for item in roster.get("group_ids", set()))),
+                            -int(roster["last_end"]),
+                            int(roster["id"]),
+                        )
+                    )
+                    assigned_roster = compatible_rosters[0]
             if assigned_roster is not None:
                 roster = assigned_roster
                 week = duty_start // (7 * 1440)
@@ -1128,6 +1212,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 roster["fortnight_drive"][fortnight] = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
                 roster["month_drive"][month] = roster["month_drive"].get(month, 0) + daily_drive
                 roster["duties"].append(duty.id)
+                roster.setdefault("group_ids", set()).update(duty_groups)
             if assigned_roster is None:
                 roster_id = len(roster_state) + 1
                 assigned_roster = {
@@ -1137,6 +1222,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     "fortnight_drive": defaultdict(int),
                     "month_drive": defaultdict(int),
                     "duties": [duty.id],
+                    "group_ids": set(duty_groups),
                 }
                 assigned_roster["week_drive"][duty_start // (7 * 1440)] = daily_drive
                 assigned_roster["fortnight_drive"][duty_start // (14 * 1440)] = daily_drive
@@ -1226,11 +1312,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 fairness_penalty = self._fairness_penalty(projected_work)
                 gap = float(data.get("gap", 0))
                 long_gap_penalty = self._long_unpaid_break_penalty(gap)
-                meal_penalty = 0.0
-                if self.meal_break_minutes > 0:
-                    new_spread = float(data.get("new_spread", 0))
-                    if new_spread >= 360 and not self._would_have_meal_break(duty, task):
-                        meal_penalty = 200.0
+                meal_penalty = self._meal_break_score(duty, task, data)
                 trip_group_score = self._trip_group_score(duty, task_group_ids, duties)
                 candidate_score = (
                     gap
@@ -1268,12 +1350,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         duties, relief_reassignment_audit = self._relief_reassignment_postopt(duties, blocks)
         if relief_reassignment_audit.get("accepted_moves"):
             duties = self._merge_small_duties(duties)
+        duties, soft_issue_reassignment_audit = self._soft_issue_reassignment_postopt(duties, blocks)
 
         sol = self.finalize_selected_duties(duties, original_blocks=blocks)
         run_cut_meta["duplicate_task_skips"] = duplicate_task_skips
         sol.meta.update(run_cut_meta)
         sol.meta["duty_merge_diagnostics"] = self._extension_diagnostics_snapshot()
         sol.meta["relief_reassignment_audit"] = relief_reassignment_audit
+        sol.meta["soft_issue_reassignment_audit"] = soft_issue_reassignment_audit
         _log.info(
             "[CSP-GREEDY] %d duties (roster_count=%s), avg_work=%d, short(<120)=%d",
             len(duties),
@@ -1509,6 +1593,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "source_block_id": int(task.meta.get("source_block_id", task.id)),
             "trip_ids": [int(getattr(trip, "public_id", trip.id)) for trip in task.trips],
             "task_trip_ids": [int(trip.id) for trip in task.trips],
+            "trip_group_ids": sorted(self._task_group_ids(task)),
             "mid_trip_original_trip_ids": [
                 int(item) for item in (task.meta.get("mid_trip_original_trip_ids") or [])
             ],
@@ -1558,7 +1643,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         unpaid_break_minutes = 0
         total_overtime_minutes = 0
         total_paid_minutes = 0
+        meal_break_missing = 0
         relief_handoff_map: Dict[int, set[int]] = defaultdict(set)
+        duty_group_map: Dict[int, set[int]] = defaultdict(set)
+        roster_group_map: Dict[int, set[int]] = defaultdict(set)
         vehicle_switches = 0
 
         for duty in duties:
@@ -1579,12 +1667,27 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             )
             total_overtime_minutes += int(duty.overtime_minutes or 0)
             total_paid_minutes += int(duty.paid_minutes or 0)
+            if self._duty_needs_meal_break(
+                duty,
+                projected_spread=int(duty.spread_time),
+                projected_has_break=bool(duty.meta.get("meal_break_found", False)),
+            ):
+                meal_break_missing += 1
+
+            roster_id = duty.meta.get("roster_id")
+            for group_id in (duty.meta.get("covered_trip_group_ids") or []):
+                parsed_group_id = int(group_id)
+                duty_group_map[parsed_group_id].add(int(duty.id))
+                if roster_id is not None:
+                    roster_group_map[parsed_group_id].add(int(roster_id))
 
             for trip in duty.all_trips:
                 if trip.is_mid_trip_segment:
                     relief_handoff_map[int(trip.public_id)].add(int(duty.id))
 
         relief_handoffs = sum(1 for assigned_duties in relief_handoff_map.values() if len(assigned_duties) > 1)
+        duty_group_splits = sum(1 for duty_ids in duty_group_map.values() if len(duty_ids) > 1)
+        roster_group_splits = sum(1 for roster_ids in roster_group_map.values() if len(roster_ids) > 1)
         fragmentation_score = (
             len(duties) * 10000
             + short_duties * 1000
@@ -1606,14 +1709,20 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "unpaid_break_minutes": unpaid_break_minutes,
             "total_overtime_minutes": total_overtime_minutes,
             "total_paid_minutes": total_paid_minutes,
+            "meal_break_missing": meal_break_missing,
+            "duty_group_splits": duty_group_splits,
+            "roster_group_splits": roster_group_splits,
             "relief_handoffs": relief_handoffs,
             "uncovered_blocks": len(solution.uncovered_blocks or []),
             "fragmentation_score": fragmentation_score,
         }
 
-    def _relief_reassignment_rank(self, metrics: Dict[str, Any]) -> Tuple[int, int, int, int, int, int, int, int, int]:
+    def _relief_reassignment_rank(self, metrics: Dict[str, Any]) -> Tuple[int, ...]:
         return (
             int(metrics.get("violations", 0)),
+            int(metrics.get("meal_break_missing", 0)),
+            int(metrics.get("duty_group_splits", 0)),
+            int(metrics.get("roster_group_splits", 0)),
             int(metrics.get("crew", 0)),
             int(metrics.get("duties", 0)),
             int(metrics.get("split_duties", 0)),
@@ -1700,7 +1809,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         for pass_index in range(max_passes):
             audit["passes"] = pass_index + 1
             best_candidate: Optional[Dict[str, Any]] = None
-            best_rank: Optional[Tuple[int, int, int, int, int, int, int]] = None
+            best_rank: Optional[Tuple[int, ...]] = None
 
             for source_duty in sorted(current_duties, key=lambda item: (item.start_time, item.id)):
                 for task_index, task in enumerate(source_duty.tasks):
@@ -1833,6 +1942,312 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                                     "reason": "not_better",
                                 },
                             )
+
+            if best_candidate is None:
+                break
+
+            current_duties = best_candidate["duties"]
+            current_metrics = best_candidate["metrics"]
+            current_rank = self._relief_reassignment_rank(current_metrics)
+            audit["accepted"] = int(audit.get("accepted", 0)) + 1
+            if len(audit["accepted_moves"]) < sample_limit:
+                audit["accepted_moves"].append(best_candidate["details"])
+
+        audit["final_metrics"] = current_metrics
+        audit["improved"] = bool(
+            self._relief_reassignment_rank(current_metrics)
+            < self._relief_reassignment_rank(audit["baseline_metrics"] or current_metrics)
+        )
+        if not audit["improved"] and audit.get("accepted") == 0:
+            audit["result"] = "no_accepted_improvement"
+        elif audit["improved"]:
+            audit["result"] = "accepted_improvement"
+        else:
+            audit["result"] = "accepted_without_rank_gain"
+        return current_duties, audit
+
+    def _split_group_ids(self, duties: Sequence[Duty]) -> set[int]:
+        group_to_duties: Dict[int, set[int]] = defaultdict(set)
+        for duty in duties:
+            for group_id in (duty.meta.get("covered_trip_group_ids") or []):
+                group_to_duties[int(group_id)].add(int(duty.id))
+        return {
+            group_id
+            for group_id, assigned_duties in group_to_duties.items()
+            if len(assigned_duties) > 1
+        }
+
+    def _soft_issue_candidate_sources(self, duties: Sequence[Duty]) -> List[Dict[str, Any]]:
+        split_group_ids = self._split_group_ids(duties)
+        candidates: List[Dict[str, Any]] = []
+        seen: set[Tuple[int, int]] = set()
+
+        for duty in sorted((item for item in duties if item.tasks), key=lambda item: (item.start_time, item.id)):
+            needs_meal_fix = self._duty_needs_meal_break(
+                duty,
+                projected_spread=int(duty.spread_time),
+                projected_has_break=bool(duty.meta.get("meal_break_found", False)),
+            )
+            for task_index, task in enumerate(duty.tasks):
+                reasons: List[str] = []
+                task_group_ids = self._task_group_ids(task)
+                if task_group_ids & split_group_ids:
+                    reasons.append("trip_group_split")
+                if needs_meal_fix and len(duty.tasks) > 1 and task_index in (0, len(duty.tasks) - 1):
+                    reasons.append("meal_break_missing")
+                if not reasons:
+                    continue
+                signature = (int(duty.id), int(task_index))
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                candidates.append(
+                    {
+                        "source_duty": duty,
+                        "task_index": task_index,
+                        "task": task,
+                        "task_group_ids": task_group_ids,
+                        "reasons": reasons,
+                        "priority": (
+                            0 if "trip_group_split" in reasons else 1,
+                            0 if "meal_break_missing" in reasons else 1,
+                            -len(task_group_ids & split_group_ids),
+                            int(task.total_drive_minutes),
+                            int(task.start_time),
+                            int(duty.id),
+                        ),
+                    }
+                )
+
+        candidates.sort(key=lambda item: item["priority"])
+        return candidates
+
+    def _soft_issue_target_duties(
+        self,
+        current_duties: Sequence[Duty],
+        source_duty: Duty,
+        task: Block,
+        task_group_ids: set[int],
+    ) -> List[Duty]:
+        candidate_targets = [
+            duty
+            for duty in current_duties
+            if duty.id != source_duty.id and duty.tasks
+        ]
+        candidate_targets.sort(
+            key=lambda duty: (
+                0 if task_group_ids & {int(item) for item in duty.meta.get("covered_trip_group_ids", [])} else 1,
+                min(
+                    abs(int(task.start_time) - int(duty.tasks[-1].end_time)),
+                    abs(int(duty.tasks[0].start_time) - int(task.end_time)),
+                ),
+                duty.id,
+            )
+        )
+        return candidate_targets
+
+    def _soft_issue_improved(self, current_metrics: Dict[str, Any], candidate_metrics: Dict[str, Any]) -> bool:
+        improvement_keys = (
+            "meal_break_missing",
+            "duty_group_splits",
+            "roster_group_splits",
+        )
+        return any(
+            int(candidate_metrics.get(key, 0)) < int(current_metrics.get(key, 0))
+            for key in improvement_keys
+        )
+
+    def _soft_issue_reassignment_postopt(
+        self,
+        duties: List[Duty],
+        original_blocks: Optional[List[Block]],
+    ) -> Tuple[List[Duty], Dict[str, Any]]:
+        enabled = bool(self.params.get("enable_soft_issue_reassignment_postopt", True))
+        max_passes = max(1, int(self.params.get("soft_issue_reassignment_max_passes", 3) or 3))
+        target_limit = max(1, int(self.params.get("soft_issue_reassignment_target_limit", 8) or 8))
+        candidate_limit = max(4, int(self.params.get("soft_issue_reassignment_candidate_limit", 16) or 16))
+        sample_limit = max(10, int(self.params.get("soft_issue_reassignment_sample_limit", 24) or 24))
+        audit: Dict[str, Any] = {
+            "enabled": enabled,
+            "passes": 0,
+            "considered": 0,
+            "evaluated": 0,
+            "feasible_targets": 0,
+            "accepted": 0,
+            "accepted_moves": [],
+            "rejection_reasons": {},
+            "samples": [],
+            "baseline_metrics": None,
+            "final_metrics": None,
+            "candidate_count": 0,
+            "improved": False,
+        }
+
+        if not enabled:
+            audit["skipped"] = "disabled"
+            return duties, audit
+
+        seeded_duties = [duty for duty in duties if duty.tasks]
+        if not seeded_duties:
+            audit["skipped"] = "no_duties"
+            return duties, audit
+
+        current_duties, _, current_metrics = self._evaluate_relief_candidate_duties(seeded_duties, original_blocks)
+        audit["baseline_metrics"] = current_metrics
+        audit["final_metrics"] = current_metrics
+        current_rank = self._relief_reassignment_rank(current_metrics)
+
+        def record_rejection(reason: str, sample: Dict[str, Any]) -> None:
+            reason_key = reason or "unknown"
+            audit["rejection_reasons"][reason_key] = int(audit["rejection_reasons"].get(reason_key, 0)) + 1
+            if len(audit["samples"]) < sample_limit:
+                audit["samples"].append(sample)
+
+        for pass_index in range(max_passes):
+            audit["passes"] = pass_index + 1
+            candidate_sources = self._soft_issue_candidate_sources(current_duties)
+            audit["candidate_count"] = len(candidate_sources)
+            if not candidate_sources:
+                audit["skipped"] = "no_soft_issue_candidates"
+                break
+
+            best_candidate: Optional[Dict[str, Any]] = None
+            best_rank: Optional[Tuple[int, ...]] = None
+
+            for source in candidate_sources[:candidate_limit]:
+                source_duty = source["source_duty"]
+                task_index = int(source["task_index"])
+                task = source["task"]
+                task_group_ids = set(source["task_group_ids"])
+                reasons = list(source["reasons"])
+
+                source_remaining = [
+                    candidate_task
+                    for idx, candidate_task in enumerate(source_duty.tasks)
+                    if idx != task_index
+                ]
+                source_rebuilt: Optional[Duty] = None
+                if source_remaining:
+                    source_rebuilt, source_reason = self._rebuild_duty_from_tasks(source_remaining, source_duty.id)
+                    if source_rebuilt is None:
+                        record_rejection(
+                            f"source_rebuild_{source_reason}",
+                            {
+                                "reason": f"source_rebuild_{source_reason}",
+                                "source_duty_id": int(source_duty.id),
+                                "target_duty_id": None,
+                                "mode": None,
+                                "reasons": reasons,
+                                "task": self._task_summary(task),
+                            },
+                        )
+                        continue
+
+                candidate_targets = self._soft_issue_target_duties(
+                    current_duties,
+                    source_duty,
+                    task,
+                    task_group_ids,
+                )
+
+                for target_duty in candidate_targets[:target_limit]:
+                    for mode in ("append", "prepend"):
+                        audit["considered"] = int(audit.get("considered", 0)) + 1
+                        if mode == "append":
+                            if int(target_duty.tasks[-1].end_time) > int(task.start_time):
+                                record_rejection(
+                                    "append_target_overlap",
+                                    {
+                                        "reason": "append_target_overlap",
+                                        "source_duty_id": int(source_duty.id),
+                                        "target_duty_id": int(target_duty.id),
+                                        "mode": mode,
+                                        "reasons": reasons,
+                                        "task": self._task_summary(task),
+                                    },
+                                )
+                                continue
+                            target_task_sequence = [*target_duty.tasks, task]
+                        else:
+                            if int(task.end_time) > int(target_duty.tasks[0].start_time):
+                                record_rejection(
+                                    "prepend_target_overlap",
+                                    {
+                                        "reason": "prepend_target_overlap",
+                                        "source_duty_id": int(source_duty.id),
+                                        "target_duty_id": int(target_duty.id),
+                                        "mode": mode,
+                                        "reasons": reasons,
+                                        "task": self._task_summary(task),
+                                    },
+                                )
+                                continue
+                            target_task_sequence = [task, *target_duty.tasks]
+
+                        target_rebuilt, target_reason = self._rebuild_duty_from_tasks(
+                            target_task_sequence,
+                            target_duty.id,
+                        )
+                        if target_rebuilt is None:
+                            record_rejection(
+                                f"{mode}_target_{target_reason}",
+                                {
+                                    "reason": f"{mode}_target_{target_reason}",
+                                    "source_duty_id": int(source_duty.id),
+                                    "target_duty_id": int(target_duty.id),
+                                    "mode": mode,
+                                    "reasons": reasons,
+                                    "task": self._task_summary(task),
+                                },
+                            )
+                            continue
+
+                        audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
+
+                        candidate_duties: List[Duty] = []
+                        for existing_duty in current_duties:
+                            if existing_duty.id == source_duty.id:
+                                if source_rebuilt is not None:
+                                    candidate_duties.append(source_rebuilt)
+                                continue
+                            if existing_duty.id == target_duty.id:
+                                candidate_duties.append(target_rebuilt)
+                                continue
+                            candidate_duties.append(existing_duty)
+
+                        normalized_candidate, _, candidate_metrics = self._evaluate_relief_candidate_duties(
+                            candidate_duties,
+                            original_blocks,
+                        )
+                        audit["evaluated"] = int(audit.get("evaluated", 0)) + 1
+                        candidate_rank = self._relief_reassignment_rank(candidate_metrics)
+                        candidate_sample = {
+                            "source_duty_id": int(source_duty.id),
+                            "target_duty_id": int(target_duty.id),
+                            "mode": mode,
+                            "reasons": reasons,
+                            "task": self._task_summary(task),
+                            "metrics_before": current_metrics,
+                            "metrics_after": candidate_metrics,
+                        }
+
+                        if candidate_rank < current_rank and self._soft_issue_improved(current_metrics, candidate_metrics):
+                            if best_candidate is None or candidate_rank < (best_rank or candidate_rank):
+                                best_candidate = {
+                                    "duties": normalized_candidate,
+                                    "metrics": candidate_metrics,
+                                    "details": candidate_sample,
+                                }
+                                best_rank = candidate_rank
+                            continue
+
+                        record_rejection(
+                            "not_better",
+                            {
+                                **candidate_sample,
+                                "reason": "not_better",
+                            },
+                        )
 
             if best_candidate is None:
                 break

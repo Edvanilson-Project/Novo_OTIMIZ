@@ -4,6 +4,7 @@ import random
 from typing import List, Dict, Any, Optional, Tuple, Set
 import copy
 from .evaluator import CostEvaluator
+from .vsp.greedy import build_preferred_pairs
 from ..domain.models import CSPSolution, VSPSolution, Trip, Block, Duty
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,8 @@ def _csp_feedback_candidates(
             refined_vsp = VSPSolution(
                 blocks=refined_blocks,
                 algorithm=vsp_sol.algorithm,
+                warnings=list(vsp_sol.warnings or []),
+                unassigned_trips=list(vsp_sol.unassigned_trips or []),
                 meta=dict(vsp_sol.meta or {}),
             )
             candidates.append(refined_vsp)
@@ -162,7 +165,13 @@ def _vsp_signature(vsp_sol: VSPSolution) -> Tuple[Tuple[int, ...], ...]:
     return tuple(tuple(int(trip.id) for trip in block.trips) for block in ordered_blocks)
 
 
-def _build_post_opt_metrics(csp_sol: CSPSolution, vsp_sol: VSPSolution, min_work: int) -> Dict[str, Any]:
+def _build_post_opt_metrics(
+    csp_sol: CSPSolution,
+    vsp_sol: VSPSolution,
+    min_work: int,
+    trips: Optional[List[Trip]] = None,
+    vsp_params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     duties = csp_sol.duties or []
     short_duties = sum(1 for duty in duties if min_work > 0 and duty.work_time < min_work)
     split_duties = 0
@@ -170,6 +179,9 @@ def _build_post_opt_metrics(csp_sol: CSPSolution, vsp_sol: VSPSolution, min_work
     waiting_minutes = 0
     unpaid_break_minutes = 0
     cross_day_duties = 0
+    preferred_pair_count = 0
+    preferred_pair_breaks = 0
+    duty_pair_splits = 0
 
     for duty in duties:
         unique_sources: List[int] = []
@@ -192,6 +204,38 @@ def _build_post_opt_metrics(csp_sol: CSPSolution, vsp_sol: VSPSolution, min_work
             duty.meta.get("service_day", 0) or 0
         ):
             cross_day_duties += 1
+
+    if trips and bool((vsp_params or {}).get("preserve_preferred_pairs", True)):
+        min_layover = int((vsp_params or {}).get("min_layover_minutes", 8) or 8)
+        pair_window = int((vsp_params or {}).get("preferred_pair_window_minutes", 120) or 120)
+        preferred_pairs = build_preferred_pairs(list(trips), min_layover, pair_window)
+        unique_pairs = {
+            tuple(sorted((trip_id, pair_id)))
+            for trip_id, pair_id in preferred_pairs.items()
+            if trip_id < pair_id
+        }
+        consecutive_pairs = {
+            tuple(sorted((block.trips[index].id, block.trips[index + 1].id)))
+            for block in (vsp_sol.blocks or [])
+            for index in range(len(block.trips) - 1)
+            if preferred_pairs.get(block.trips[index].id) == block.trips[index + 1].id
+        }
+        preferred_pair_count = len(unique_pairs)
+        preferred_pair_breaks = len(unique_pairs - consecutive_pairs)
+
+        duty_by_trip: Dict[int, int] = {}
+        for duty in duties:
+            for task in getattr(duty, "tasks", []):
+                for trip in task.trips:
+                    duty_by_trip[int(trip.id)] = int(duty.id)
+        seen_pairs: Set[Tuple[int, int]] = set()
+        for trip_id, pair_id in preferred_pairs.items():
+            signature = tuple(sorted((int(trip_id), int(pair_id))))
+            if signature in seen_pairs:
+                continue
+            seen_pairs.add(signature)
+            if duty_by_trip.get(signature[0]) != duty_by_trip.get(signature[1]):
+                duty_pair_splits += 1
 
     fragmentation_score = (
         len(duties) * 10000
@@ -217,6 +261,9 @@ def _build_post_opt_metrics(csp_sol: CSPSolution, vsp_sol: VSPSolution, min_work
         "uncovered_blocks": len(csp_sol.uncovered_blocks or []),
         "unassigned_trips": len(vsp_sol.unassigned_trips or []),
         "csp_cost": round(evaluator.csp_cost(csp_sol), 2),
+        "preferred_pair_count": preferred_pair_count,
+        "preferred_pair_breaks": preferred_pair_breaks,
+        "duty_pair_splits": duty_pair_splits,
     }
 
 
@@ -231,11 +278,17 @@ def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, 
         return False
     if candidate["crew"] > current["crew"]:
         return False
+    if candidate.get("preferred_pair_breaks", 0) > current.get("preferred_pair_breaks", 0):
+        return False
+    if candidate.get("duty_pair_splits", 0) > current.get("duty_pair_splits", 0):
+        return False
 
     current_rank = (
         current["violations"],
         current["vehicles"],
         current["crew"],
+        current.get("preferred_pair_breaks", 0),
+        current.get("duty_pair_splits", 0),
         current["fragmentation_score"],
         current["short_duties"],
         current["split_duties"],
@@ -246,6 +299,8 @@ def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, 
         candidate["violations"],
         candidate["vehicles"],
         candidate["crew"],
+        candidate.get("preferred_pair_breaks", 0),
+        candidate.get("duty_pair_splits", 0),
         candidate["fragmentation_score"],
         candidate["short_duties"],
         candidate["split_duties"],
@@ -262,6 +317,7 @@ def _can_append_suffix(recipient: Block, suffix: List[Trip], vsp_params: Dict[st
     min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
     max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
     allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
+    connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", 0) or 0)
     last_trip = recipient.trips[-1]
     first_suffix_trip = suffix[0]
     gap = first_suffix_trip.start_time - last_trip.end_time
@@ -271,7 +327,7 @@ def _can_append_suffix(recipient: Block, suffix: List[Trip], vsp_params: Dict[st
 
     deadhead = int(last_trip.deadhead_times.get(first_suffix_trip.origin_id, 0))
     transfer_needed = max(min_layover, deadhead)
-    if gap < transfer_needed:
+    if gap + connection_tolerance < transfer_needed:
         return False, "transfer_insufficient", {"gap": gap, "transfer_needed": transfer_needed}
 
     if not allow_multi_line:
@@ -684,7 +740,7 @@ def joint_duty_vehicle_swap(
             }
 
         if len(vsp_sol.blocks) < 2:
-            baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, 0)
+            baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, 0, trips, {})
             post_opt_meta = _post_opt_meta(
                 accepted=False,
                 baseline=baseline_metrics,
@@ -714,7 +770,7 @@ def joint_duty_vehicle_swap(
 
         original_vehicles = len(vsp_sol.blocks)
         original_crew = csp_sol.num_crew
-        baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, min_work)
+        baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, min_work, trips, vsp_params)
 
         # ── Fase 1: Merge de blocos VSP ──────────────────────────────────────
         merged_vsp = _try_merge_vsp_blocks(vsp_sol, vsp_params)
@@ -906,7 +962,7 @@ def joint_duty_vehicle_swap(
             evaluated_signatures.add(signature)
 
             csp_candidate = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(candidate_vsp.blocks, trips)
-            candidate_metrics = _build_post_opt_metrics(csp_candidate, candidate_vsp, min_work)
+            candidate_metrics = _build_post_opt_metrics(csp_candidate, candidate_vsp, min_work, trips, vsp_params)
             if _is_better_post_opt_candidate(best_metrics, candidate_metrics):
                 best_csp = csp_candidate
                 best_vsp = candidate_vsp
@@ -926,7 +982,7 @@ def joint_duty_vehicle_swap(
                     continue
                 evaluated_signatures.add(fb_sig)
                 fb_csp = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(fb_vsp.blocks, trips)
-                fb_metrics = _build_post_opt_metrics(fb_csp, fb_vsp, min_work)
+                fb_metrics = _build_post_opt_metrics(fb_csp, fb_vsp, min_work, trips, vsp_params)
                 if _is_better_post_opt_candidate(best_metrics, fb_metrics):
                     best_csp = fb_csp
                     best_vsp = fb_vsp

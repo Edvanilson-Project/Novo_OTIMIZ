@@ -54,6 +54,20 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         # Restrições CCT RÍGIDAS com parametrização via cct_params
         self.max_shift_minutes = int(self.cct_params.get("max_shift_minutes", 720))
         self.max_work_minutes = int(self.cct_params.get("max_work_minutes", 480))
+        self.min_layover_minutes = int(
+            self.vsp_params.get(
+                "min_layover_minutes",
+                self.cct_params.get("min_layover_minutes", 8),
+            )
+            or 8
+        )
+        self.connection_tolerance_minutes = int(
+            self.vsp_params.get(
+                "connection_tolerance_minutes",
+                self.cct_params.get("connection_tolerance_minutes", 0),
+            )
+            or 0
+        )
         self.meal_break_minutes = self.cct_params.get("meal_break_minutes", 60)
         self.min_inter_shift_rest = int(self.cct_params.get("min_inter_shift_rest_minutes", 660))
         self.terminal_location_ids = set(self.cct_params.get("terminal_location_ids", []) or [])
@@ -414,17 +428,26 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                 if t in current_path:
                     continue
                     
-                deadhead_dur = last_trip.deadhead_times.get(t.origin_id, 0) if last_trip else 0
-                
+                deadhead_dur = int(last_trip.deadhead_times.get(t.origin_id, 0)) if last_trip else 0
+                gap = int(t.start_time - current_time) if last_trip is not None else 0
+
+                is_contiguous_group = bool(
+                    last_trip is not None
+                    and gap == 0
+                    and getattr(last_trip, "trip_group_id", None) is not None
+                    and last_trip.trip_group_id == getattr(t, "trip_group_id", None)
+                )
+                required_gap = 0 if is_contiguous_group else max(self.min_layover_minutes, deadhead_dur)
+
                 # Verificar se a viagem t pode ser adicionada temporalmente
-                if t.start_time >= current_time + deadhead_dur:
+                if last_trip is None or gap + self.connection_tolerance_minutes >= required_gap:
                     # Regra de Poda: Viagem Casada (Arquiteto)
                     force_round_trip = self.cct_params.get('force_round_trip', False)
                     if force_round_trip and last_trip is not None:
                         if t.origin_id != last_trip.destination_id:
                             continue
 
-                    if last_trip is None or last_trip.can_precede(t):
+                    if last_trip is None or gap + self.connection_tolerance_minutes >= required_gap:
                         
                         # 1. Poda por Tempo de Direção (Work Time + Deadhead)
                         # Deadhead conta como tempo de trabalho na CCT brasileira

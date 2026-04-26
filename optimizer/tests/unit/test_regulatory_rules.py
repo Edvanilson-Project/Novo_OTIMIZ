@@ -928,3 +928,103 @@ def test_hard_validation_rejects_missing_union_compatible_operator():
             time_budget_s=5.0,
         )
     assert "UNASSIGNED_OPERATOR_PROFILE" in str(exc.value)
+
+
+def test_deadhead_hard_validation_respects_connection_tolerance():
+    trips = [
+        _trip(1, 360, 40, line=60, origin=1, dest=2, depot=1),
+        _trip(2, 402, 40, line=60, origin=2, dest=1, depot=1),
+    ]
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={
+            "min_layover_minutes": 15,
+            "connection_tolerance_minutes": 30,
+            "strict_hard_validation": False,
+        },
+        vsp_params={"preserve_preferred_pairs": False},
+        time_budget_s=5.0,
+    )
+    hard_issues = result.meta["hard_constraint_report"]["output"].get("hard_issues", [])
+    assert not any(issue.startswith("DEADHEAD_INFEASIBLE") for issue in hard_issues)
+
+
+def test_hybrid_pipeline_surfaces_ev_charger_capacity_warning():
+    trips = [
+        _trip(1, 360, 50, line=31, origin=1, dest=2, depot=1, energy=30.0),
+        _trip(2, 420, 50, line=31, origin=2, dest=1, depot=1, energy=12.0),
+        _trip(3, 360, 50, line=32, origin=1, dest=2, depot=1, energy=30.0),
+        _trip(4, 420, 50, line=32, origin=2, dest=1, depot=1, energy=12.0),
+    ]
+    result = OptimizerService().run(
+        trips,
+        _vehicle(electric=True),
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        cct_params={"strict_hard_validation": False},
+        vsp_params={
+            "min_layover_minutes": 10,
+            "max_simultaneous_chargers": 1,
+            "allow_multi_line_block": False,
+        },
+        time_budget_s=10.0,
+    )
+    warnings = list(result.vsp.warnings or [])
+    assert any("CHARGER_CAPACITY_EXCEEDED" in warning for warning in warnings)
+
+
+def test_soft_issue_reassignment_postopt_coalesces_split_trip_group_when_feasible():
+    solver = GreedyCSP(strict_hard_validation=False)
+
+    first_task = _task_block(1, [_trip(1, 360, 60, line=70, origin=1, dest=2, trip_group_id=700)])
+    second_task = _task_block(2, [_trip(2, 430, 60, line=70, origin=2, dest=1, trip_group_id=700)])
+
+    duties = [
+        solver._seed_duty_with_task(1, first_task),
+        solver._seed_duty_with_task(2, second_task),
+    ]
+    original_blocks = [
+        Block(id=1, trips=list(first_task.trips)),
+        Block(id=2, trips=list(second_task.trips)),
+    ]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt(duties, original_blocks)
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["final_metrics"]["duty_group_splits"] == 0
+    assert any("trip_group_split" in move["reasons"] for move in audit["accepted_moves"])
+
+
+def test_soft_issue_reassignment_postopt_moves_boundary_task_to_clear_meal_break_gap():
+    solver = GreedyCSP(
+        meal_break_minutes=30,
+        min_break_minutes=30,
+        mandatory_break_after_minutes=600,
+        max_driving_minutes=600,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=80, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 435, 60, line=80, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 510, 60, line=80, origin=1, dest=2)]),
+        _task_block(4, [_trip(4, 585, 60, line=80, origin=2, dest=1)]),
+        _task_block(5, [_trip(5, 660, 60, line=80, origin=1, dest=2)]),
+    ]
+    target_task = _task_block(6, [_trip(6, 750, 60, line=81, origin=2, dest=3)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, target_task)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, target_task])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["meal_break_missing"] == 1
+    assert audit["final_metrics"]["meal_break_missing"] == 0
+    assert any("meal_break_missing" in move["reasons"] for move in audit["accepted_moves"])

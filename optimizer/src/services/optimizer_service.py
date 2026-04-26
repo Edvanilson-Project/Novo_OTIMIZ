@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -68,6 +69,7 @@ class OptimizerService:
         t0 = time.perf_counter()
         cct_params = self._normalize_rules(cct_params)
         vsp_params = self._normalize_rules(vsp_params)
+        self._align_vsp_params_with_cct(cct_params, vsp_params)
         normalized_time_budget_s = (
             float(time_budget_s)
             if time_budget_s is not None
@@ -84,6 +86,7 @@ class OptimizerService:
         self._inject_trip_group_constraints(trips, cct_params, vsp_params)
         if not had_explicit_mandatory_groups and not bool(cct_params.get("enforce_trip_groups_hard", False)):
             cct_params.pop("mandatory_trip_groups_same_duty", None)
+        self._ensure_deadhead_coverage(trips, vsp_params)
         
         strict_hard_validation = bool(
             vsp_params.get("strict_hard_validation", cct_params.get("strict_hard_validation", True))
@@ -116,6 +119,7 @@ class OptimizerService:
             cct_params,
             vsp_params,
         )
+        self._ensure_vsp_operational_warnings(result, vehicle_types, vsp_params)
         solver_ms = (time.perf_counter() - t_solver) * 1000
         result.total_elapsed_ms = (time.perf_counter() - t0) * 1000
         result.algorithm = algorithm
@@ -1095,6 +1099,189 @@ class OptimizerService:
                 pairs.append(sorted([trip.id, best.id]))
 
         return pairs
+
+    def _align_vsp_params_with_cct(
+        self,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> None:
+        passthrough_fields = (
+            "min_layover_minutes",
+            "pullout_minutes",
+            "pullback_minutes",
+            "connection_tolerance_minutes",
+            "strict_hard_validation",
+        )
+        for field in passthrough_fields:
+            if field not in vsp_params and cct_params.get(field) is not None:
+                vsp_params[field] = cct_params[field]
+
+        if "same_depot_required" not in vsp_params and cct_params.get("enforce_same_depot_start_end") is not None:
+            vsp_params["same_depot_required"] = bool(cct_params.get("enforce_same_depot_start_end"))
+
+    def _ensure_deadhead_coverage(
+        self,
+        trips: List[Trip],
+        vsp_params: Dict[str, Any],
+    ) -> None:
+        if not trips:
+            return
+
+        terminal_coords: Dict[int, tuple[float, float]] = {}
+        for trip in trips:
+            if trip.origin_latitude is not None and trip.origin_longitude is not None:
+                terminal_coords.setdefault(int(trip.origin_id), (float(trip.origin_latitude), float(trip.origin_longitude)))
+            if trip.destination_latitude is not None and trip.destination_longitude is not None:
+                terminal_coords.setdefault(int(trip.destination_id), (float(trip.destination_latitude), float(trip.destination_longitude)))
+
+        origin_ids = sorted({int(trip.origin_id) for trip in trips})
+        fallback_speed_kmh = float(vsp_params.get("fallback_deadhead_speed_kmh", 18.0) or 18.0)
+        fallback_floor = int(vsp_params.get("fallback_deadhead_floor_minutes", 8) or 8)
+        impossible_deadhead = int(vsp_params.get("unknown_deadhead_minutes", 999999) or 999999)
+
+        for trip in trips:
+            trip.deadhead_times = dict(trip.deadhead_times or {})
+            dest_coords = terminal_coords.get(int(trip.destination_id))
+            for origin_id in origin_ids:
+                if origin_id in trip.deadhead_times:
+                    continue
+                if int(trip.destination_id) == int(origin_id):
+                    trip.deadhead_times[origin_id] = 0
+                    continue
+                origin_coords = terminal_coords.get(int(origin_id))
+                if dest_coords is None or origin_coords is None:
+                    trip.deadhead_times[origin_id] = impossible_deadhead
+                    continue
+                trip.deadhead_times[origin_id] = self._estimate_deadhead_minutes(
+                    dest_coords,
+                    origin_coords,
+                    fallback_speed_kmh,
+                    fallback_floor,
+                )
+
+    def _estimate_deadhead_minutes(
+        self,
+        from_coords: tuple[float, float],
+        to_coords: tuple[float, float],
+        speed_kmh: float,
+        floor_minutes: int,
+    ) -> int:
+        distance_km = self._haversine_km(from_coords, to_coords)
+        if distance_km <= 0:
+            return 0
+        minutes = math.ceil((distance_km / max(speed_kmh, 1.0)) * 60.0)
+        return max(floor_minutes, minutes)
+
+    def _haversine_km(
+        self,
+        from_coords: tuple[float, float],
+        to_coords: tuple[float, float],
+    ) -> float:
+        lat1, lon1 = from_coords
+        lat2, lon2 = to_coords
+        radius_km = 6371.0
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        a = (
+            math.sin(delta_phi / 2.0) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+        )
+        return 2.0 * radius_km * math.atan2(math.sqrt(a), math.sqrt(max(1.0 - a, 0.0)))
+
+    def _ensure_vsp_operational_warnings(
+        self,
+        result: OptimizationResult,
+        vehicle_types: List[VehicleType],
+        vsp_params: Dict[str, Any],
+    ) -> None:
+        warnings = list(getattr(result.vsp, "warnings", []) or [])
+        meta = dict(getattr(result.vsp, "meta", {}) or {})
+        max_chargers = int(vsp_params.get("max_simultaneous_chargers", meta.get("max_simultaneous_chargers", 999999)) or 999999)
+        electric_vehicle = next(
+            (
+                vehicle
+                for vehicle in vehicle_types
+                if vehicle.is_electric and vehicle.battery_capacity_kwh > 0 and vehicle.charge_rate_kw > 0
+            ),
+            None,
+        )
+
+        charger_peak = 0
+        if electric_vehicle is not None and max_chargers < 999999:
+            charger_peak = self._estimate_charger_peak(result.vsp.blocks or [], electric_vehicle)
+            meta["charger_peak_concurrency"] = charger_peak
+            meta["max_simultaneous_chargers"] = max_chargers
+            if charger_peak > max_chargers:
+                meta["charger_capacity_exceeded"] = True
+                warning = f"CHARGER_CAPACITY_EXCEEDED peak={charger_peak}>{max_chargers}"
+                if warning not in warnings:
+                    warnings.append(warning)
+            else:
+                meta["charger_capacity_exceeded"] = False
+        elif "charger_capacity_exceeded" not in meta:
+            meta["charger_capacity_exceeded"] = False
+
+        result.vsp.warnings = warnings
+        result.vsp.meta = meta
+
+    def _estimate_charger_peak(
+        self,
+        blocks: List[Any],
+        vehicle: VehicleType,
+    ) -> int:
+        timeline: List[tuple[int, int]] = []
+        for block in blocks:
+            trips = list(getattr(block, "trips", []) or [])
+            if not trips:
+                continue
+
+            home_depot = block.meta.get("start_depot_id") if getattr(block, "meta", None) else None
+            if home_depot is None:
+                home_depot = trips[0].depot_id
+
+            current_soc = float(vehicle.battery_capacity_kwh)
+            for index, trip in enumerate(trips):
+                current_soc = max(0.0, current_soc - self._estimate_trip_energy_need(trip, vehicle))
+                if index + 1 >= len(trips):
+                    continue
+
+                nxt = trips[index + 1]
+                gap = int(nxt.start_time - trip.end_time)
+                can_charge = (
+                    gap > 0
+                    and home_depot is not None
+                    and nxt.depot_id is not None
+                    and nxt.depot_id == home_depot
+                    and current_soc < float(vehicle.battery_capacity_kwh)
+                )
+                if not can_charge:
+                    continue
+
+                charge_window_start = int(nxt.start_time - gap)
+                timeline.append((charge_window_start, 1))
+                timeline.append((int(nxt.start_time), -1))
+                charged = min(
+                    float(vehicle.charge_rate_kw) * (gap / 60.0),
+                    float(vehicle.battery_capacity_kwh) - current_soc,
+                )
+                current_soc = min(float(vehicle.battery_capacity_kwh), current_soc + max(0.0, charged))
+
+        concurrent = 0
+        peak = 0
+        for _, delta in sorted(timeline):
+            concurrent += delta
+            peak = max(peak, concurrent)
+        return peak
+
+    def _estimate_trip_energy_need(self, trip: Trip, vehicle: VehicleType) -> float:
+        if getattr(trip, "energy_kwh", 0.0) > 0:
+            base = float(trip.energy_kwh)
+        else:
+            base = float(getattr(trip, "distance_km", 0.0) or 0.0) * 1.25
+        topo_factor = 1.0 + max(0.0, float(getattr(trip, "elevation_gain_m", 0.0) or 0.0)) * 0.0008
+        return base * topo_factor
 
     def _parse_rule(self, rule: str) -> Dict[str, Any]:
         text = rule.lower().strip()

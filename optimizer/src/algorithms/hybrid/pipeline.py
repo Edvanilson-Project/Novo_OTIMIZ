@@ -24,6 +24,9 @@ from ..vsp.tabu_search import TabuSearchVSP
 settings = get_settings()
 logger = logging.getLogger(__name__)
 evaluator = CostEvaluator()
+MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
+DEFAULT_MAX_CSP_ILP_TRIPS = 250
+DEFAULT_MAX_CSP_ILP_BLOCKS = 180
 
 
 class HybridPipeline(BaseAlgorithm):
@@ -33,9 +36,20 @@ class HybridPipeline(BaseAlgorithm):
         self.cct_params = cct_params or {}
         self.vsp_params = dict(vsp_params or {})
 
-        # Propagar connection_tolerance para VSP se definido no CCT mas não no VSP
-        if "connection_tolerance_minutes" not in self.vsp_params and self.cct_params.get("connection_tolerance_minutes"):
-            self.vsp_params["connection_tolerance_minutes"] = self.cct_params["connection_tolerance_minutes"]
+        # Alinha parâmetros operacionais compartilhados entre CCT e VSP.
+        passthrough_fields = (
+            "min_layover_minutes",
+            "connection_tolerance_minutes",
+            "pullout_minutes",
+            "pullback_minutes",
+            "strict_hard_validation",
+        )
+        for field in passthrough_fields:
+            if field not in self.vsp_params and self.cct_params.get(field) is not None:
+                self.vsp_params[field] = self.cct_params[field]
+
+        if "same_depot_required" not in self.vsp_params and self.cct_params.get("enforce_same_depot_start_end") is not None:
+            self.vsp_params["same_depot_required"] = bool(self.cct_params.get("enforce_same_depot_start_end"))
 
         # NÃO injetar crew_block_limit no VSP.
         # O limite de jornada do TRIPULANTE (CSP) não deve restringir o turno do VEÍCULO (VSP).
@@ -230,9 +244,18 @@ class HybridPipeline(BaseAlgorithm):
             t_phase = time.perf_counter()
             csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
             phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-            # Dar mais budget ao ILP para gerar colunas melhores
-            ilp_budget = max(60.0, self.time_budget_s * 0.25)
-            if not self._check_timeout():
+            remaining_budget_s = max(0.0, self.time_budget_s - self._elapsed())
+            max_ilp_trips = int(self.vsp_params.get("max_csp_ilp_trips", DEFAULT_MAX_CSP_ILP_TRIPS) or DEFAULT_MAX_CSP_ILP_TRIPS)
+            max_ilp_blocks = int(self.vsp_params.get("max_csp_ilp_blocks", DEFAULT_MAX_CSP_ILP_BLOCKS) or DEFAULT_MAX_CSP_ILP_BLOCKS)
+            should_run_ilp = (
+                not self._check_timeout()
+                and remaining_budget_s >= MIN_REMAINING_BUDGET_FOR_ILP_S
+                and len(trips) <= max_ilp_trips
+                and len(vsp_sol.blocks) <= max_ilp_blocks
+            )
+            if should_run_ilp:
+                # O polish exato só pode consumir o orçamento restante.
+                ilp_budget = max(1.0, min(remaining_budget_s, self.time_budget_s * 0.25))
                 ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
                 ilp.time_budget_s = ilp_budget
                 t_phase = time.perf_counter()
@@ -258,6 +281,12 @@ class HybridPipeline(BaseAlgorithm):
                 else:
                     csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
             else:
+                logger.info(
+                    "[PIPELINE] Skipping CSP ILP polish: remaining_budget=%.2fs trips=%d blocks=%d",
+                    remaining_budget_s,
+                    len(trips),
+                    len(vsp_sol.blocks),
+                )
                 csp_final = csp_greedy
         from ..joint_opt import joint_duty_vehicle_swap
         t_phase = time.perf_counter()

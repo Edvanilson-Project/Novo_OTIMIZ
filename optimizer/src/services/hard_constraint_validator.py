@@ -80,6 +80,13 @@ class HardConstraintValidator:
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
         min_layover = int(cct_params.get("min_layover_minutes", vsp_params.get("min_layover_minutes", 8)) or 8)
+        connection_tolerance = int(
+            vsp_params.get(
+                "connection_tolerance_minutes",
+                cct_params.get("connection_tolerance_minutes", 0),
+            )
+            or 0
+        )
         inter_shift = max(int(cct_params.get("inter_shift_rest_minutes", 660) or 660), 660)
         enforce_same_depot = bool(cct_params.get("enforce_same_depot_start_end", False) or vsp_params.get("same_depot_required", False))
         enforce_single_line_duty = bool(cct_params.get("enforce_single_line_duty", False))
@@ -94,13 +101,22 @@ class HardConstraintValidator:
             issues.extend(f"UNCOVERED_BLOCK B{block.id}" for block in result.csp.uncovered_blocks)
 
         warning_pool = [*getattr(result.vsp, "warnings", []), *getattr(result.csp, "warnings", [])]
-        if any("CHARGER_CAPACITY_EXCEEDED" in warning for warning in warning_pool):
+        charger_flag = bool((getattr(result.vsp, "meta", {}) or {}).get("charger_capacity_exceeded", False))
+        if charger_flag or any("CHARGER_CAPACITY_EXCEEDED" in warning for warning in warning_pool):
             issues.append("EV_CHARGER_CAPACITY_EXCEEDED")
         if any("EV_SOC_INSUFFICIENT" in warning for warning in warning_pool):
             issues.append("EV_SOC_INSUFFICIENT")
 
         for block in result.vsp.blocks:
-            issues.extend(self._audit_block(block, min_layover, enforce_same_depot, allow_multi_line_block))
+            issues.extend(
+                self._audit_block(
+                    block,
+                    min_layover,
+                    connection_tolerance,
+                    enforce_same_depot,
+                    allow_multi_line_block,
+                )
+            )
 
         roster_windows: Dict[int, List[Tuple[int, int, int]]] = {}
         for duty in result.csp.duties:
@@ -302,7 +318,14 @@ class HardConstraintValidator:
             )
         return same_terminal or same_depot or relief_ok
 
-    def _audit_block(self, block, min_layover: int, enforce_same_depot: bool, allow_multi_line: bool = True) -> List[str]:
+    def _audit_block(
+        self,
+        block,
+        min_layover: int,
+        connection_tolerance: int,
+        enforce_same_depot: bool,
+        allow_multi_line: bool = True,
+    ) -> List[str]:
         issues: List[str] = []
         trips = list(getattr(block, "trips", []))
         line_ids = {int(trip.line_id) for trip in trips}
@@ -328,7 +351,7 @@ class HardConstraintValidator:
             need = max(min_layover, deadhead_need)
             if gap < 0:
                 issues.append(f"VEHICLE_OVERLAP B{block.id} T{current.id}->{nxt.id}")
-            elif gap < need:
+            elif gap + connection_tolerance < need:
                 issues.append(f"DEADHEAD_INFEASIBLE B{block.id} T{current.id}->{nxt.id}")
         if enforce_same_depot and trips:
             start_depot = trips[0].depot_id

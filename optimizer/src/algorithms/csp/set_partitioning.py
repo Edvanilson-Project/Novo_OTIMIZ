@@ -328,6 +328,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         duties, relief_reassignment_audit = self.greedy._relief_reassignment_postopt(duties, blocks)
         if relief_reassignment_audit.get("accepted_moves"):
             duties = self.greedy._merge_small_duties(duties)
+        duties, soft_issue_reassignment_audit = self.greedy._soft_issue_reassignment_postopt(duties, blocks)
 
         sol = self.greedy.finalize_selected_duties(duties, original_blocks=blocks)
         sol.algorithm = self.name
@@ -350,6 +351,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                 },
                 "duty_merge_diagnostics": self.greedy._extension_diagnostics_snapshot(),
                 "relief_reassignment_audit": relief_reassignment_audit,
+                "soft_issue_reassignment_audit": soft_issue_reassignment_audit,
                 **run_cut_meta,
             }
         )
