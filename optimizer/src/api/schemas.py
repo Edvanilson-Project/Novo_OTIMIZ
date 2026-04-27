@@ -9,20 +9,110 @@ from pydantic import BaseModel, Field, model_validator
 
 from ..domain.models import AlgorithmType
 
-class OptimizationParametersDTO(BaseModel):
-    driver_cost_per_minute: float = Field(0.0, description="Custo do motorista por minuto")
-    collector_cost_per_minute: float = Field(0.0, description="Custo do coletor por minuto")
-    force_round_trip: bool = Field(True, description="Forçar viagem de ida e volta")
-    allow_vehicle_swap: bool = Field(True, description="Permitir troca de veículo")
-    max_driving_time_minutes: int = Field(480, description="Tempo máximo de direção em minutos")
-    meal_break_minutes: int = Field(60, description="Tempo de intervalo de refeição em minutos")
+class BaseOptimizationConfig(BaseModel):
+    """
+    Configuração centralizada de parâmetros de otimização (Single Source of Truth).
+    Utilizado por todos os solvers e pelo CostEvaluator.
+    """
+    # Custos Operacionais e Pesos
+    driver_cost_per_minute: float = Field(0.0, description="Custo real do motorista por minuto")
+    collector_cost_per_minute: float = Field(0.0, description="Custo real do coletor por minuto")
     vehicle_fixed_cost: float = Field(800.0, description="Custo fixo por veículo ativado")
-    terminal_location_ids: List[int] = Field(default_factory=list, description="IDs dos locais que são terminais válidos para rendição")
+    cost_vehicle: float = Field(1000.0, description="Peso (penalidade) para cada veículo ativado no solver")
+    cost_km: float = Field(1.0, description="Custo/Peso por KM de deslocamento morto")
+    cost_duty: float = Field(500.0, description="Custo/Peso fixo por jornada (ativação de tripulação)")
+    waiting_time_pay_pct: float = Field(0.30, description="Percentual de pagamento sobre o tempo de espera (ocioso)")
+    idle_time_is_paid: bool = Field(True, description="Indica se o tempo de espera entre viagens é remunerado")
     
-    # Novos pesos de custo
-    cost_vehicle: float = Field(1000.0, description="Peso para redução da frota")
-    cost_km: float = Field(1.0, description="Custo por KM para redução de quilometragem morta")
-    cost_duty: float = Field(500.0, description="Custo por jornada para redução do número de motoristas")
+    # Parâmetros Noturnos
+    nocturnal_start_hour: int = Field(22, description="Hora de início do período noturno (0-23)")
+    nocturnal_end_hour: int = Field(5, description="Hora de término do período noturno (0-23)")
+    nocturnal_factor: float = Field(1.0, description="Fator de redução de hora noturna (ex: 1.1428 para 52.5min)")
+    nocturnal_extra_pct: float = Field(0.20, description="Adicional noturno em percentual (ex: 0.20 para 20%)")
+    holiday_extra_pct: float = Field(1.0, description="Adicional por trabalho em feriado/domingo (ex: 1.0 para 100% extra)")
+    sunday_off_weight: float = Field(0.0, description="Peso/Penalidade para escalas que não folgam no domingo")
+
+    # Limites CCT (Tripulação)
+    max_shift_minutes: int = Field(560, description="Tempo máximo de jornada total (Spread)")
+    min_shift_minutes: int = Field(0, description="Tempo mínimo de jornada total")
+    max_work_minutes: int = Field(480, description="Tempo máximo de trabalho efetivo")
+    min_work_minutes: int = Field(0, description="Tempo mínimo de trabalho efetivo")
+    max_driving_minutes: int = Field(270, description="Tempo máximo de direção contínua sem pausa")
+    overtime_limit_minutes: int = Field(120, description="Limite de horas extras permitidas")
+    min_break_minutes: int = Field(30, description="Tempo mínimo de intervalo (refeição/descanso)")
+    mandatory_break_after_minutes: int = Field(270, description="Tempo máximo de condução antes de pausa obrigatória")
+    meal_break_minutes: int = Field(60, description="Tempo padrão de intervalo de refeição")
+    inter_shift_rest_minutes: int = Field(660, description="Descanso mínimo entre jornadas (11h)")
+    
+    # Limites Adicionais (Europeus/Avançados)
+    daily_driving_limit_minutes: int = Field(540, description="Limite de direção diária (padrão 9h)")
+    extended_daily_driving_limit_minutes: int = Field(600, description="Limite estendido de direção diária (padrão 10h)")
+    max_extended_driving_days_per_week: int = Field(2, description="Número máximo de extensões de direção por semana")
+    weekly_driving_limit_minutes: int = Field(3360, description="Limite de direção semanal (56h)")
+    fortnight_driving_limit_minutes: int = Field(5400, description="Limite de direção quinzenal (90h)")
+    weekly_rest_minutes: int = Field(2700, description="Tempo de descanso semanal obrigatório (45h)")
+    reduced_weekly_rest_minutes: int = Field(1440, description="Tempo de descanso semanal reduzido (24h)")
+    allow_reduced_weekly_rest: bool = Field(False, description="Permite reduzir o descanso semanal")
+    max_unpaid_break_minutes: Optional[int] = Field(None, description="Limite máximo de um único intervalo não remunerado")
+    max_total_unpaid_break_minutes: Optional[int] = Field(None, description="Limite total de intervalos não remunerados na jornada")
+    long_unpaid_break_limit_minutes: int = Field(180, description="Duração acima da qual a pausa é considerada longa")
+    long_unpaid_break_penalty_weight: float = Field(4.0, description="Peso de penalização por pausas longas não pagas")
+    
+    # Regras de Conexão e Operação
+    min_layover_minutes: int = Field(8, description="Tempo mínimo de parada técnica em terminais")
+    pullout_minutes: int = Field(10, description="Tempo de soltura (garagem -> primeiro terminal)")
+    pullback_minutes: int = Field(10, description="Tempo de recolhimento (último terminal -> garagem)")
+    connection_tolerance_minutes: int = Field(0, description="Tolerância para conexões apertadas")
+    allow_relief_points: bool = Field(False, description="Permitir trocas de motorista em pontos de rendição na rota")
+    enforce_same_depot_start_end: bool = Field(False, description="Forçar início e fim da jornada na mesma garagem")
+    operator_change_terminals_only: bool = Field(True, description="Restringir trocas de operador apenas a terminais/garagem")
+    enforce_single_line_duty: bool = Field(False, description="Restringir jornada a apenas uma linha")
+    operator_single_vehicle_only: bool = Field(False, description="Restringir operador a apenas um veículo (sem trocas)")
+    
+    # Pesos de Metas (Soft Constraints)
+    fairness_weight: float = Field(0.0, description="Peso para equilibrar carga de trabalho entre motoristas")
+    fairness_target_work_minutes: int = Field(420, description="Alvo de minutos de trabalho para equilíbrio")
+    fairness_tolerance_minutes: int = Field(30, description="Tolerância para o alvo de equilíbrio")
+    cct_violation_penalty: float = Field(5000.0, description="Penalidade por violação de regra CCT 'soft'")
+    trip_group_keep_bonus: float = Field(240.0, description="Bônus por manter viagens acopladas (ida e volta)")
+    enforce_trip_groups_hard: bool = Field(True, description="Obriga viagens do mesmo grupo a ficarem na mesma escala")
+    operator_pairing_hard: bool = Field(True, description="Obriga pareamento rígido de operadores")
+    
+    # Configurações de Algoritmo e Modo Estrito
+    apply_cct: bool = Field(True, description="Ativa todas as regras da Convenção Coletiva de Trabalho")
+    strict_hard_validation: bool = Field(True, description="Rejeita soluções que violem restrições hard")
+    strict_union_rules: bool = Field(True, description="Aplica regras sindicais em modo estrito")
+    time_budget_s: Optional[int] = Field(None, description="Tempo limite para o solver (segundos)")
+    random_seed: Optional[int] = Field(None, description="Seed aleatória para repetibilidade")
+    max_vehicles: Optional[int] = Field(None, description="Limite máximo de veículos ativados")
+    max_vehicle_shift_minutes: Optional[int] = Field(None, description="Duração máxima de um bloco de veículo")
+    preferred_pair_window_minutes: int = Field(30, description="Janela máxima para par preferencial (IDA+VOLTA)")
+    pair_break_penalty: float = Field(1000.0, description="Penalidade por quebra de par IDA+VOLTA")
+    paired_trip_bonus: float = Field(500.0, description="Bônus por par IDA+VOLTA preservado")
+    ilp_timeout_seconds: int = Field(120, description="Tempo limite para solvers exatos (segundos)")
+    goal_weights: Dict[str, float] = Field(default_factory=dict, description="Pesos personalizados de objetivos")
+    dynamic_rules: List[Dict[str, Any]] = Field(default_factory=list, description="Regras dinâmicas de custo")
+    
+    class Config:
+        extra = "ignore"
+
+
+class OptimizationParametersDTO(BaseOptimizationConfig):
+    """
+    DTO retrocompatível para parâmetros de otimização.
+    Campos antigos mapeados ou marcados como secundários.
+    """
+    # Mapeamentos para manter compatibilidade com nomes antigos do Frontend
+    force_round_trip: bool = Field(True, description="Forçar viagem de ida e volta (Mapeia para trip_group_keep_bonus)")
+    allow_vehicle_swap: bool = Field(True, description="Permitir troca de veículo entre blocos")
+    max_driving_time_minutes: Optional[int] = Field(None, description="DEPRECATED: Use max_work_minutes")
+    terminal_location_ids: List[int] = Field(default_factory=list, description="IDs dos locais que são terminais válidos")
+
+    @model_validator(mode="after")
+    def sync_deprecated_fields(self) -> "OptimizationParametersDTO":
+        if self.max_driving_time_minutes is not None:
+            self.max_work_minutes = self.max_driving_time_minutes
+        return self
 
 
 class TripInput(BaseModel):
@@ -116,6 +206,7 @@ class VehicleTypeInput(BaseModel):
 
 
 class CctParamsInput(BaseModel):
+    """Schema flexível para entrada de parâmetros CCT (campos opcionais)."""
     max_shift_minutes: Optional[int] = None
     max_work_minutes: Optional[int] = None
     min_work_minutes: Optional[int] = None
@@ -155,6 +246,7 @@ class CctParamsInput(BaseModel):
     operator_change_terminals_only: Optional[bool] = None
     enforce_trip_groups_hard: Optional[bool] = None
     operator_pairing_hard: Optional[bool] = None
+    trip_group_keep_bonus: Optional[float] = None
     sunday_off_weight: Optional[float] = None
     holiday_extra_pct: Optional[float] = None
     enforce_single_line_duty: Optional[bool] = None
@@ -173,25 +265,17 @@ class CctParamsInput(BaseModel):
     operator_profiles: List[OperatorProfileInput] = Field(default_factory=list)
     natural_language_rules: List[str] = Field(default_factory=list)
     apply_cct: Optional[bool] = None
-    dynamic_rules: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Regras dinâmicas de custo no formato JSON Logic. "
-            "Aplicadas como modificadores APÓS o cálculo base do CostEvaluator. "
-            "Ex: {\"condition\": {\"field\": \"is_holiday\", \"op\": \"==\", \"value\": true}, "
-            "\"action\": {\"target\": \"overtime_cost\", \"type\": \"multiply\", \"value\": 1.5}}"
-        ),
-    )
+    dynamic_rules: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class VspParamsInput(BaseModel):
+    """Schema flexível para entrada de parâmetros VSP."""
     time_budget_s: Optional[float] = None
     random_seed: Optional[int] = None
     force_round_trip: Optional[bool] = None
     allow_vehicle_swap: Optional[bool] = None
     max_vehicle_shift_minutes: Optional[int] = None
     max_vehicles: Optional[int] = None
-    maxVehicles: Optional[int] = None
     min_layover_minutes: Optional[int] = None
     fixed_vehicle_activation_cost: Optional[float] = None
     deadhead_cost_per_minute: Optional[float] = None

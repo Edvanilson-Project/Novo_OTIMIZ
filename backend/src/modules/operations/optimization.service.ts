@@ -136,12 +136,16 @@ export class OptimizationService implements OnModuleInit {
           cost_vehicle: params?.cost_vehicle ?? 1000.0,
           cost_km: params?.cost_km ?? 1.0,
           cost_duty: params?.cost_duty ?? 500.0,
+          driver_cost_per_minute: params?.driver_cost_per_minute ?? 0.0,
+          collector_cost_per_minute: params?.collector_cost_per_minute ?? 0.0,
+          cct_violation_penalty: params?.cct_violation_penalty ?? 500.0,
+          ilp_timeout_seconds: params?.ilp_timeout_seconds ?? 120,
           force_round_trip: forceRoundTrip,
           allow_vehicle_swap: allowVehicleSwap,
         },
         vsp_params: vspParams,
         time_budget_s: params?.time_budget_s ?? null,
-        algorithm: algorithm || 'hybrid_pipeline',
+        algorithm: algorithm || params?.algorithm_preference || 'hybrid_pipeline',
         company_id: companyId,
         run_id: schedule.id,
       };
@@ -370,7 +374,8 @@ export class OptimizationService implements OnModuleInit {
         operational_kpis: result.meta?.operational_kpis ?? null,
         resolved_params: result.meta?.input ?? null,
         num_vehicles: result.vehicles ?? 0,
-        num_duties: result.crew ?? 0,
+        num_duties: result.crew ?? (result.meta?.roster_count || 0),
+        roster_count: result.meta?.roster_count ?? 0,
         total_trips: result.total_trips ?? 0,
         algorithm: result.vsp_algorithm ?? '',
       };
@@ -437,6 +442,8 @@ export class OptimizationService implements OnModuleInit {
           cost_vehicle: companyParams?.cost_vehicle ?? 1000.0,
           cost_km: companyParams?.cost_km ?? 1.0,
           cost_duty: companyParams?.cost_duty ?? 500.0,
+          driver_cost_per_minute: companyParams?.driver_cost_per_minute ?? 0.0,
+          collector_cost_per_minute: companyParams?.collector_cost_per_minute ?? 0.0,
         },
       };
 
@@ -611,6 +618,7 @@ export class OptimizationService implements OnModuleInit {
       'allow_relief_points', 'enforce_same_depot_start_end',
       'fairness_weight', 'fairness_target_work_minutes', 'fairness_tolerance_minutes',
       'operator_change_terminals_only', 'enforce_trip_groups_hard', 'operator_pairing_hard',
+      'trip_group_keep_bonus',
       'sunday_off_weight', 'holiday_extra_pct', 'enforce_single_line_duty',
       'operator_single_vehicle_only', 'nocturnal_start_hour', 'nocturnal_end_hour',
       'nocturnal_factor', 'nocturnal_extra_pct', 'apply_cct',
@@ -688,6 +696,9 @@ export class OptimizationService implements OnModuleInit {
 
     if (cctParams.connection_tolerance_minutes !== undefined && result.connection_tolerance_minutes === undefined) {
       result.connection_tolerance_minutes = cctParams.connection_tolerance_minutes;
+    }
+    if (params.trip_group_keep_bonus !== undefined) {
+      result.paired_trip_bonus = params.trip_group_keep_bonus;
     }
     if (cctParams.strict_hard_validation !== undefined && result.strict_hard_validation === undefined) {
       result.strict_hard_validation = cctParams.strict_hard_validation;
@@ -851,6 +862,7 @@ export class OptimizationService implements OnModuleInit {
       cct_violations: schedule.cctViolations ?? 0,
       cctViolations: schedule.cctViolations ?? 0,
       total_trips: meta.total_trips ?? uniqueTripIds.length,
+      rosterCount: meta.roster_count ?? 0,
       unassigned_trips: meta.unassigned_trips ?? [],
       hardIssueCount: meta.hard_issue_count ?? (((meta.solver_explanation || {}).issues || {}).hard || []).length,
       softIssueCount: meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length,
@@ -895,6 +907,9 @@ export class OptimizationService implements OnModuleInit {
       updatedAt: schedule.updatedAt,
       blocks: hydratedBlocks,
       resultSummary,
+      rosterCount: Number(meta.roster_count || 0),
+      totalBlocks: blocks.length,
+      totalTrips: uniqueTripIds.length,
     };
 
     // 4. Salvar no Cache antes de retornar

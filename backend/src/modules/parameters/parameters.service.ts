@@ -62,6 +62,10 @@ export class ParametersService {
       strict_hard_validation: true,
       strict_union_rules: true,
       preserve_preferred_pairs: true,
+      cct_violation_penalty: 500.0,
+      trip_group_keep_bonus: 240.0,
+      algorithm_preference: 'hybrid_pipeline',
+      ilp_timeout_seconds: 120,
     });
 
     return this.parametersRepository.save(newParams);

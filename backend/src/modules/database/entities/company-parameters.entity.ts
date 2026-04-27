@@ -23,6 +23,9 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('float', { default: 500.0 })
   cost_duty: number;
 
+  @Column('float', { default: 500.0 })
+  cct_violation_penalty: number;
+
   // ── Flags de Otimização ──
   @Column('boolean', { default: true })
   force_round_trip: boolean;
@@ -151,6 +154,9 @@ export class CompanyParameters extends TenantBaseEntity {
 
   @Column('boolean', { default: false })
   operator_pairing_hard: boolean;
+
+  @Column('float', { default: 240.0 })
+  trip_group_keep_bonus: number;
 
   @Column('float', { nullable: true })
   sunday_off_weight: number;
@@ -285,6 +291,12 @@ export class CompanyParameters extends TenantBaseEntity {
   // Limite em minutos acima do qual aplica o behavior acima (null = padrão do solver)
   @Column('integer', { nullable: true })
   vehicle_idle_gap_threshold_minutes: number;
+
+  @Column({ default: 'hybrid_pipeline' })
+  algorithm_preference: string;
+
+  @Column('integer', { default: 120 })
+  ilp_timeout_seconds: number;
 
   // ── JSON Complexo ──
   @Column('jsonb', { nullable: true })

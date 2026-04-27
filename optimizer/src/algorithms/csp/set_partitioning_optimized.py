@@ -149,7 +149,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         O algoritmo ajusta automaticamente estes parâmetros baseado no número de tarefas.
         """
-        super().__init__(name="set_partitioning_optimized_csp", time_budget_s=settings.ilp_timeout_seconds)
+        # Prioriza ilp_timeout_seconds da API
+        timeout = params.get("ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds))
+        super().__init__(name="set_partitioning_optimized_csp", time_budget_s=timeout)
         self.params = params
         self.vsp_params = vsp_params or {}
 
@@ -677,59 +679,26 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
     def _piece_cost(self, combo: Sequence[Block]) -> float:
         """
-        Calcula custo de uma combinação (jornada).
-
-        COMPONENTES DO CUSTO:
-        1. Custo fixo por jornada (ativar operador)
-        2. Custo variável por hora de trabalho
-        3. Penalidades por gaps (tempo ocioso)
-        4. Penalidades por transferência passiva (deadheading)
-        5. Desvios de metas (programação por metas)
-
-        A função é idêntica à original para manter compatibilidade.
+        Calcula custo de uma combinação (jornada) usando o CostEvaluator centralizado.
         """
-        work = sum(self.greedy._block_drive(block) for block in combo)
-        spread = self.greedy._duty_spread_minutes(combo)
-        gaps = [max(0, combo[index + 1].start_time - combo[index].end_time) for index in range(len(combo) - 1)]
-        passive = 0
-        for index in range(len(combo) - 1):
-            passive += max(0, self.greedy._transfer_needed(combo[index], combo[index + 1]) - self.greedy.min_layover)
-
-        # Converter tudo para Decimal
-        from decimal import Decimal
-        work_dec = Decimal(str(work))
-        spread_dec = Decimal(str(spread))
-        gaps_sum = Decimal(str(sum(gaps)))
-        passive_dec = Decimal(str(passive))
+        from ...domain.models import CSPSolution
+        duty = Duty(id=0)
+        # Re-aplicar para garantir que todos os metadados estejam no duty para o avaliador
+        for i, block in enumerate(combo):
+            if i == 0:
+                self.greedy._apply_block(duty, block, {
+                    "new_work": self.greedy._block_regulatory_work(block),
+                    "new_spread": block.total_duration + self.greedy.pullout + self.greedy.pullback,
+                    "new_cont": self.greedy._block_drive(block),
+                    "daily_drive": self.greedy._block_regulatory_work(block),
+                })
+            else:
+                ok, _, data = self.greedy._can_extend(duty, block)
+                if ok:
+                    self.greedy._apply_block(duty, block, data)
         
-        # Custos base
-        cost = Decimal('50.0')  # custo fixo por jornada
-        cost += (work_dec / Decimal('60.0')) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
-        cost += gaps_sum * Decimal('0.1')
-        cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))
-        
-        # Desvios de metas
-        target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
-        target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
-        
-        overtime_dev = self.greedy._regular_overtime_minutes(work)
-        underwork_dev = max(0, target_work - work)
-        spread_dev = max(0, spread - target_spread)
-        fairness_dev = abs(work - target_work)
-        
-        # Converter desvios para Decimal
-        overtime_dev_dec = Decimal(str(overtime_dev))
-        underwork_dev_dec = Decimal(str(underwork_dev))
-        spread_dev_dec = Decimal(str(spread_dev))
-        fairness_dev_dec = Decimal(str(fairness_dev))
-        
-        # Adicionar penalidades de desvio
-        cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 0.8)))
-        cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.2)))
-        cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.15)))
-        cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.05)))
-        
-        return float(cost)
+        dummy_sol = CSPSolution(duties=[duty], uncovered_blocks=[])
+        return float(self.greedy.evaluator.csp_cost_breakdown(dummy_sol)["total"])
 
     def _spprc_pricing(
         self,
@@ -786,11 +755,12 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         Rótulos dominados são descartados imediatamente (poda Pareto).
         """
-        CREW_COST_PER_MIN = float(_DEFAULT_CREW_COST_PER_HOUR) / 60.0
-        FIXED_DUTY_COST = 50.0
-        GAP_WEIGHT = 0.1
+        # Sincronização de Pesos com o Evaluador Central
+        CREW_COST_PER_MIN = float(self.greedy.evaluator.crew_cost_per_hour) / 60.0
+        FIXED_DUTY_COST = float(self.greedy.evaluator.cost_duty)
+        GAP_WEIGHT = 0.1 # Peso interno do solver para gaps pequenos
         PASSIVE_WEIGHT = float(self.goal_weights.get("passive_transfer", 0.25))
-        BREAK_RESET_MIN = 45
+        BREAK_RESET_MIN = self.greedy.min_break
         LONG_UNPAID_BREAK_LIMIT = self.greedy.long_unpaid_break_limit
         LONG_UNPAID_BREAK_PENALTY = self.greedy.long_unpaid_break_penalty_weight
 

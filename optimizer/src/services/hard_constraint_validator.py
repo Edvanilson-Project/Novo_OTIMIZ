@@ -170,7 +170,7 @@ class HardConstraintValidator:
         )
 
         # Separar violações hard (bloqueantes) de soft (avisos)
-        soft_prefixes = ["MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED"]
+        soft_prefixes = ["MEAL_BREAK_MISSING"]
         hard_pairing = bool(cct_params.get("enforce_trip_groups_hard", False)) or bool(
             cct_params.get("operator_pairing_hard", False)
         )

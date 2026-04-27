@@ -31,42 +31,7 @@ _DEF_MAX_DRIVING = getattr(settings, "cct_max_driving_minutes", 270)
 _DEF_MIN_BREAK = getattr(settings, "cct_min_break_minutes", 30)
 
 
-def _nocturnal_overlap(start: int, end: int, noct_start_h: int, noct_end_h: int) -> int:
-    """Calcula minutos noturnos entre start e end (minutos absolutos).
-    Suporta janela noturna com wrap de meia-noite (ex: 22h-5h) e sem wrap (ex: 1h-6h)."""
-    if start >= end:
-        return 0
-    start_noct = noct_start_h * 60
-    end_noct = noct_end_h * 60
-    wraps_midnight = noct_start_h > noct_end_h  # e.g. 22h-5h
-
-    total = 0
-    # Iterar dia a dia coberto pelo intervalo
-    day_start = (start // 1440) * 1440
-    day_end = ((end - 1) // 1440) * 1440
-
-    for day_base in range(day_start, day_end + 1440, 1440):
-        if wraps_midnight:
-            # Janela noturna: [day_base+start_noct, day_base+1440) + [day_base+1440, day_base+1440+end_noct)
-            win_a_start = day_base + start_noct
-            win_a_end = day_base + 1440
-            win_b_start = day_base + 1440
-            win_b_end = day_base + 1440 + end_noct
-            for ws, we in [(win_a_start, win_a_end), (win_b_start, win_b_end)]:
-                ov_start = max(start, ws)
-                ov_end = min(end, we)
-                if ov_end > ov_start:
-                    total += ov_end - ov_start
-        else:
-            # Janela contígua: [day_base+start_noct, day_base+end_noct)
-            ws = day_base + start_noct
-            we = day_base + end_noct
-            ov_start = max(start, ws)
-            ov_end = min(end, we)
-            if ov_end > ov_start:
-                total += ov_end - ov_start
-
-    return total
+from ..evaluator import _nocturnal_overlap, CostEvaluator
 
 
 def _shift_type_from_minutes(minutes: int) -> str:
@@ -90,69 +55,93 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.params = params
         self.vsp_params = vsp_params or {}
         self._next_synthetic_trip_id = -1
-        self.legal_max_shift = int(params.get("legal_max_shift_minutes", 720))
-        self.legal_max_continuous_driving = 600
-        self.max_shift = min(int(params.get("max_shift_minutes", _DEF_MAX_SHIFT)), self.legal_max_shift)
+        
+        # Sincronização com BaseOptimizationConfig
+        self.max_shift = int(params.get("max_shift_minutes", _DEF_MAX_SHIFT))
         self.max_work = int(params.get("max_work_minutes", _DEF_MAX_WORK))
         self.min_work = int(params.get("min_work_minutes", 0))
+        self.min_guaranteed_work = int(params.get("min_work_minutes", 420))
         self.min_shift = int(params.get("min_shift_minutes", 0))
         self.overtime_limit = int(params.get("overtime_limit_minutes", 120))
-        self.max_driving = min(int(params.get("max_driving_minutes", _DEF_MAX_DRIVING)), self.legal_max_continuous_driving)
+        self.max_driving = int(params.get("max_driving_minutes", _DEF_MAX_DRIVING))
         self.min_break = int(params.get("min_break_minutes", _DEF_MIN_BREAK))
         self.connection_tolerance = max(0, int(params.get("connection_tolerance_minutes", 0)))
-        self.mandatory_break_after = min(int(params.get("mandatory_break_after_minutes", self.max_driving)), self.legal_max_continuous_driving)
-        self.split_break_first = int(params.get("split_break_first_minutes", 15))
-        self.split_break_second = int(params.get("split_break_second_minutes", max(self.min_break, 30)))
+        self.mandatory_break_after = int(params.get("mandatory_break_after_minutes", self.max_driving))
         self.meal_break_minutes = int(params.get("meal_break_minutes", 0))
         self.inter_shift_rest = max(int(params.get("inter_shift_rest_minutes", 660)), 660)
-        self.weekly_rest = int(params.get("weekly_rest_minutes", 1440))
-        self.daily_driving_limit = int(params.get("daily_driving_limit_minutes", 540))
-        self.extended_daily_driving_limit = int(params.get("extended_daily_driving_limit_minutes", 600))
-        self.max_extended_days = int(params.get("max_extended_driving_days_per_week", 2))
-        self.weekly_driving_limit = int(params.get("weekly_driving_limit_minutes", 3360))
-        self.fortnight_driving_limit = int(params.get("fortnight_driving_limit_minutes", 5400))
-        self.min_layover = int(params.get("min_layover_minutes", self.vsp_params.get("min_layover_minutes", 8)))
-        self.pullout = int(params.get("pullout_minutes", 10))
-        self.pullback = int(params.get("pullback_minutes", 10))
+        
+        # Custos e Pesos
+        self.cost_duty = float(params.get("cost_duty", 500.0))
         self.idle_time_is_paid = bool(params.get("idle_time_is_paid", True))
         self.waiting_time_pay_pct = float(params.get("waiting_time_pay_pct", 0.30))
-        max_unpaid_break = params.get("max_unpaid_break_minutes", None)
-        self.max_unpaid_break = None if max_unpaid_break is None else max(0, int(max_unpaid_break))
         self.long_unpaid_break_limit = int(params.get("long_unpaid_break_limit_minutes", 180))
         self.long_unpaid_break_penalty_weight = float(params.get("long_unpaid_break_penalty_weight", 4.0))
-        max_total_unpaid_break = params.get("max_total_unpaid_break_minutes", None)
-        self.max_total_unpaid_break = None if max_total_unpaid_break is None else max(0, int(max_total_unpaid_break))
-        self.min_guaranteed_work = int(params.get("min_guaranteed_work_minutes", 0))
-        self.allow_relief_points = bool(params.get("allow_relief_points", False))
-        self.enforce_same_depot = bool(params.get("enforce_same_depot_start_end", False))
-        self.enforce_single_line_duty = bool(params.get("enforce_single_line_duty", False))
-        self.operator_single_vehicle_only = bool(params.get("operator_single_vehicle_only", False))
+        
+        # Parâmetros Noturnos
         self.nocturnal_start_hour = int(params.get("nocturnal_start_hour", 22))
         self.nocturnal_end_hour = int(params.get("nocturnal_end_hour", 5))
         self.nocturnal_extra_pct = float(params.get("nocturnal_extra_pct", 0.20))
+        self.nocturnal_factor = float(params.get("nocturnal_factor", 1.0))
         self.holiday_extra_pct = float(params.get("holiday_extra_pct", 1.0))
-        self.goal_weights = dict(params.get("goal_weights") or self.vsp_params.get("goal_weights") or {})
-        fairness_weight = params.get("fairness_weight", self.goal_weights.get("fairness", 0.0))
-        try:
-            fairness_weight = float(fairness_weight)
-        except (TypeError, ValueError):
-            fairness_weight = 0.0
-        if fairness_weight > 1.0:
-            fairness_weight = fairness_weight / 100.0
-        self.fairness_weight = max(0.0, fairness_weight)
-        self.fairness_target_work = int(params.get("fairness_target_work_minutes", self.goal_weights.get("target_work_minutes", 420)))
-        self.fairness_tolerance = int(params.get("fairness_tolerance_minutes", 30))
+        
+        # Regras de Operação
+        self.allow_relief_points = bool(params.get("allow_relief_points", False))
+        self.enforce_same_depot = bool(params.get("enforce_same_depot_start_end", False))
         self.operator_change_terminals_only = bool(params.get("operator_change_terminals_only", True))
-        self.strict_union_rules = bool(params.get("strict_union_rules", True))
-        self.operator_profiles = list(params.get("operator_profiles") or [])
+        self.enforce_single_line_duty = bool(params.get("enforce_single_line_duty", False))
+        self.operator_single_vehicle_only = bool(params.get("operator_single_vehicle_only", False))
+        
+        # Limites Adicionais
+        self.daily_driving_limit = int(params.get("daily_driving_limit_minutes", 540))
+        self.extended_daily_driving_limit = int(params.get("extended_daily_driving_limit_minutes", 600))
+        self.max_extended_days = int(params.get("max_extended_driving_days_per_week", 2))
+        self.max_unpaid_break = params.get("max_unpaid_break_minutes")
+        if self.max_unpaid_break is not None: self.max_unpaid_break = int(self.max_unpaid_break)
+        self.max_total_unpaid_break = params.get("max_total_unpaid_break_minutes")
+        if self.max_total_unpaid_break is not None: self.max_total_unpaid_break = int(self.max_total_unpaid_break)
+        self.weekly_driving_limit = int(params.get("weekly_driving_limit_minutes", 3360))
+        self.fortnight_driving_limit = int(params.get("fortnight_driving_limit_minutes", 5400))
+        
+        # Minutos de Layover/Pull
+        self.min_layover = int(params.get("min_layover_minutes", self.vsp_params.get("min_layover_minutes", 8)))
+        self.pullout = int(params.get("pullout_minutes", 10))
+        self.pullback = int(params.get("pullback_minutes", 10))
+        
+        # Fairness
+        self.goal_weights = dict(params.get("goal_weights") or self.vsp_params.get("goal_weights") or {})
+        self.fairness_weight = float(params.get("fairness_weight", 0.0))
+        self.fairness_target_work = int(params.get("fairness_target_work_minutes", 420))
+        self.fairness_tolerance = int(params.get("fairness_tolerance_minutes", 30))
+        
         self.trip_group_keep_bonus = float(params.get("trip_group_keep_bonus", 240.0))
-        self.trip_group_split_penalty = float(
-            params.get("trip_group_split_penalty", max(self.trip_group_keep_bonus * 4.0, 1000.0))
-        )
+        self.trip_group_split_penalty = float(params.get("trip_group_split_penalty", 1000.0))
+        self.operator_profiles = params.get("operator_profiles", [])
+        self.split_break_first = int(params.get("split_break_first_minutes", 15))
+        self.split_break_second = int(params.get("split_break_second_minutes", 30))
+        self.strict_union_rules = bool(params.get("strict_union_rules", False))
+        
+        self.apply_cct = bool(params.get("apply_cct", True))
+        
+        # Inicializar Evaluador para scoring preciso se desejado
+        self.evaluator = params.get("evaluator") or CostEvaluator()
+        self.evaluator.set_costs(params)
+        
         self._extension_diagnostics = self._empty_extension_diagnostics()
 
     def _block_drive(self, block: Block) -> int:
         return sum(t.duration for t in block.trips)
+
+    def _block_regulatory_work(self, block: Block) -> int:
+        real_drive = self._block_drive(block)
+        if self.nocturnal_factor <= 1.0:
+            return real_drive
+        
+        noct_min = sum(
+            _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
+            for t in block.trips
+        )
+        extension = int(round(noct_min * (self.nocturnal_factor - 1.0)))
+        return real_drive + extension
 
     def _service_day(self, block: Block) -> int:
         return block.start_time // 1440
@@ -713,33 +702,46 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             if covered_sources and source_block_id not in covered_sources:
                 return False, "operator_single_vehicle_only", {}
 
-        new_spread = self._duty_spread_minutes([*duty.tasks, block])
-        if new_spread > self.max_shift:
-            return False, "spread_exceeded", {"new_spread": new_spread}
+        if self.apply_cct:
+            new_spread = self._duty_spread_minutes([*duty.tasks, block])
+            if new_spread > self.max_shift:
+                return False, "spread_exceeded", {"new_spread": new_spread}
 
-        projected_work = duty.work_time + self._block_drive(block)
-        overtime_minutes = self._regular_overtime_minutes(projected_work)
-        if overtime_minutes > self.overtime_limit:
-            return False, "overtime_hard", {"new_spread": new_spread, "new_work": projected_work, "overtime_minutes": overtime_minutes}
+            projected_work = duty.work_time + self._block_regulatory_work(block)
+            overtime_minutes = self._regular_overtime_minutes(projected_work)
+            if overtime_minutes > self.overtime_limit:
+                return False, "overtime_hard", {"new_spread": new_spread, "new_work": projected_work, "overtime_minutes": overtime_minutes}
+
+            had_break, break_state, break_adjustment = self._break_resets(duty.meta.get("break_state", {}), gap)
+            current_cont = int(duty.meta.get("continuous_drive", 0))
+            block_drive = self._block_drive(block)
+            block_regulatory = self._block_regulatory_work(block)
+            new_cont = block_drive if had_break else current_cont + block_drive
+            if new_cont > self.max_driving or new_cont > self.mandatory_break_after:
+                return False, "continuous_drive_exceeded", {"continuous_drive": new_cont}
+
+            daily_drive = int(duty.meta.get("daily_driving", 0)) + block_regulatory
+            extended_days_used = int(duty.meta.get("extended_days_used", 0))
+            if daily_drive > self.extended_daily_driving_limit:
+                return False, "daily_driving_exceeded", {"daily_drive": daily_drive}
+            if daily_drive > self.daily_driving_limit and extended_days_used >= self.max_extended_days:
+                return False, "daily_extension_quota_exceeded", {"daily_drive": daily_drive}
+        else:
+            # Cálculos mínimos necessários mesmo sem CCT
+            new_spread = self._duty_spread_minutes([*duty.tasks, block])
+            projected_work = duty.work_time + self._block_regulatory_work(block)
+            had_break, break_state, break_adjustment = self._break_resets(duty.meta.get("break_state", {}), gap)
+            block_drive = self._block_drive(block)
+            block_regulatory = self._block_regulatory_work(block)
+            current_cont = int(duty.meta.get("continuous_drive", 0))
+            new_cont = block_drive if had_break else current_cont + block_drive
+            daily_drive = int(duty.meta.get("daily_driving", 0)) + block_regulatory
+            extended_days_used = int(duty.meta.get("extended_days_used", 0))
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
         if self.enforce_same_depot and start_depot is not None and candidate_end_depot is not None and candidate_end_depot != start_depot:
             return False, "same_depot_required", {}
-
-        had_break, break_state, break_adjustment = self._break_resets(duty.meta.get("break_state", {}), gap)
-        current_cont = int(duty.meta.get("continuous_drive", 0))
-        block_drive = self._block_drive(block)
-        new_cont = block_drive if had_break else current_cont + block_drive
-        if new_cont > self.max_driving or new_cont > self.mandatory_break_after:
-            return False, "continuous_drive_exceeded", {"continuous_drive": new_cont}
-
-        daily_drive = int(duty.meta.get("daily_driving", 0)) + block_drive
-        extended_days_used = int(duty.meta.get("extended_days_used", 0))
-        if daily_drive > self.extended_daily_driving_limit:
-            return False, "daily_driving_exceeded", {"daily_drive": daily_drive}
-        if daily_drive > self.daily_driving_limit and extended_days_used >= self.max_extended_days:
-            return False, "daily_extension_quota_exceeded", {"daily_drive": daily_drive}
 
         transfer_adjustment = self._adjustment_needed(gap, transfer_needed)
         connection_adjustment = max(transfer_adjustment, break_adjustment)
@@ -770,11 +772,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         )
         duty.add_task(block)
         start_buffer, end_buffer, duty_start, duty_end = self._duty_span_bounds(duty.tasks)
-        duty.work_time = int(data.get("new_work", self._block_drive(block)))
+        duty.work_time = int(data.get("new_work", self._block_regulatory_work(block)))
         duty.spread_time = max(0, duty_end - duty_start)
         gap = int(data.get("gap", 0))
         duty.meta["continuous_drive"] = int(data.get("new_cont", self._block_drive(block)))
-        duty.meta["daily_driving"] = int(data.get("daily_drive", self._block_drive(block)))
+        duty.meta["daily_driving"] = int(data.get("daily_drive", self._block_regulatory_work(block)))
         duty.meta["extended_days_used"] = int(data.get("extended_days_used", 0))
         duty.meta["break_state"] = dict(data.get("break_state", duty.meta.get("break_state", {"credit": 0, "has_long": False})))
         duty.meta["duty_start_minutes"] = duty_start
@@ -1308,7 +1310,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 self._record_extension_attempt("duty_build", duty, task, ok, reason, data)
                 if not ok:
                     continue
-                projected_work = int(data.get("new_work", duty.work_time + self._block_drive(task)))
+                projected_work = int(data.get("new_work", duty.work_time + self._block_regulatory_work(task)))
                 fairness_penalty = self._fairness_penalty(projected_work)
                 gap = float(data.get("gap", 0))
                 long_gap_penalty = self._long_unpaid_break_penalty(gap)
@@ -1336,11 +1338,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 duty,
                 task,
                 {
-                    "new_work": self._block_drive(task),
+                    "new_work": self._block_regulatory_work(task),
                     "new_spread": self._duty_spread_minutes([task]),
                     "new_cont": self._block_drive(task),
-                    "daily_drive": self._block_drive(task),
-                    "extended_days_used": 1 if self._block_drive(task) > self.daily_driving_limit else 0,
+                    "daily_drive": self._block_regulatory_work(task),
+                    "extended_days_used": 1 if self._block_regulatory_work(task) > self.daily_driving_limit else 0,
                 },
             )
             covered_trip_ids.update(task_trip_ids)
@@ -1399,7 +1401,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     continue
                 combined_spread = self._duty_spread_minutes([*a.tasks, *b.tasks])
                 combined_work = a.work_time + sum(
-                    self._block_drive(t) for t in b.tasks
+                    self._block_regulatory_work(t) for t in b.tasks
                 )
                 if combined_spread > self.max_shift:
                     i += 1

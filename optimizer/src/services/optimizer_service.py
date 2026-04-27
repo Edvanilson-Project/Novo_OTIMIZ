@@ -77,23 +77,43 @@ class OptimizerService:
         intent_params: Dict[str, Any] = {}
         if optimization_params is not None:
             intent_params.update(
-                optimization_params if isinstance(optimization_params, dict) else dict(optimization_params)
+                optimization_params if isinstance(optimization_params, dict) else optimization_params.dict()
             )
-        for key in ("force_round_trip", "allow_vehicle_swap"):
-            if key in vsp_params and key not in intent_params:
-                intent_params[key] = vsp_params.get(key)
+        
+        # Sincronização de Intenções do Frontend com Parâmetros de Solver
         if intent_params.get("force_round_trip"):
             cct_params["enforce_trip_groups_hard"] = True
             cct_params.setdefault("operator_pairing_hard", True)
             vsp_params.setdefault("preserve_preferred_pairs", True)
+            # Aumentar bônus de acoplamento se não definido
+            intent_params.setdefault("trip_group_keep_bonus", 500.0)
+            
         if intent_params.get("allow_vehicle_swap") is False:
             cct_params["operator_single_vehicle_only"] = True
+            vsp_params["allow_vehicle_swap"] = False
+
+        # Propagar TODOS os parâmetros do DTO global para cct_params e vsp_params
+        # Isso garante compatibilidade com solvers legados e validadores.
+        for key, value in intent_params.items():
+            if key not in ("trips", "vehicle_types"): # evitar sobrecarga
+                cct_params[key] = value
+                vsp_params[key] = value
+        
+        # Mapeamentos específicos de nomes legados
+        if intent_params.get("cost_vehicle"):
+            vsp_params["fixed_vehicle_activation_cost"] = intent_params["cost_vehicle"]
+        if intent_params.get("cost_km"):
+            vsp_params["deadhead_cost_per_minute"] = intent_params["cost_km"]
+        if intent_params.get("cost_duty"):
+            cct_params["cost_duty"] = intent_params["cost_duty"]
+        if intent_params.get("max_shift_minutes"):
+            vsp_params["max_vehicle_shift_minutes"] = intent_params["max_shift_minutes"]
 
         self._align_vsp_params_with_cct(cct_params, vsp_params)
         normalized_time_budget_s = (
             float(time_budget_s)
             if time_budget_s is not None
-            else float(vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds))
+            else float(vsp_params.get("time_budget_s") or settings.hybrid_time_budget_seconds or 60)
         )
         replay_fingerprint = self._build_replay_fingerprint(
             trips,
@@ -138,6 +158,7 @@ class OptimizerService:
             normalized_time_budget_s,
             cct_params,
             vsp_params,
+            optimization_params,
         )
         primary_trip_group_audit = self._build_trip_group_audit(result, trips)
 
@@ -250,17 +271,20 @@ class OptimizerService:
         # Injetar regras dinâmicas e pesos de custo no avaliador
         self.evaluator.set_dynamic_rules(cct_params.get("dynamic_rules") or [])
         
-        # Configurar novos pesos de custo
+        # Configurar pesos de custo e regras de negócio usando o DTO unificado
         if optimization_params:
-            self.evaluator.set_costs(
-                cost_vehicle=optimization_params.get("cost_vehicle", 1000.0),
-                cost_km=optimization_params.get("cost_km", 1.0),
-                cost_duty=optimization_params.get("cost_duty", 500.0),
+            self.evaluator.set_costs(optimization_params)
+            # Correção do bug result_meta -> result.meta
+            result.meta["ilp_timeout_seconds"] = (
+                optimization_params.get("ilp_timeout_seconds", 120) 
+                if isinstance(optimization_params, dict) 
+                else getattr(optimization_params, "ilp_timeout_seconds", 120)
             )
         
         cost_breakdown = self.evaluator.total_cost_breakdown(result, vehicle_types)
         result.total_cost = float(cost_breakdown["total"])
         result.meta["cost_breakdown"] = cost_breakdown
+        result.meta["roster_count"] = result.csp.meta.get("roster_count", 0)
         result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)
         result.meta["trip_group_audit"] = self._build_trip_group_audit(result, trips)
         result.meta["phase_summary"] = self._build_phase_summary(result, cost_breakdown)
@@ -988,6 +1012,7 @@ class OptimizerService:
         time_budget_s: Optional[float],
         cct_params: Dict[str, Any],
         vsp_params: Dict[str, Any],
+        optimization_params: Optional[Dict[str, Any]] = None,
     ) -> OptimizationResult:
         # Mapa de alocação de tempo otimizada
         TIME_ALLOCATION = {
@@ -1000,55 +1025,55 @@ class OptimizerService:
         handler = self._solver_registry.get(algorithm)
         if not handler:
             raise InvalidAlgorithmError(str(algorithm))
-        return handler(trips, vehicle_types, depot_id, time_budget_s, cct_params, vsp_params)
+        return handler(trips, vehicle_types, depot_id, time_budget_s, cct_params, vsp_params, optimization_params)
 
-    def _run_greedy(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params)
+    def _run_greedy(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
         vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_genetic(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_genetic(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        csp = self._make_csp(cct_params, vsp_params)
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
         ga = GeneticVSP(vsp_params=vsp_params)
         ga.time_budget_s = budget * 0.8
         vsp = ga.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_sa(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_sa(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        csp = self._make_csp(cct_params, vsp_params)
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
         sa = SimulatedAnnealingVSP(vsp_params=vsp_params)
         sa.time_budget_s = budget * 0.8
         vsp = sa.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_ts(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_ts(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        csp = self._make_csp(cct_params, vsp_params)
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
         ts = TabuSearchVSP(vsp_params=vsp_params)
         ts.time_budget_s = budget * 0.8
         vsp = ts.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_sp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_sp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
         vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-        ilp = self._make_set_covering_csp(cct_params, vsp_params)
+        ilp = self._make_set_covering_csp(cct_params, vsp_params, optimization_params)
         ilp.time_budget_s = budget * 0.9
         return OptimizationResult(vsp=vsp, csp=ilp.solve(vsp.blocks, trips))
 
-    def _run_mcnf(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_mcnf(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        csp = self._make_csp(cct_params, vsp_params)
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
         mcnf = MCNFVSP(vsp_params=vsp_params)
         mcnf.time_budget_s = budget * 0.8
         vsp = mcnf.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_joint(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_joint(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        return JointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+        return JointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params, optimization_params=optimization_params).solve(trips, vehicle_types, depot_id)
 
     def _run_hybrid(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
@@ -1456,10 +1481,15 @@ class OptimizerService:
 
         return parsed
 
-    def _make_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any]):
+    def _make_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None):
+        # Merge optimization_params into cct_params for CSP solvers
+        full_params = {**cct_params}
+        if optimization_params:
+            full_params.update(optimization_params)
+            
         if vsp_params.get("use_set_covering") or vsp_params.get("pricing_enabled"):
-            return self._make_set_covering_csp(cct_params, vsp_params)
-        return GreedyCSP(vsp_params=vsp_params, **cct_params)
+            return self._make_set_covering_csp(full_params, vsp_params)
+        return GreedyCSP(vsp_params=vsp_params, **full_params)
 
     def _make_set_covering_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any]):
         # Usa a versão otimizada por padrão (Nível Optibus)

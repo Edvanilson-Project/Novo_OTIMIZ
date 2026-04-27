@@ -36,7 +36,9 @@ except ImportError:  # pragma: no cover
 
 class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
     def __init__(self, vsp_params: Optional[Dict[str, Any]] = None, **params: Any):
-        super().__init__(name="set_partitioning_csp", time_budget_s=settings.ilp_timeout_seconds)
+        # Prioritize ilp_timeout_seconds from params, then vsp_params, then global settings
+        timeout = params.get("ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds))
+        super().__init__(name="set_partitioning_csp", time_budget_s=timeout)
         self.params = params
         self.vsp_params = vsp_params or {}
         self.greedy = GreedyCSP(vsp_params=vsp_params, **params)
@@ -98,7 +100,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         passive_dec = Decimal(str(passive))
         
         # Custos base
-        cost = Decimal('50.0')  # custo fixo por jornada
+        cost = Decimal(str(getattr(self.greedy, "cost_duty", 50.0)))  # custo fixo por jornada dinâmico
         cost += (work_dec / Decimal('60.0')) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
         cost += gaps_sum * Decimal('0.1')
         cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))

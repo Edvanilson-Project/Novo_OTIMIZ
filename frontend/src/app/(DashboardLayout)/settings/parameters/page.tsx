@@ -44,6 +44,7 @@ interface CompanyParameters {
   cost_vehicle: number;
   cost_km: number;
   cost_duty: number;
+  cct_violation_penalty: number;
   // Flags
   force_round_trip: boolean;
   allow_vehicle_swap: boolean;
@@ -79,6 +80,8 @@ interface CompanyParameters {
   max_pricing_additions: number | null;
   vehicle_idle_gap_behavior: string | null;
   vehicle_idle_gap_threshold_minutes: number | null;
+  algorithm_preference: string | null;
+  ilp_timeout_seconds: number | null;
   // Jornada Base
   max_driving_time_minutes: number;
   meal_break_minutes: number;
@@ -121,6 +124,7 @@ interface CompanyParameters {
   operator_change_terminals_only: boolean | null;
   enforce_trip_groups_hard: boolean | null;
   operator_pairing_hard: boolean | null;
+  trip_group_keep_bonus: number | null;
   sunday_off_weight: number | null;
   holiday_extra_pct: number | null;
   enforce_single_line_duty: boolean | null;
@@ -144,6 +148,7 @@ const DEFAULTS: CompanyParameters = {
   cost_vehicle: 1000.0,
   cost_km: 1.0,
   cost_duty: 500.0,
+  cct_violation_penalty: 500.0,
   force_round_trip: true,
   allow_vehicle_swap: false,
   time_budget_s: null,
@@ -177,6 +182,8 @@ const DEFAULTS: CompanyParameters = {
   max_pricing_additions: null,
   vehicle_idle_gap_behavior: 'solver_decides',
   vehicle_idle_gap_threshold_minutes: null,
+  algorithm_preference: 'hybrid_pipeline',
+  ilp_timeout_seconds: 120,
   max_driving_time_minutes: 480,
   meal_break_minutes: 60,
   max_shift_minutes: 720,
@@ -217,6 +224,7 @@ const DEFAULTS: CompanyParameters = {
   operator_change_terminals_only: true,
   enforce_trip_groups_hard: true,
   operator_pairing_hard: true,
+  trip_group_keep_bonus: 240.0,
   sunday_off_weight: null,
   holiday_extra_pct: null,
   enforce_single_line_duty: false,
@@ -490,6 +498,9 @@ export default function ParametersPage() {
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                   {numField(params, setParams, "sunday_off_weight", "Peso Folga Domingo", "Peso para priorizar folga dominical no solver", "", true)}
                 </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  {numField(params, setParams, "cct_violation_penalty", "Peso de Penalidade Legal", "Severidade de violação contratual ou de regras CCT (Padrão: 500)", "peso", true)}
+                </Grid>
               </Grid>
             </AccordionDetails>
           </Accordion>
@@ -670,6 +681,9 @@ export default function ParametersPage() {
                   {boolField(params, setParams, "enforce_trip_groups_hard", "Forcar Grupo de Viagens", "Obriga viagens do mesmo grupo a ficarem na mesma escala")}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
+                  {numField(params, setParams, "trip_group_keep_bonus", "Vínculo de Ida e Volta", "Prioridade para manter o ciclo de ida e volta do motorista no mesmo carro (Padrão: 240)", "peso", true)}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   {boolField(params, setParams, "operator_pairing_hard", "Forcar Pareamento Operador", "Obriga pareamento rigido de operadores")}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
@@ -821,7 +835,37 @@ export default function ParametersPage() {
                   <Grid size={{ xs: 12 }}>
                     <Divider sx={{ my: 1 }} />
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                      VSP Avançado
+                      Configurações Avançadas de Processamento
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                      Modo de Processamento (Motor VSP)
+                    </Typography>
+                    <ToggleButtonGroup
+                      exclusive
+                      size="small"
+                      value={params.algorithm_preference ?? 'hybrid_pipeline'}
+                      onChange={(_, v) => { if (v) setParams(p => ({ ...p, algorithm_preference: v })); }}
+                    >
+                      <ToggleButton value="assignment_vsp">Relâmpago (Fast)</ToggleButton>
+                      <ToggleButton value="hybrid_pipeline">Preciso (Deep)</ToggleButton>
+                    </ToggleButtonGroup>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                      {params.algorithm_preference === 'assignment_vsp' && '→ Recomendado para rapidez e grandes volumes (40k+ viagens).'}
+                      {params.algorithm_preference === 'hybrid_pipeline' && '→ Recomendado para máxima qualidade e economia de frota.'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    {numField(params, setParams, "ilp_timeout_seconds", "Tempo Limite do Solver (ILP)", "Tempo máximo que o solver matemático tenta resolver cada fragmento do problema (Padrão: 120s)", "s")}
+                  </Grid>
+
+                  <Grid size={{ xs: 12 }}>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                      VSP Detalhado
                     </Typography>
                   </Grid>
                   <Grid size={{ xs: 12, sm: 6 }}>
