@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.api.routes.optimize import router as optimize_router
+from src.api.routes.optimize import _build_optimize_response, router as optimize_router
 from fastapi import FastAPI
 from src.algorithms.csp.greedy import GreedyCSP
 from src.algorithms.evaluator import CostEvaluator
@@ -217,6 +217,42 @@ def test_optimizer_result_compact_payload_avoids_trip_object_duplication():
     assert len(payload["trip_group_audit"]["sample_splits"]) == 5
 
 
+def test_optimizer_result_compact_payload_keeps_operational_quality_decision_in_root_and_meta():
+    trip = _trip(1, 360, 60, trip_group_id=77, direction="outbound")
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+
+    decision = {
+        "mode": "balanced",
+        "chosen_scenario": "plus_one_duty",
+        "chosen_title": "Plano mais equilibrado",
+        "justification": ["Melhor equilibrio operacional."],
+        "trade_offs": ["Exige +1 duty."],
+        "rejected_scenarios": [{"scenario_id": "current_plan", "reason": "Mantem mais excecoes."}],
+    }
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block]),
+        csp=CSPSolution(duties=[duty]),
+        meta={
+            "chosen_scenario": "plus_one_duty",
+            "rejected_scenarios": decision["rejected_scenarios"],
+            "justification": decision["justification"],
+            "trade_offs": decision["trade_offs"],
+            "operational_quality_decision": decision,
+        },
+    )
+
+    payload = result.as_compact_dict()
+
+    assert payload["chosen_scenario"] == "plus_one_duty"
+    assert payload["operational_quality_decision"]["chosen_scenario"] == "plus_one_duty"
+    assert payload["meta"]["chosen_scenario"] == "plus_one_duty"
+    assert payload["meta"]["justification"] == ["Melhor equilibrio operacional."]
+    assert payload["meta"]["trade_offs"] == ["Exige +1 duty."]
+    assert payload["meta"]["operational_quality_decision"]["chosen_scenario"] == "plus_one_duty"
+
+
 def test_run_optimization_task_returns_compact_payload(monkeypatch):
     trip = _trip(1, 360, 60)
     block = Block(id=1, trips=[trip], vehicle_type_id=1)
@@ -258,6 +294,38 @@ def test_run_optimization_task_returns_compact_payload(monkeypatch):
     assert compact["blocks"][0]["trips"] == [1]
     assert compact["duties"][0]["trips"] == [1]
     assert compact["meta"]["run_id"] == 99
+
+
+def test_build_optimize_response_recovers_operational_quality_fields_from_meta():
+    raw = {
+        "vehicles": 1,
+        "crew": 1,
+        "total_trips": 1,
+        "total_cost": 10.0,
+        "cct_violations": 0,
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "vsp_algorithm": "greedy",
+        "csp_algorithm": "greedy",
+        "elapsed_ms": 1.0,
+        "blocks": [{"block_id": 1, "trips": [1], "num_trips": 1, "start_time": 360, "end_time": 420}],
+        "duties": [{"duty_id": 1, "blocks": [1], "trip_ids": [1], "work_time": 60, "spread_time": 60, "rest_violations": 0}],
+        "meta": {
+            "chosen_scenario": "current_plan",
+            "rejected_scenarios": [{"scenario_id": "plus_one_duty"}],
+            "justification": ["Plano atual atende ao criterio."],
+            "trade_offs": ["Nao adiciona duty extra."],
+            "operational_quality_decision": {"chosen_scenario": "current_plan"},
+        },
+    }
+
+    response = _build_optimize_response(raw, 1)
+
+    assert response.chosen_scenario == "current_plan"
+    assert response.rejected_scenarios == [{"scenario_id": "plus_one_duty"}]
+    assert response.justification == ["Plano atual atende ao criterio."]
+    assert response.trade_offs == ["Nao adiciona duty extra."]
+    assert response.operational_quality_decision["chosen_scenario"] == "current_plan"
 
 
 def test_hybrid_group_audit_fallback_is_skipped_for_large_instances(monkeypatch):
@@ -396,10 +464,37 @@ def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():
     assert payload["phase_summary"]["csp"]["crew"] >= 1
     assert result.meta["reproducibility"]["input_hash"]
     assert result.meta["reproducibility"]["params_hash"]
+    assert result.meta["run_snapshot"]["trips_hash"] == result.meta["reproducibility"]["input_hash"]
+    assert result.meta["run_snapshot"]["resolved_params"]["cct_params"]["strict_hard_validation"] is True
     assert result.meta["performance"]["phase_timings_ms"]["input_validation_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["solver_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["output_validation_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["audit_enrichment_ms"] >= 0
+
+
+def test_operational_quality_defaults_to_balanced_and_sets_current_plan_when_missing():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2, trip_group_id=77, direction="outbound"),
+        _trip(2, 430, 60, origin=2, dest=1, trip_group_id=77, direction="return"),
+    ]
+
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={"strict_hard_validation": True},
+        vsp_params={"preserve_preferred_pairs": True},
+        optimization_params={},
+    )
+
+    payload = result.as_compact_dict()
+
+    assert result.meta["chosen_scenario"] == "current_plan"
+    assert result.meta["operational_quality_decision"]["mode"] == "balanced"
+    assert result.meta["operational_quality_decision"]["chosen_scenario"] == "current_plan"
+    assert payload["chosen_scenario"] == "current_plan"
+    assert payload["operational_quality_decision"]["chosen_scenario"] == "current_plan"
+    assert payload["meta"]["chosen_scenario"] == "current_plan"
 
 
 def test_greedy_csp_prefers_existing_trip_group_duty_when_feasible():
@@ -436,9 +531,11 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     payload = service.build_failure_payload(
         HardConstraintViolationError(["SPREAD_EXCEEDED D5", "CONTINUOUS_DRIVING_EXCEEDED D6"]),
         trips,
+        _vehicle(),
         AlgorithmType.HYBRID_PIPELINE,
         {"max_shift_minutes": 480},
         {"random_seed": 7, "time_budget_s": 9},
+        {},
         stage="output_validation",
     )
 
@@ -449,6 +546,7 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     assert payload["input_snapshot"]["input_hash"]
     assert payload["input_snapshot"]["params_hash"]
     assert payload["input_snapshot"]["time_budget_s"] == pytest.approx(9.0)
+    assert payload["run_snapshot"]["seed"] == 7
 
 
 def test_optimize_route_returns_structured_diagnostics_on_failure():
@@ -501,3 +599,28 @@ def test_same_random_seed_produces_same_hybrid_solution_signature():
     assert "phase_timings_ms" in result_a.meta.get("performance", {})
     assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_mcnf_ms") is not None
     assert result_a.meta["performance"]["phase_timings_ms"].get("solver_ms") is not None
+
+
+def test_missing_random_seed_is_derived_deterministically_from_input_and_params():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2),
+        _trip(2, 450, 60, origin=2, dest=1),
+        _trip(3, 570, 60, origin=1, dest=2),
+        _trip(4, 660, 60, origin=2, dest=1),
+    ]
+    service = OptimizerService()
+    params = {"preserve_preferred_pairs": True, "min_layover_minutes": 30}
+
+    result_a = service.run(trips, _vehicle(), algorithm=AlgorithmType.HYBRID_PIPELINE, vsp_params=params, time_budget_s=4.0)
+    result_b = service.run(trips, _vehicle(), algorithm=AlgorithmType.HYBRID_PIPELINE, vsp_params=params, time_budget_s=4.0)
+
+    signature_a = [[trip.id for trip in block.trips] for block in result_a.vsp.blocks]
+    signature_b = [[trip.id for trip in block.trips] for block in result_b.vsp.blocks]
+    seed_a = result_a.meta["run_snapshot"]["seed"]
+    seed_b = result_b.meta["run_snapshot"]["seed"]
+
+    assert seed_a == seed_b
+    assert seed_a is not None
+    assert result_a.meta["run_snapshot"]["resolved_params"]["vsp_params"]["random_seed"] == seed_a
+    assert result_b.meta["run_snapshot"]["resolved_params"]["vsp_params"]["random_seed"] == seed_b
+    assert signature_a == signature_b

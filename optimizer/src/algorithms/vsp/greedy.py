@@ -18,6 +18,7 @@ _log = logging.getLogger(__name__)
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from ..utils import is_connection_feasible
 
 settings = get_settings()
 
@@ -192,6 +193,29 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         )
         return charged, soc_after
 
+    def _max_idle_gap(self) -> Optional[int]:
+        behavior = str(self._p("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")
+        threshold = self._p("vehicle_idle_gap_threshold_minutes", None)
+        if behavior == "stay_at_terminal":
+            return None
+        if threshold is None:
+            return None
+        try:
+            parsed = int(threshold)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _energy_rate(self, trip: Trip, vehicle: Optional[VehicleType]) -> float:
+        if not vehicle or not vehicle.is_electric:
+            return 0.0
+        if vehicle.energy_cost_per_kwh:
+            return float(vehicle.energy_cost_per_kwh)
+        hour = (int(trip.start_time) // 60) % 24
+        if 17 <= hour < 21:
+            return float(self._p("peak_energy_cost_per_kwh", self._p("offpeak_energy_cost_per_kwh", 0.0)) or 0.0)
+        return float(self._p("offpeak_energy_cost_per_kwh", 0.0) or 0.0)
+
     def solve(
         self,
         trips: List[Trip],
@@ -223,6 +247,10 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
         idle_cost = float(self._p("idle_cost_per_minute", 0.25))
         min_layover = int(self._p("min_layover_minutes", 8))
+        min_break = self._p("min_break_minutes", None)
+        enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
+        if enforce_min_interval and min_break is not None:
+            min_layover = max(min_layover, int(min_break))
         max_vehicle_shift = int(self._p("max_vehicle_shift_minutes", 960))
         crew_block_limit = int(self._p("crew_block_limit_minutes", 0) or 0)
         if crew_block_limit > 0:
@@ -244,6 +272,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
         pullout_m = int(self._p("pullout_minutes", 10))
         pullback_m = int(self._p("pullback_minutes", 10))
+        max_idle_gap = self._max_idle_gap()
         garage_return_cost = (pullout_m + pullback_m) * deadhead_cost
         garage_policy = self._p("vsp_garage_return_policy", "smart")
         if connection_tolerance > 0:
@@ -284,7 +313,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
 
             # Check feasibility against LAST trip in block
             last = target_blk.trips[-1]
-            gap = trip.start_time - last.end_time
+            gap = int(trip.start_time - last.end_time)
+            needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
 
             # For same trip_group with gap=0 (contiguous ida/volta), skip deadhead
             pair_trip = trip_by_id.get(group_trips[0] if group_trips[0] != trip.id else group_trips[-1])
@@ -307,12 +337,20 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                         # Check gap between pair_trip and THIS trip
                         pair_gap = trip.start_time - pair_trip.end_time
                         if pair_gap >= 0:
+                            if enforce_min_interval and 0 < pair_gap < min_layover:
+                                # Violação de intervalo mínimo mesmo para grupo
+                                return None
                             # Also check gap between THIS trip and the next trip in block
                             if pair_idx + 1 < len(target_blk.trips):
                                 next_in_block = target_blk.trips[pair_idx + 1]
-                                gap_after = next_in_block.start_time - trip.end_time
-                                needed_after = self._deadhead(trip, next_in_block, min_layover)
-                                if gap_after + connection_tolerance >= needed_after:
+                                if is_connection_feasible(
+                                    trip,
+                                    next_in_block,
+                                    min_layover=min_layover,
+                                    min_break=int(min_break) if min_break is not None else 30,
+                                    enforce_min_interval=enforce_min_interval,
+                                    connection_tolerance=connection_tolerance,
+                                ):
                                     # Feasible insertion! Insert after pair_trip
                                     data = {
                                         "gap": pair_gap,
@@ -343,8 +381,16 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                                 return (-paired_trip_bonus * 3.0, target_blk, data)
                 return None
 
-            needed = 0 if is_contiguous_group and gap == 0 else self._deadhead(last, trip, min_layover)
-            if gap + connection_tolerance < needed:
+            if not is_connection_feasible(
+                last,
+                trip,
+                min_layover=0 if is_contiguous_group and gap == 0 else min_layover,
+                min_break=int(min_break) if min_break is not None else 30,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+            ):
+                return None
+            if max_idle_gap is not None and gap > max_idle_gap:
                 return None
             if trip.end_time - target_blk.start_time > max_vehicle_shift:
                 return None
@@ -365,9 +411,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
 
             slack = max(0, gap - needed)
-            energy_rate = 0.0
-            if vehicle and vehicle.is_electric:
-                energy_rate = vehicle.energy_cost_per_kwh or float(self._p("offpeak_energy_cost_per_kwh", 0.0))
+            energy_rate = self._energy_rate(trip, vehicle)
 
             pairing_delta = -paired_trip_bonus * 3.0  # strong bonus for group forcing
             marginal_cost = needed * deadhead_cost + slack * idle_cost + energy_need * energy_rate + pairing_delta
@@ -407,9 +451,22 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                         continue
                 if not allow_multi_line_block and last.line_id != trip.line_id:
                     continue
-                gap = trip.start_time - last.end_time
-                needed = self._deadhead(last, trip, min_layover)
-                if gap < 0 or gap + connection_tolerance < needed:
+                gap = int(trip.start_time - last.end_time)
+                needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
+
+                gap = int(trip.start_time - last.end_time)
+                needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
+
+                if not is_connection_feasible(
+                    last,
+                    trip,
+                    min_layover=min_layover,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
+                    continue
+                if max_idle_gap is not None and gap > max_idle_gap:
                     continue
                 if trip.end_time - blk.start_time > max_vehicle_shift:
                     continue
@@ -428,9 +485,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                         continue
 
                 slack = max(0, gap - needed)
-                energy_rate = 0.0
-                if vehicle and vehicle.is_electric:
-                    energy_rate = vehicle.energy_cost_per_kwh or float(self._p("offpeak_energy_cost_per_kwh", 0.0))
+                energy_rate = self._energy_rate(trip, vehicle)
 
                 pairing_delta = 0.0
                 pairing_state = "neutral"
@@ -512,11 +567,21 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 return None
 
             last = blk.trips[-1]
+            gap = int(trip.start_time - last.end_time)
+            needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
+
             if not allow_multi_line_block and last.line_id != trip.line_id:
                 return None
-            gap = trip.start_time - last.end_time
-            needed = self._deadhead(last, trip, min_layover)
-            if gap < 0 or gap + connection_tolerance < needed:
+            if not is_connection_feasible(
+                last,
+                trip,
+                min_layover=min_layover,
+                min_break=int(min_break) if min_break is not None else 30,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+            ):
+                return None
+            if max_idle_gap is not None and gap > max_idle_gap:
                 return None
             if trip.end_time - blk.start_time > max_vehicle_shift:
                 return None
@@ -535,9 +600,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
 
             slack = max(0, gap - needed)
-            energy_rate = 0.0
-            if vehicle and vehicle.is_electric:
-                energy_rate = vehicle.energy_cost_per_kwh or float(self._p("offpeak_energy_cost_per_kwh", 0.0))
+            energy_rate = self._energy_rate(trip, vehicle)
 
             pairing_delta = -paired_trip_bonus
             marginal_cost = needed * deadhead_cost + slack * idle_cost + energy_need * energy_rate + pairing_delta
@@ -662,11 +725,21 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 if not target.trips:
                     return None
                 last = target.trips[-1]
+                gap = int(trip.start_time - last.end_time)
+                needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
+
                 if not allow_multi_line_block and last.line_id != trip.line_id:
                     return None
-                gap = int(trip.start_time - last.end_time)
-                needed = int(self._deadhead(last, trip, min_layover))
-                if gap < needed or gap > single_trip_compaction_max_gap:
+                if not is_connection_feasible(
+                    last,
+                    trip,
+                    min_layover=min_layover,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
+                    return None
+                if max_idle_gap is not None and gap > max_idle_gap:
                     return None
                 if trip.end_time - target.start_time > max_vehicle_shift:
                     return None
@@ -683,11 +756,20 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 if not target.trips:
                     return None
                 first = target.trips[0]
+                gap = int(first.start_time - trip.end_time)
+                needed = max(min_layover, int(trip.deadhead_times.get(first.origin_id, 0)))
                 if not allow_multi_line_block and first.line_id != trip.line_id:
                     return None
-                gap = int(first.start_time - trip.end_time)
-                needed = int(self._deadhead(trip, first, min_layover))
-                if gap < needed or gap > single_trip_compaction_max_gap:
+                if not is_connection_feasible(
+                    trip,
+                    first,
+                    min_layover=min_layover,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
+                    return None
+                if max_idle_gap is not None and gap > max_idle_gap:
                     return None
                 if target.end_time - trip.start_time > max_vehicle_shift:
                     return None
@@ -801,6 +883,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "preferred_pair_window_minutes": preferred_pair_window,
                 "enable_single_trip_compaction": enable_single_trip_compaction,
                 "single_trip_compaction_max_gap_minutes": single_trip_compaction_max_gap,
+                "vehicle_idle_gap_behavior": self._p("vehicle_idle_gap_behavior", "solver_decides"),
+                "vehicle_idle_gap_threshold_minutes": max_idle_gap,
                 **pair_meta,
             },
         )

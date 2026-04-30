@@ -38,8 +38,9 @@ celery_app.conf.update(
     task_acks_late=True,            # ACK apenas após conclusão (não perder tarefas em crash)
     # Timeouts de segurança: evita workers bloqueados por solvers CBC/PuLP travados.
     # soft_time_limit dispara SoftTimeLimitExceeded (capturável); time_limit envia SIGKILL.
-    task_soft_time_limit=1200,      # 20 min: orçamento 15 min + 5 min de overhead
-    task_time_limit=1500,           # 25 min: SIGKILL caso soft limit seja ignorado
+    task_soft_time_limit=settings.celery_task_soft_time_limit,
+    task_time_limit=settings.celery_task_time_limit,
+    task_reject_on_worker_lost=True,  # Evita loop infinito se worker morrer por OOM
     # Reinicia o processo após cada otimização pesada para devolver RAM ao SO.
     worker_max_tasks_per_child=1,
     worker_max_memory_per_child=800000,  # ~800 MB em KB

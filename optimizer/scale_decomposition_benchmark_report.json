@@ -1,0 +1,306 @@
+{
+  "algorithm": "hybrid_pipeline",
+  "company_id": 16,
+  "real_trip_count": 298,
+  "volumes": [
+    2000,
+    5000
+  ],
+  "fail_on_hard_violations": true,
+  "params": {
+    "apply_cct": true,
+    "strict_hard_validation": true,
+    "strict_zero_gap_validation": true,
+    "strict_operational_mode": true,
+    "strict_hard_constraints": true,
+    "min_layover_minutes": 10,
+    "min_break_minutes": 15,
+    "enforce_min_interval": false,
+    "connection_tolerance_minutes": 0,
+    "max_shift_minutes": 840,
+    "max_vehicle_shift_minutes": 960,
+    "max_driving_minutes": 240,
+    "meal_break_minutes": 15,
+    "mandatory_break_after_minutes": 240,
+    "force_round_trip": true,
+    "allow_vehicle_swap": true,
+    "allow_multi_line_block": true,
+    "fixed_vehicle_activation_cost": 950.0,
+    "deadhead_cost_per_minute": 10.0,
+    "idle_cost_per_minute": 2.0,
+    "max_candidate_successors_per_task": 64
+  },
+  "results": [
+    {
+      "volume": 2000,
+      "algorithm": "hybrid_pipeline",
+      "status": "ok",
+      "wall_time_s": 50.792,
+      "cpu_time_s": 45.554,
+      "rss_before_mb": 162.6,
+      "rss_after_mb": 448.9,
+      "rss_delta_mb": 286.4,
+      "total_cost": 259824.13,
+      "vehicles": 84,
+      "duties": 112,
+      "input_trips": 2000,
+      "covered_trips": 2000,
+      "unique_covered_trips": 2000,
+      "missing_trips": 0,
+      "duplicated_trips": 0,
+      "extra_trips": 0,
+      "input_duplicate_trips": 0,
+      "unassigned_trips": 0,
+      "uncovered_blocks": 0,
+      "hard_violations": 0,
+      "cct_violations": 0,
+      "sample_missing_trip_ids": [],
+      "sample_duplicated_trip_ids": [],
+      "sample_hard_issues": [],
+      "phase_timings_ms": {
+        "input_validation_ms": 1.67,
+        "solver_ms": 50720.33,
+        "output_validation_ms": 5.52,
+        "audit_enrichment_ms": 39.22
+      },
+      "scale_decomposition": {
+        "enabled": true,
+        "status": "partially_completed",
+        "chunk_count": 4,
+        "fallback_chunk_count": 1,
+        "chunk_time_budget_s": 30.0,
+        "chunks": [
+          {
+            "chunk_index": 0,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 1,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 2,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 3,
+            "trip_count": 200,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 98,
+            "status": "fallback_completed",
+            "vehicles": 13,
+            "duties": 13,
+            "split_groups": 0,
+            "hard_issues": 0
+          }
+        ],
+        "stitching": {
+          "attempted": 66,
+          "accepted": 1,
+          "rejected": 63,
+          "input_blocks": 85,
+          "output_blocks": 84,
+          "max_gap_minutes": 60
+        }
+      },
+      "scale_execution_status": "partially_completed"
+    },
+    {
+      "volume": 5000,
+      "algorithm": "hybrid_pipeline",
+      "status": "ok",
+      "wall_time_s": 143.773,
+      "cpu_time_s": 129.868,
+      "rss_before_mb": 448.9,
+      "rss_after_mb": 480.9,
+      "rss_delta_mb": 32.0,
+      "total_cost": 661999.79,
+      "vehicles": 204,
+      "duties": 288,
+      "input_trips": 5000,
+      "covered_trips": 5000,
+      "unique_covered_trips": 5000,
+      "missing_trips": 0,
+      "duplicated_trips": 0,
+      "extra_trips": 0,
+      "input_duplicate_trips": 0,
+      "unassigned_trips": 0,
+      "uncovered_blocks": 0,
+      "hard_violations": 0,
+      "cct_violations": 0,
+      "sample_missing_trip_ids": [],
+      "sample_duplicated_trip_ids": [],
+      "sample_hard_issues": [],
+      "phase_timings_ms": {
+        "input_validation_ms": 4.34,
+        "solver_ms": 143599.33,
+        "output_validation_ms": 16.42,
+        "audit_enrichment_ms": 90.43
+      },
+      "scale_decomposition": {
+        "enabled": true,
+        "status": "partially_completed",
+        "chunk_count": 9,
+        "fallback_chunk_count": 1,
+        "chunk_time_budget_s": 30.0,
+        "chunks": [
+          {
+            "chunk_index": 0,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 1,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 2,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 24,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 3,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 26,
+            "duties": 33,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 4,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 26,
+            "duties": 35,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 5,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 30,
+            "duties": 36,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 6,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 28,
+            "duties": 36,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 7,
+            "trip_count": 600,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 300,
+            "status": "completed",
+            "vehicles": 29,
+            "duties": 37,
+            "split_groups": 0,
+            "hard_issues": 0
+          },
+          {
+            "chunk_index": 8,
+            "trip_count": 200,
+            "line_ids": [
+              0
+            ],
+            "trip_group_count": 97,
+            "status": "fallback_completed",
+            "vehicles": 12,
+            "duties": 12,
+            "split_groups": 0,
+            "hard_issues": 0
+          }
+        ],
+        "stitching": {
+          "attempted": 341,
+          "accepted": 19,
+          "rejected": 253,
+          "input_blocks": 223,
+          "output_blocks": 204,
+          "max_gap_minutes": 60
+        }
+      },
+      "scale_execution_status": "partially_completed"
+    }
+  ]
+}

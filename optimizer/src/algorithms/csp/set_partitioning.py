@@ -48,7 +48,8 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         self.min_trips_per_piece = int(self.vsp_params.get("min_trips_per_piece", 1))
         self.max_trips_per_piece = int(self.vsp_params.get("max_trips_per_piece", 4))
         self.goal_weights = dict(self.vsp_params.get("goal_weights") or params.get("goal_weights") or {})
-        self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", True))
+        pricing_default = bool(self.vsp_params.get("enable_column_generation", True))
+        self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self.max_candidate_successors = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self.max_columns = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
         self.max_pricing_iterations = max(0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0)))
@@ -236,7 +237,13 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
             lp += pulp.lpSum(cost * y[index] for index, (_, cost) in enumerate(columns))
             for task_id in task_ids:
                 lp += pulp.lpSum(y[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1, f"cover_{task_id}"
-            lp.solve(pulp.PULP_CBC_CMD(timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False))
+            lp.solve(pulp.PULP_CBC_CMD(
+                timeLimit=pricing_time_limit_s, 
+                msg=0, 
+                mip=False, 
+                keepFiles=False,
+                threads=settings.ilp_threads
+            ))
             duals = {
                 task_id: float(lp.constraints[f"cover_{task_id}"].pi or 0.0)
                 for task_id in task_ids
@@ -255,7 +262,12 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
         for task_id in task_ids:
             prob += pulp.lpSum(x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1
-        prob.solve(pulp.PULP_CBC_CMD(timeLimit=total_time_limit_s, msg=0, keepFiles=False))
+        prob.solve(pulp.PULP_CBC_CMD(
+            timeLimit=total_time_limit_s, 
+            msg=0, 
+            keepFiles=False,
+            threads=settings.ilp_threads
+        ))
 
         if prob.status != pulp.constants.LpStatusOptimal:
             _log.warning("ILP solver status: %s — falling back to greedy CSP", pulp.LpStatus[prob.status])

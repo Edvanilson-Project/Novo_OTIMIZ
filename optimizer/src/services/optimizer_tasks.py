@@ -23,6 +23,7 @@ import time
 from typing import Any, Dict, List, Tuple
 
 from ..core.celery_app import celery_app
+from ..core.exceptions import OptimizerError, HardConstraintViolationError
 from ..core.exceptions import OptimizerError
 from ..domain.models import AlgorithmType, Trip, VehicleType
 from ..services.optimizer_service import OptimizerService
@@ -132,6 +133,7 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     cct_params = payload.get("cct_params") or {}
     vsp_params = dict(payload.get("vsp_params") or {})
     optimization_params = payload.get("optimization_params") or {}
+    request_metadata = payload.get("request_metadata") or {}
     algorithm_preference = payload.get("algorithm_preference")
     if algorithm_preference:
         vsp_params["algorithm_preference"] = algorithm_preference
@@ -171,6 +173,7 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             cct_params=cct_params,
             vsp_params=vsp_params,
             optimization_params=optimization_params,
+            request_metadata=request_metadata,
         )
         # Usa uma representação compacta para reduzir o pico de memória e o
         # tamanho do payload no Celery/Redis. O resultado completo continua
@@ -184,14 +187,62 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "company_id": company_id,
             }
         )
+        logger.info(
+            "[OP-QUALITY] task completed run_id=%s mode=%s chosen_scenario=%s",
+            run_id,
+            ((result_dict.get("operational_quality_decision") or {}).get("mode"))
+            or ((result_dict.get("meta") or {}).get("operational_quality_decision") or {}).get("mode")
+            or (optimization_params or {}).get("operational_quality_mode")
+            or "balanced",
+            result_dict.get("chosen_scenario")
+            or ((result_dict.get("meta") or {}).get("chosen_scenario")),
+        )
         _update_prog(1.0, "Otimização concluída")
 
         return {"_is_error": False, "result": result_dict}
+
+    except OptimizerError as e:
+        logger.exception("Erro de negocio durante a execução da otimização")
+        issues = list(getattr(e, "issues", []) or [])
+        error_code = getattr(e, "code", "OPTIMIZER_ERROR")
+        if isinstance(e, HardConstraintViolationError) and any(
+            str(issue).startswith("MANDATORY_GROUP_SPLIT") for issue in issues
+        ):
+            error_code = "MANDATORY_GROUP_SPLIT"
+        details = dict(getattr(e, "details", {}) or {})
+        details.update({
+            "issues": issues,
+            "run_id": run_id,
+            "line_id": line_id,
+            "company_id": company_id,
+            "algorithm": algorithm_str,
+        })
+        return {
+            "_is_error": True,
+            "status": "failed",
+            "error_type": "business",
+            "error_code": error_code,
+            "message": str(e),
+            "details": details,
+            "error_payload": {
+                "status": "failed",
+                "error_type": "business",
+                "error_code": error_code,
+                "message": str(e),
+                "details": details,
+            },
+            "http_status": 200,
+        }
 
     except Exception as e:
         logger.exception("Erro durante a execução da otimização")
         return {
             "_is_error": True,
+            "status": "failed",
+            "error_type": "system",
+            "error_code": "INTERNAL_ERROR",
+            "message": str(e),
+            "details": {"run_id": run_id, "algorithm": algorithm_str},
             "error_payload": {
                 "message": str(e),
                 "code": "INTERNAL_ERROR",

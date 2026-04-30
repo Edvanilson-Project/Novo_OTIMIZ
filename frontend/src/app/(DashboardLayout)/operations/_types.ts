@@ -294,6 +294,53 @@ export interface OptimizationRunAuditResult extends OptimizationResultSummary {
   hardConstraintReport?: Record<string, unknown> | null;
 }
 
+export type OperationalQualityMode = 'strict' | 'balanced' | 'optimized';
+
+export interface OperationalQualityScenarioSummary {
+  total_cost?: number;
+  vehicles?: number;
+  duties?: number;
+  crew?: number;
+  duties_below_25_pct?: number;
+  duties_below_30_pct?: number;
+  duties_above_12h?: number;
+  avg_utilization_pct?: number;
+  avg_idle_minutes?: number;
+  overtime_minutes?: number;
+  critical_count?: number;
+  borderline_count?: number;
+  acceptable_count?: number;
+  hard_violation_count?: number;
+  labels?: string[];
+}
+
+export interface OperationalQualityScenarioOption {
+  scenario_id: string;
+  title?: string;
+  labels?: string[];
+  candidate_note?: string | null;
+  summary?: OperationalQualityScenarioSummary | null;
+}
+
+export interface OperationalQualityRejectedScenario {
+  scenario_id: string;
+  title?: string;
+  reason?: string;
+  summary?: OperationalQualityScenarioSummary | null;
+}
+
+export interface OperationalQualityDecision {
+  mode?: OperationalQualityMode;
+  chosen_scenario?: string;
+  chosen_title?: string;
+  justification?: string[];
+  trade_offs?: string[];
+  criteria?: Record<string, string>;
+  available_scenarios?: OperationalQualityScenarioOption[];
+  rejected_scenarios?: OperationalQualityRejectedScenario[];
+  selected_summary?: OperationalQualityScenarioSummary | null;
+}
+
 export interface OptimizationResultSummary {
   vehicles?: number;
   num_vehicles?: number;
@@ -324,6 +371,15 @@ export interface OptimizationResultSummary {
   reproducibility?: OptimizationReproducibility | null;
   performance?: OptimizationPerformance | null;
   hardConstraintReport?: Record<string, unknown> | null;
+  chosenScenario?: string | null;
+  chosen_scenario?: string | null;
+  rejectedScenarios?: OperationalQualityRejectedScenario[];
+  rejected_scenarios?: OperationalQualityRejectedScenario[];
+  justification?: string[];
+  tradeOffs?: string[];
+  trade_offs?: string[];
+  operationalQualityDecision?: OperationalQualityDecision | null;
+  operational_quality_decision?: OperationalQualityDecision | null;
   metadata?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
 }

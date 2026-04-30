@@ -91,8 +91,9 @@ class Settings(BaseSettings):
     ts_max_iterations: int = 5000
     ts_neighborhood_size: int = 40
 
-    # ILP timeout (segundos)
+    # ILP timeout (segundos) e paralelismo
     ilp_timeout_seconds: int = 120
+    ilp_threads: int = 8
 
     # Hybrid pipeline: tempo máximo total (segundos)
     hybrid_time_budget_seconds: int = 900
@@ -113,6 +114,8 @@ class Settings(BaseSettings):
 
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
     redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
+    celery_task_soft_time_limit: int = 1200      # 20 min
+    celery_task_time_limit: int = 1500           # 25 min
 
     # ── Roteamento OSRM ──────────────────────────────────────────────────────
     osrm_url: str = "http://localhost:5000"

@@ -176,7 +176,8 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         self.goal_weights = dict(self.vsp_params.get("goal_weights") or params.get("goal_weights") or {})
 
         # Controle de complexidade (serão ajustados dinamicamente)
-        self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", True))
+        pricing_default = bool(self.vsp_params.get("enable_column_generation", True))
+        self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self._max_candidate_successors_base = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self._max_columns_base = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
         self.max_pricing_iterations = max(0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0)))
@@ -1148,7 +1149,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 constraint_terms.append((s[task_id], 1.0))
                 lp += pulp.LpAffineExpression(constraint_terms) >= 1.0, f"cover_{task_id}"
 
-            lp.solve(pulp.PULP_CBC_CMD(timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False))
+            lp.solve(pulp.PULP_CBC_CMD(timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False, threads=settings.ilp_threads))
 
             # Extrai Valores Duais (\pi_i) das restrições para o SPPRC (Shortest Path Subproblem)
             duals = {
@@ -1215,6 +1216,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             presolve=True,       # Consolida matriz antes de iniciar Solver Nodes
             warmStart=True,
             strong=5,
+            threads=settings.ilp_threads,
             options=["-heuristicsOnOff", "on"],
         ))
         

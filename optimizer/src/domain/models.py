@@ -379,6 +379,7 @@ class OptimizationResult:
             "holiday_extra_cost": round(float(costs.get("holiday_extra", 0.0) or 0.0), 2),
             "cct_penalties_cost": round(float(costs.get("cct_penalties", 0.0) or 0.0), 2),
             "total_cost": round(float(costs.get("total", 0.0) or 0.0), 2),
+            "quality_metrics": dict(duty.meta.get("quality_metrics") or {}),
         }
 
     @staticmethod
@@ -475,13 +476,30 @@ class OptimizationResult:
             "input": merged_meta.get("input"),
             "solver_version": merged_meta.get("solver_version"),
             "hard_constraint_report": merged_meta.get("hard_constraint_report"),
+            "parameter_effect_report": merged_meta.get("parameter_effect_report"),
             "operational_kpis": merged_meta.get("operational_kpis"),
             "performance": merged_meta.get("performance"),
+            "chosen_scenario": merged_meta.get("chosen_scenario"),
+            "rejected_scenarios": list(merged_meta.get("rejected_scenarios") or []),
+            "justification": list(merged_meta.get("justification") or []),
+            "trade_offs": list(merged_meta.get("trade_offs") or []),
+            "operational_quality_decision": merged_meta.get("operational_quality_decision") or {},
         }
+        input_meta = merged_meta.get("input") or {}
+        performance_meta = merged_meta.get("performance") or {}
+        covered_trips = sum(len(b.trips) for b in self.vsp.blocks)
+        input_total_trips = (
+            input_meta.get("n_trips")
+            or input_meta.get("total_trips")
+            or performance_meta.get("trip_count")
+            or performance_meta.get("input_trip_count")
+            or covered_trips + len(self.vsp.unassigned_trips)
+        )
         return {
             "vehicles": self.vsp.num_vehicles,
             "crew": self.csp.num_crew,
-            "total_trips": sum(len(b.trips) for b in self.vsp.blocks),
+            "total_trips": input_total_trips,
+            "covered_trips": covered_trips,
             "total_cost": round(self.total_cost, 2),
             "cct_violations": self.csp.cct_violations,
             "unassigned_trips": len(self.vsp.unassigned_trips),
@@ -494,8 +512,14 @@ class OptimizationResult:
             "solver_explanation": self._compact_solver_explanation(merged_meta.get("solver_explanation")),
             "phase_summary": merged_meta.get("phase_summary"),
             "trip_group_audit": self._compact_trip_group_audit(merged_meta.get("trip_group_audit")),
+            "parameter_effect_report": merged_meta.get("parameter_effect_report"),
             "reproducibility": merged_meta.get("reproducibility"),
             "performance": merged_meta.get("performance") or {},
+            "chosen_scenario": merged_meta.get("chosen_scenario"),
+            "rejected_scenarios": list(merged_meta.get("rejected_scenarios") or []),
+            "justification": list(merged_meta.get("justification") or []),
+            "trade_offs": list(merged_meta.get("trade_offs") or []),
+            "operational_quality_decision": merged_meta.get("operational_quality_decision") or {},
             "meta": compact_meta,
             "blocks": [self._compact_block(b, block_costs) for b in self.vsp.blocks],
             "duties": [self._compact_duty(d, duty_costs) for d in self.csp.duties],
@@ -516,10 +540,21 @@ class OptimizationResult:
             for item in (csp_breakdown.get("duties") or [])
             if item.get("duty_id") is not None
         }
+        input_meta = merged_meta.get("input") or {}
+        performance_meta = merged_meta.get("performance") or {}
+        covered_trips = sum(len(b.trips) for b in self.vsp.blocks)
+        input_total_trips = (
+            input_meta.get("n_trips")
+            or input_meta.get("total_trips")
+            or performance_meta.get("trip_count")
+            or performance_meta.get("input_trip_count")
+            or covered_trips + len(self.vsp.unassigned_trips)
+        )
         return {
             "vehicles": self.vsp.num_vehicles,
             "crew": self.csp.num_crew,
-            "total_trips": sum(len(b.trips) for b in self.vsp.blocks),
+            "total_trips": input_total_trips,
+            "covered_trips": covered_trips,
             "total_cost": round(self.total_cost, 2),
             "cct_violations": self.csp.cct_violations,
             "unassigned_trips": len(self.vsp.unassigned_trips),
@@ -532,7 +567,13 @@ class OptimizationResult:
             "solver_explanation": merged_meta.get("solver_explanation"),
             "phase_summary": merged_meta.get("phase_summary"),
             "trip_group_audit": merged_meta.get("trip_group_audit"),
+            "parameter_effect_report": merged_meta.get("parameter_effect_report"),
             "reproducibility": merged_meta.get("reproducibility"),
+            "chosen_scenario": merged_meta.get("chosen_scenario"),
+            "rejected_scenarios": list(merged_meta.get("rejected_scenarios") or []),
+            "justification": list(merged_meta.get("justification") or []),
+            "trade_offs": list(merged_meta.get("trade_offs") or []),
+            "operational_quality_decision": merged_meta.get("operational_quality_decision") or {},
             "meta": merged_meta,
             "blocks": [
                 {
@@ -695,3 +736,4 @@ class NominalRosteringSolution:
     elapsed_ms: float = 0.0
     logs: List[str] = field(default_factory=list)
     algorithm: str = "nominal_assignment_pulp"
+    meta: Dict[str, Any] = field(default_factory=dict)

@@ -1,0 +1,16 @@
+{
+  "trips": [],
+  "vehicle_types": [
+    {
+      "id": 1,
+      "name": "Padrao",
+      "passenger_capacity": 40,
+      "cost_per_km": 1.0,
+      "cost_per_hour": 10.0,
+      "fixed_cost": 14565.104535778026
+    }
+  ],
+  "cct_params": null,
+  "optimization_params": null,
+  "algorithm": "hybrid_pipeline"
+}

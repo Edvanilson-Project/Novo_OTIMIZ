@@ -29,6 +29,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from ..utils import is_connection_feasible
 from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
@@ -247,6 +248,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
         idle_cost = float(self._p("idle_cost_per_minute", 0.25))
         min_layover = int(self._p("min_layover_minutes", 8))
+        min_break = self._p("min_break_minutes", None)
+        enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
+        if enforce_min_interval and min_break is not None:
+            min_layover = max(min_layover, int(min_break))
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
@@ -254,14 +259,26 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
         pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
         paired_trip_bonus = float(self._p("paired_trip_bonus", fixed_cost * 0.05))
+        idle_behavior = str(self._p("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")
+        idle_threshold = self._p("vehicle_idle_gap_threshold_minutes", None)
+        max_idle_gap: Optional[int] = None
+        if idle_behavior != "stay_at_terminal" and idle_threshold is not None:
+            try:
+                parsed_threshold = int(idle_threshold)
+                max_idle_gap = parsed_threshold if parsed_threshold > 0 else None
+            except (TypeError, ValueError):
+                max_idle_gap = None
         
         INF = 1e9
         N = len(trips)
 
-        if N > 1000:
-            _log.warning("Instância massiva (>1000 trips). MCNF global abortado para evitar OOM. Retornando fallback Greedy.")
-            from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
+        if N > _CLUSTER_SIZE_LIMIT:
+            _log.warning(
+                "Subproblema MCNF com %d trips excede limite %d; redirecionando para chunking.",
+                N,
+                _CLUSTER_SIZE_LIMIT,
+            )
+            return self._solve_with_temporal_clustering(trips, vehicle_types, depots)
 
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
         preferred_pairs = build_preferred_pairs(trips_sorted, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
@@ -287,14 +304,22 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     break  # Monotonicidade: todos os j seguintes também excedem max_shift
                 if gap < 0:
                     continue  # Sobreposição temporal (trip j começa antes de i terminar)
+                if max_idle_gap is not None and gap > max_idle_gap:
+                    continue
                 if not allow_multi and trips_sorted[i].line_id != trips_sorted[j].line_id:
                     continue
 
-                dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
-
-                if gap + connection_tolerance < dh:
+                if not is_connection_feasible(
+                    trips_sorted[i],
+                    trips_sorted[j],
+                    min_layover=min_layover,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
                     continue
 
+                dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
                 idle = gap - dh
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
@@ -374,10 +399,18 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         for did, cap in depot_caps.items():
             prob += pulp.lpSum(P_out_vars[(did, i)] for i in range(N)) <= cap, f"depot_cap_{did}"
 
-        # Solve with CBC (quiet)
+        # Configurar o tempo limite do solver MCNF
+        ilp_timeout = int(self.vsp_params.get("mcnf_ilp_timeout_seconds", min(60, int(self.time_budget_s))))
+        
+        _log.info(f"MCNFVSP: Resolvendo matriz {N}x{N} (timeout={ilp_timeout}s)")
+        
         milp_start = time.time()
         try:
-            solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=60)
+            solver = pulp.PULP_CBC_CMD(
+                msg=0, 
+                timeLimit=ilp_timeout, 
+                threads=settings.ilp_threads
+            )
             prob.solve(solver)
             milp_end = time.time()
         except Exception as e:
@@ -386,9 +419,17 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         if prob.status != pulp.constants.LpStatusOptimal:
-            _log.warning("ILP solver status: %s — fallback para GreedyVSP", pulp.LpStatus[prob.status])
+            status_str = pulp.LpStatus[prob.status]
+            _log.warning("ILP solver status: %s — fallback para GreedyVSP", status_str)
             from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
+            res = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
+            res.meta.update({
+                "fallback_used": True,
+                "fallback_reason": status_str,
+                "original_solver": "mcnf_ilp",
+                "fallback_solver": "greedy_vsp"
+            })
+            return res
 
         # Reconstroi sequenciamento a partir das variáveis selecionadas
         next_trip: Dict[int, int] = {}

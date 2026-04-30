@@ -1,0 +1,5289 @@
+{
+  "vehicles": 15,
+  "crew": 18,
+  "total_trips": 298,
+  "covered_trips": 298,
+  "total_cost": 247343.12,
+  "cct_violations": 0,
+  "unassigned_trips": 0,
+  "uncovered_blocks": 0,
+  "vsp_algorithm": "mcnf_vsp",
+  "csp_algorithm": "greedy_csp",
+  "elapsed_ms": 49070.0,
+  "warnings": [
+    "PAIR_GROUP_ROSTER_SPLIT D204 expected_roster=9",
+    "PAIR_GROUP_ROSTER_SPLIT D205 expected_roster=6"
+  ],
+  "cost_breakdown": {
+    "total": 247343.12,
+    "vsp": {
+      "total": 227640.73,
+      "activation": 218476.57,
+      "connection": 0.0,
+      "distance": 7599.0,
+      "time": 965.17,
+      "idle_cost": 600.0,
+      "total_deadhead_minutes": 0,
+      "num_blocks": 15,
+      "num_unassigned_trips": 0,
+      "advisory_idle_proxy_cost": 600.0,
+      "advisory_infeasibility_penalty": 0.0
+    },
+    "csp": {
+      "total": 19702.39,
+      "work_cost": 2436.72,
+      "guaranteed_cost": 1087.87,
+      "waiting_cost": 1124.17,
+      "overtime_cost": 37.29,
+      "long_unpaid_break_penalty": 4928.75,
+      "nocturnal_extra": 1733.33,
+      "holiday_extra": 0.0,
+      "cct_penalties": 0.0,
+      "duty_overhead_cost": 8354.27,
+      "num_duties": 19,
+      "num_uncovered_blocks": 0
+    },
+    "shares": {
+      "vsp": 0.9203,
+      "csp": 0.0797
+    }
+  },
+  "solver_explanation": {
+    "status": "hard_violation",
+    "headline": "Solução gerada com violações hard; exige correção antes de uso operacional.",
+    "summary": [
+      "VSP cobriu 298/298 viagens com 15 veículos.",
+      "CSP produziu 18 tripulantes, 19 jornadas e 18 rosters.",
+      "Custo total 247343.12, com dominância VSP=activation e CSP=long_unpaid_break_penalty.",
+      "Trip groups preservados no mesmo roster: 147/149."
+    ],
+    "issues": {
+      "hard": [
+        {
+          "raw": "MANDATORY_GROUP_SPLIT [5584, 5590]",
+          "code": "MANDATORY_GROUP_SPLIT",
+          "severity": "hard",
+          "phase": "integrated",
+          "message": "Um grupo ida/volta obrigatório foi separado entre rosters ou duties.",
+          "refs": []
+        },
+        {
+          "raw": "MANDATORY_GROUP_SPLIT [5591, 5597]",
+          "code": "MANDATORY_GROUP_SPLIT",
+          "severity": "hard",
+          "phase": "integrated",
+          "message": "Um grupo ida/volta obrigatório foi separado entre rosters ou duties.",
+          "refs": []
+        }
+      ],
+      "soft": [],
+      "hard_count": 2,
+      "soft_count": 0
+    },
+    "recommendations": [
+      "Revise os grupos ida/volta preservados no CSP e confirme se o pairing deve ser rígido ou apenas preferencial."
+    ]
+  },
+  "phase_summary": {
+    "vsp": {
+      "vehicles": 15,
+      "assigned_trips": 298,
+      "unassigned_trips": 0,
+      "warnings_count": 0,
+      "cost": 227640.73,
+      "dominant_cost_component": {
+        "component": "activation",
+        "value": 218476.57,
+        "share": 0.9597
+      }
+    },
+    "csp": {
+      "duties": 19,
+      "crew": 18,
+      "rosters": 18,
+      "uncovered_blocks": 0,
+      "cct_violations": 0,
+      "warnings_count": 2,
+      "cost": 19702.39,
+      "dominant_cost_component": {
+        "component": "long_unpaid_break_penalty",
+        "value": 4928.75,
+        "share": 0.2502
+      }
+    }
+  },
+  "trip_group_audit": {
+    "groups_total": 149,
+    "groups_fully_assigned": 149,
+    "same_block_groups": 147,
+    "same_duty_groups": 147,
+    "same_roster_groups": 147,
+    "split_groups": 2,
+    "missing_groups": 0,
+    "same_roster_ratio": 0.9866,
+    "sample_splits": [
+      {
+        "trip_group_id": 75,
+        "trip_ids": [
+          5584,
+          5590
+        ],
+        "block_ids": [
+          3,
+          14
+        ],
+        "duty_ids": [
+          199,
+          204
+        ],
+        "roster_ids": [
+          9,
+          14
+        ]
+      },
+      {
+        "trip_group_id": 76,
+        "trip_ids": [
+          5591,
+          5597
+        ],
+        "block_ids": [
+          6,
+          15
+        ],
+        "duty_ids": [
+          196,
+          205
+        ],
+        "roster_ids": [
+          6,
+          15
+        ]
+      }
+    ]
+  },
+  "parameter_effect_report": {
+    "schema_version": "parameter_effect_report_v1",
+    "active_constraints": {
+      "min_break": {
+        "active": true,
+        "value_minutes": 15
+      },
+      "min_connection_time": {
+        "active": true,
+        "value_minutes": 15
+      },
+      "max_shift_minutes": {
+        "active": true,
+        "value_minutes": 840
+      },
+      "max_driving_minutes": {
+        "active": true,
+        "value_minutes": 240
+      },
+      "zero_gap": {
+        "active": false,
+        "strict_geography": false
+      },
+      "allow_vehicle_swap": {
+        "active": false,
+        "value": true,
+        "effective_operator_single_vehicle_only": false
+      }
+    },
+    "blocked_connections": {
+      "total": 3153,
+      "by_constraint": {
+        "min_connection_time": 2063,
+        "min_break": 1090
+      },
+      "samples": [
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5428,
+          "gap": 0,
+          "limit": 15,
+          "deadhead": 0
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5429,
+          "gap": 0,
+          "limit": 15,
+          "deadhead": 0
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5430,
+          "gap": 2,
+          "limit": 15
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5438,
+          "gap": 12,
+          "limit": 15
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5433,
+          "gap": 17,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5434,
+          "gap": 21,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5437,
+          "gap": 32,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5444,
+          "gap": 37,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5440,
+          "gap": 46,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5442,
+          "gap": 47,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5426,
+          "to_trip_id": 5453,
+          "gap": 57,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5439,
+          "gap": 0,
+          "limit": 15,
+          "deadhead": 0
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5436,
+          "gap": 8,
+          "limit": 15
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5437,
+          "gap": 9,
+          "limit": 15
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5435,
+          "gap": 10,
+          "limit": 15
+        },
+        {
+          "constraint": "min_break",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5444,
+          "gap": 14,
+          "limit": 15
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5440,
+          "gap": 23,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5442,
+          "gap": 24,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5453,
+          "gap": 34,
+          "limit": 999999,
+          "deadhead": 999999
+        },
+        {
+          "constraint": "min_connection_time",
+          "phase": "vsp_candidate",
+          "from_trip_id": 5431,
+          "to_trip_id": 5447,
+          "gap": 39,
+          "limit": 999999,
+          "deadhead": 999999
+        }
+      ]
+    },
+    "impact": {
+      "vsp": {
+        "vehicles": 15,
+        "unassigned_trips": 0,
+        "warnings": []
+      },
+      "csp": {
+        "duties": 19,
+        "cct_violations": 0,
+        "issue_counts": {
+          "MANDATORY_GROUP_SPLIT": 2
+        }
+      },
+      "fallback": {
+        "group_audit_fallback": null,
+        "group_audit_fallback_skipped": {
+          "reason": "instance_scale_guard",
+          "trip_count": 298,
+          "block_count": 15,
+          "max_trips": 220,
+          "max_blocks": 160,
+          "strict_group_mode": false,
+          "strict_max_trips": 1000,
+          "strict_max_blocks": 1000
+        },
+        "scale_fallback_chunk_count": null
+      },
+      "stitching": {
+        "attempted": 0,
+        "accepted": 0,
+        "rejected": 0
+      }
+    }
+  },
+  "reproducibility": {
+    "algorithm": "hybrid_pipeline",
+    "random_seed": 20260429,
+    "stochastic_algorithm": true,
+    "deterministic_replay_possible": false,
+    "input_hash": "320d78dd9253",
+    "params_hash": "a05eba739392",
+    "time_budget_s": 600.0,
+    "note": "Seed explícita reduz a variabilidade, mas o solver usa budget por tempo; execuções equivalentes podem divergir no número de iterações e no resultado final."
+  },
+  "performance": {
+    "phase_timings_ms": {
+      "vsp_mcnf_ms": 1212.07,
+      "csp_greedy_ms": 2644.45,
+      "joint_swap_ms": 45198.23,
+      "input_validation_ms": 0.26,
+      "solver_ms": 49066.27,
+      "output_validation_ms": 0.48,
+      "audit_enrichment_ms": 10.16
+    },
+    "input_trip_count": 298,
+    "selected_vsp_algorithm": "mcnf_vsp",
+    "time_budget_s": 600.0,
+    "advanced_stats": {
+      "gap_stats": {
+        "min_gap": 0,
+        "avg_gap": 20.0,
+        "total_gaps_count": 283
+      },
+      "block_distribution": {
+        "avg_trips_per_block": 19.87,
+        "max_trips": 32,
+        "std_dev_trips": 75.18
+      }
+    },
+    "explainability": {
+      "vehicles_reduction": "Stable",
+      "crew_efficiency": "Stable",
+      "compliance_fixing": "Stable"
+    },
+    "benchmark": {
+      "baseline": {
+        "vehicles": 15,
+        "crew": 18,
+        "violations": 0,
+        "total_cost": 247103.1
+      },
+      "final": {
+        "vehicles": 15,
+        "crew": 18,
+        "violations": 0,
+        "total_cost": 247103.1
+      },
+      "improvement": {
+        "vehicles_saved": 0,
+        "crew_saved": 0,
+        "cost_reduction": 0.0
+      }
+    },
+    "group_audit_fallback_skipped": {
+      "reason": "instance_scale_guard",
+      "trip_count": 298,
+      "block_count": 15,
+      "max_trips": 220,
+      "max_blocks": 160,
+      "strict_group_mode": false,
+      "strict_max_trips": 1000,
+      "strict_max_blocks": 1000
+    },
+    "total_elapsed_ms": 49070.0,
+    "trip_count": 298,
+    "vehicle_type_count": 1
+  },
+  "meta": {
+    "input": {
+      "n_trips": 298,
+      "n_vehicle_types": 1,
+      "submitted_cct_params": {
+        "cost_km": 1,
+        "apply_cct": true,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "max_work_minutes": 480,
+        "min_work_minutes": 240,
+        "nocturnal_factor": 1.14,
+        "pullback_minutes": 10,
+        "idle_time_is_paid": true,
+        "max_shift_minutes": 840,
+        "min_break_minutes": 15,
+        "min_shift_minutes": 240,
+        "allow_vehicle_swap": true,
+        "meal_break_minutes": 15,
+        "nocturnal_end_hour": 5,
+        "strict_union_rules": false,
+        "allow_relief_points": false,
+        "max_driving_minutes": 240,
+        "min_layover_minutes": 15,
+        "nocturnal_extra_pct": 20,
+        "weekly_rest_minutes": 2100,
+        "enforce_min_interval": true,
+        "nocturnal_start_hour": 22,
+        "waiting_time_pay_pct": 1,
+        "operator_pairing_hard": true,
+        "terminal_location_ids": [],
+        "trip_group_keep_bonus": 500,
+        "overtime_limit_minutes": 120,
+        "strict_hard_validation": false,
+        "enforce_single_line_duty": false,
+        "enforce_trip_groups_hard": true,
+        "inter_shift_rest_minutes": 660,
+        "allow_reduced_weekly_rest": false,
+        "min_guaranteed_work_minutes": 420,
+        "connection_tolerance_minutes": 0,
+        "enforce_same_depot_start_end": true,
+        "operator_single_vehicle_only": false,
+        "mandatory_break_after_minutes": 240,
+        "operator_change_terminals_only": false,
+        "long_unpaid_break_limit_minutes": 120,
+        "group_infeasibility_mode": "production",
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "use_set_covering": true,
+        "same_depot_required": true,
+        "idle_cost_per_minute": 2,
+        "allow_multi_line_block": true,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "preserve_preferred_pairs": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429
+      },
+      "submitted_vsp_params": {
+        "preserve_preferred_pairs": true,
+        "cost_km": 1,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "pullback_minutes": 10,
+        "use_set_covering": true,
+        "allow_vehicle_swap": true,
+        "min_layover_minutes": 15,
+        "same_depot_required": true,
+        "enforce_min_interval": true,
+        "idle_cost_per_minute": 2,
+        "trip_group_keep_bonus": 500,
+        "allow_multi_line_block": true,
+        "strict_hard_validation": false,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "connection_tolerance_minutes": 0,
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429,
+        "group_infeasibility_mode": "production"
+      },
+      "submitted_optimization_params": {
+        "cost_km": 1,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "pullback_minutes": 10,
+        "use_set_covering": true,
+        "allow_vehicle_swap": true,
+        "min_layover_minutes": 15,
+        "same_depot_required": true,
+        "enforce_min_interval": true,
+        "idle_cost_per_minute": 2,
+        "trip_group_keep_bonus": 500,
+        "allow_multi_line_block": true,
+        "strict_hard_validation": false,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "preserve_preferred_pairs": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "connection_tolerance_minutes": 0,
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429,
+        "group_infeasibility_mode": "production"
+      },
+      "cct_params": {
+        "cost_km": 1,
+        "apply_cct": true,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "max_work_minutes": 480,
+        "min_work_minutes": 240,
+        "nocturnal_factor": 1.14,
+        "pullback_minutes": 10,
+        "idle_time_is_paid": true,
+        "max_shift_minutes": 840,
+        "min_break_minutes": 15,
+        "min_shift_minutes": 240,
+        "allow_vehicle_swap": true,
+        "meal_break_minutes": 15,
+        "nocturnal_end_hour": 5,
+        "strict_union_rules": false,
+        "allow_relief_points": false,
+        "max_driving_minutes": 240,
+        "min_layover_minutes": 15,
+        "nocturnal_extra_pct": 20,
+        "weekly_rest_minutes": 2100,
+        "enforce_min_interval": true,
+        "nocturnal_start_hour": 22,
+        "waiting_time_pay_pct": 1,
+        "operator_pairing_hard": true,
+        "terminal_location_ids": [],
+        "trip_group_keep_bonus": 500,
+        "overtime_limit_minutes": 120,
+        "strict_hard_validation": false,
+        "enforce_single_line_duty": false,
+        "enforce_trip_groups_hard": true,
+        "inter_shift_rest_minutes": 660,
+        "allow_reduced_weekly_rest": false,
+        "min_guaranteed_work_minutes": 420,
+        "connection_tolerance_minutes": 0,
+        "enforce_same_depot_start_end": true,
+        "operator_single_vehicle_only": false,
+        "mandatory_break_after_minutes": 240,
+        "operator_change_terminals_only": false,
+        "long_unpaid_break_limit_minutes": 120,
+        "group_infeasibility_mode": "production",
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "use_set_covering": true,
+        "same_depot_required": true,
+        "idle_cost_per_minute": 2,
+        "allow_multi_line_block": true,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "preserve_preferred_pairs": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429,
+        "mandatory_trip_groups_same_duty": [
+          [
+            5431,
+            5439
+          ],
+          [
+            5426,
+            5429
+          ],
+          [
+            5427,
+            5428
+          ],
+          [
+            5430,
+            5432
+          ],
+          [
+            5438,
+            5445
+          ],
+          [
+            5433,
+            5436
+          ],
+          [
+            5434,
+            5435
+          ],
+          [
+            5437,
+            5441
+          ],
+          [
+            5444,
+            5454
+          ],
+          [
+            5440,
+            5443
+          ],
+          [
+            5442,
+            5446
+          ],
+          [
+            5453,
+            5464
+          ],
+          [
+            5447,
+            5450
+          ],
+          [
+            5448,
+            5449
+          ],
+          [
+            5462,
+            5474
+          ],
+          [
+            5451,
+            5457
+          ],
+          [
+            5452,
+            5455
+          ],
+          [
+            5456,
+            5460
+          ],
+          [
+            5469,
+            5481
+          ],
+          [
+            5459,
+            5465
+          ],
+          [
+            5458,
+            5461
+          ],
+          [
+            5463,
+            5468
+          ],
+          [
+            5477,
+            5490
+          ],
+          [
+            5466,
+            5472
+          ],
+          [
+            5467,
+            5471
+          ],
+          [
+            5470,
+            5475
+          ],
+          [
+            5484,
+            5494
+          ],
+          [
+            5473,
+            5479
+          ],
+          [
+            5476,
+            5480
+          ],
+          [
+            5489,
+            5500
+          ],
+          [
+            5478,
+            5483
+          ],
+          [
+            5482,
+            5487
+          ],
+          [
+            5485,
+            5488
+          ],
+          [
+            5497,
+            5505
+          ],
+          [
+            5486,
+            5491
+          ],
+          [
+            5492,
+            5496
+          ],
+          [
+            5493,
+            5495
+          ],
+          [
+            5503,
+            5511
+          ],
+          [
+            5498,
+            5502
+          ],
+          [
+            5499,
+            5501
+          ],
+          [
+            5507,
+            5516
+          ],
+          [
+            5504,
+            5509
+          ],
+          [
+            5506,
+            5508
+          ],
+          [
+            5515,
+            5523
+          ],
+          [
+            5510,
+            5513
+          ],
+          [
+            5512,
+            5514
+          ],
+          [
+            5522,
+            5529
+          ],
+          [
+            5517,
+            5519
+          ],
+          [
+            5518,
+            5521
+          ],
+          [
+            5528,
+            5536
+          ],
+          [
+            5520,
+            5524
+          ],
+          [
+            5525,
+            5527
+          ],
+          [
+            5526,
+            5530
+          ],
+          [
+            5534,
+            5542
+          ],
+          [
+            5531,
+            5535
+          ],
+          [
+            5532,
+            5533
+          ],
+          [
+            5541,
+            5549
+          ],
+          [
+            5537,
+            5539
+          ],
+          [
+            5538,
+            5540
+          ],
+          [
+            5546,
+            5555
+          ],
+          [
+            5543,
+            5545
+          ],
+          [
+            5544,
+            5547
+          ],
+          [
+            5553,
+            5561
+          ],
+          [
+            5548,
+            5551
+          ],
+          [
+            5550,
+            5552
+          ],
+          [
+            5554,
+            5556
+          ],
+          [
+            5559,
+            5566
+          ],
+          [
+            5557,
+            5558
+          ],
+          [
+            5560,
+            5562
+          ],
+          [
+            5565,
+            5572
+          ],
+          [
+            5563,
+            5564
+          ],
+          [
+            5567,
+            5569
+          ],
+          [
+            5571,
+            5579
+          ],
+          [
+            5568,
+            5570
+          ],
+          [
+            5573,
+            5575
+          ],
+          [
+            5577,
+            5585
+          ],
+          [
+            5574,
+            5576
+          ],
+          [
+            5578,
+            5581
+          ],
+          [
+            5584,
+            5590
+          ],
+          [
+            5580,
+            5582
+          ],
+          [
+            5583,
+            5587
+          ],
+          [
+            5586,
+            5588
+          ],
+          [
+            5591,
+            5597
+          ],
+          [
+            5589,
+            5593
+          ],
+          [
+            5596,
+            5603
+          ],
+          [
+            5592,
+            5594
+          ],
+          [
+            5595,
+            5599
+          ],
+          [
+            5602,
+            5610
+          ],
+          [
+            5598,
+            5600
+          ],
+          [
+            5601,
+            5605
+          ],
+          [
+            5608,
+            5616
+          ],
+          [
+            5604,
+            5606
+          ],
+          [
+            5607,
+            5611
+          ],
+          [
+            5615,
+            5623
+          ],
+          [
+            5609,
+            5612
+          ],
+          [
+            5613,
+            5618
+          ],
+          [
+            5622,
+            5630
+          ],
+          [
+            5614,
+            5617
+          ],
+          [
+            5620,
+            5624
+          ],
+          [
+            5619,
+            5621
+          ],
+          [
+            5628,
+            5635
+          ],
+          [
+            5625,
+            5626
+          ],
+          [
+            5627,
+            5631
+          ],
+          [
+            5638,
+            5647
+          ],
+          [
+            5629,
+            5632
+          ],
+          [
+            5633,
+            5637
+          ],
+          [
+            5634,
+            5636
+          ],
+          [
+            5644,
+            5652
+          ],
+          [
+            5639,
+            5641
+          ],
+          [
+            5640,
+            5643
+          ],
+          [
+            5655,
+            5664
+          ],
+          [
+            5642,
+            5646
+          ],
+          [
+            5645,
+            5649
+          ],
+          [
+            5661,
+            5671
+          ],
+          [
+            5648,
+            5651
+          ],
+          [
+            5650,
+            5653
+          ],
+          [
+            5656,
+            5658
+          ],
+          [
+            5654,
+            5657
+          ],
+          [
+            5667,
+            5677
+          ],
+          [
+            5659,
+            5663
+          ],
+          [
+            5660,
+            5662
+          ],
+          [
+            5675,
+            5684
+          ],
+          [
+            5665,
+            5668
+          ],
+          [
+            5666,
+            5669
+          ],
+          [
+            5670,
+            5673
+          ],
+          [
+            5683,
+            5691
+          ],
+          [
+            5672,
+            5674
+          ],
+          [
+            5676,
+            5679
+          ],
+          [
+            5678,
+            5680
+          ],
+          [
+            5689,
+            5696
+          ],
+          [
+            5681,
+            5686
+          ],
+          [
+            5682,
+            5685
+          ],
+          [
+            5697,
+            5703
+          ],
+          [
+            5688,
+            5692
+          ],
+          [
+            5687,
+            5690
+          ],
+          [
+            5694,
+            5698
+          ],
+          [
+            5693,
+            5695
+          ],
+          [
+            5704,
+            5706
+          ],
+          [
+            5699,
+            5701
+          ],
+          [
+            5700,
+            5702
+          ],
+          [
+            5707,
+            5709
+          ],
+          [
+            5705,
+            5708
+          ],
+          [
+            5711,
+            5713
+          ],
+          [
+            5710,
+            5712
+          ],
+          [
+            5714,
+            5716
+          ],
+          [
+            5715,
+            5717
+          ],
+          [
+            5718,
+            5719
+          ],
+          [
+            5423,
+            5720
+          ],
+          [
+            5424,
+            5425
+          ]
+        ]
+      },
+      "vsp_params": {
+        "preserve_preferred_pairs": true,
+        "cost_km": 1,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "pullback_minutes": 10,
+        "use_set_covering": true,
+        "allow_vehicle_swap": true,
+        "min_layover_minutes": 15,
+        "same_depot_required": true,
+        "enforce_min_interval": true,
+        "idle_cost_per_minute": 2,
+        "trip_group_keep_bonus": 500,
+        "allow_multi_line_block": true,
+        "strict_hard_validation": false,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "connection_tolerance_minutes": 0,
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429,
+        "group_infeasibility_mode": "production",
+        "hard_pairing_vehicle_level": true,
+        "hard_pairing_penalty": 364127.61339445063,
+        "apply_cct": true,
+        "max_work_minutes": 480,
+        "min_work_minutes": 240,
+        "nocturnal_factor": 1.14,
+        "idle_time_is_paid": true,
+        "max_shift_minutes": 840,
+        "min_break_minutes": 15,
+        "min_shift_minutes": 240,
+        "meal_break_minutes": 15,
+        "nocturnal_end_hour": 5,
+        "strict_union_rules": false,
+        "allow_relief_points": false,
+        "max_driving_minutes": 240,
+        "nocturnal_extra_pct": 20,
+        "weekly_rest_minutes": 2100,
+        "nocturnal_start_hour": 22,
+        "waiting_time_pay_pct": 1,
+        "operator_pairing_hard": true,
+        "terminal_location_ids": [],
+        "overtime_limit_minutes": 120,
+        "enforce_single_line_duty": false,
+        "enforce_trip_groups_hard": true,
+        "inter_shift_rest_minutes": 660,
+        "allow_reduced_weekly_rest": false,
+        "min_guaranteed_work_minutes": 420,
+        "enforce_same_depot_start_end": true,
+        "operator_single_vehicle_only": false,
+        "mandatory_break_after_minutes": 240,
+        "operator_change_terminals_only": false,
+        "long_unpaid_break_limit_minutes": 120
+      },
+      "optimization_params": {
+        "cost_km": 1,
+        "apply_cct": true,
+        "cost_duty": 439.6983429020171,
+        "cost_vehicle": 14565.104535778026,
+        "pullout_minutes": 10,
+        "force_round_trip": true,
+        "max_work_minutes": 480,
+        "min_work_minutes": 240,
+        "nocturnal_factor": 1.14,
+        "pullback_minutes": 10,
+        "idle_time_is_paid": true,
+        "max_shift_minutes": 840,
+        "min_break_minutes": 15,
+        "min_shift_minutes": 240,
+        "allow_vehicle_swap": true,
+        "meal_break_minutes": 15,
+        "nocturnal_end_hour": 5,
+        "strict_union_rules": false,
+        "allow_relief_points": false,
+        "max_driving_minutes": 240,
+        "min_layover_minutes": 15,
+        "nocturnal_extra_pct": 20,
+        "weekly_rest_minutes": 2100,
+        "enforce_min_interval": true,
+        "nocturnal_start_hour": 22,
+        "waiting_time_pay_pct": 1,
+        "operator_pairing_hard": true,
+        "terminal_location_ids": [],
+        "trip_group_keep_bonus": 500,
+        "overtime_limit_minutes": 120,
+        "strict_hard_validation": false,
+        "enforce_single_line_duty": false,
+        "enforce_trip_groups_hard": true,
+        "inter_shift_rest_minutes": 660,
+        "allow_reduced_weekly_rest": false,
+        "min_guaranteed_work_minutes": 420,
+        "connection_tolerance_minutes": 0,
+        "enforce_same_depot_start_end": true,
+        "operator_single_vehicle_only": false,
+        "mandatory_break_after_minutes": 240,
+        "operator_change_terminals_only": false,
+        "long_unpaid_break_limit_minutes": 120,
+        "group_infeasibility_mode": "production",
+        "time_budget_s": 600,
+        "pricing_enabled": true,
+        "use_set_covering": true,
+        "same_depot_required": true,
+        "idle_cost_per_minute": 2,
+        "allow_multi_line_block": true,
+        "deadhead_cost_per_minute": 1,
+        "enable_column_generation": true,
+        "preserve_preferred_pairs": true,
+        "max_vehicle_shift_minutes": 840,
+        "vehicle_idle_gap_behavior": "solver_decides",
+        "fixed_vehicle_activation_cost": 14565.104535778026,
+        "preferred_pair_window_minutes": 30,
+        "random_seed": 20260429
+      },
+      "request_metadata": {},
+      "replay_fingerprint": {
+        "input_hash": "320d78dd9253",
+        "params_hash": "c36b40ba2725",
+        "trip_count": 298,
+        "line_ids": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "time_budget_s": 600.0
+      },
+      "group_inference_report": {
+        "mode": "direct_input",
+        "backend_trip_group_stats": {
+          "group_count": 149,
+          "grouped_trip_count": 298,
+          "max_group_size": 2
+        },
+        "optimizer_input_stats": {
+          "group_count": 149,
+          "grouped_trip_count": 298,
+          "max_group_size": 2
+        },
+        "optimizer_effective_stats": {
+          "group_count": 149,
+          "grouped_trip_count": 298,
+          "max_group_size": 2
+        },
+        "inference_applied": false
+      },
+      "run_snapshot": {
+        "schema_version": "optimization_run_snapshot_v1",
+        "timestamp": "2026-04-29T14:23:35.160984+00:00",
+        "algorithm": "hybrid_pipeline",
+        "seed": 20260429,
+        "time_budget_s": 600.0,
+        "company_id": null,
+        "scenario_id": null,
+        "run_id": null,
+        "strict_flags": {
+          "strict_hard_validation": false,
+          "strict_zero_gap_validation": false,
+          "strict_operational_mode": false,
+          "strict_hard_constraints": false
+        },
+        "trips_hash": "320d78dd9253",
+        "vehicle_types_hash": "dcbd8c88cf3d",
+        "trip_count": 298,
+        "vehicle_type_count": 1,
+        "replay_fingerprint": {
+          "input_hash": "320d78dd9253",
+          "params_hash": "c36b40ba2725",
+          "trip_count": 298,
+          "line_ids": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "time_budget_s": 600.0
+        },
+        "trip_group_inference_report": {
+          "mode": "direct_input",
+          "backend_trip_group_stats": {
+            "group_count": 149,
+            "grouped_trip_count": 298,
+            "max_group_size": 2
+          },
+          "optimizer_input_stats": {
+            "group_count": 149,
+            "grouped_trip_count": 298,
+            "max_group_size": 2
+          },
+          "optimizer_effective_stats": {
+            "group_count": 149,
+            "grouped_trip_count": 298,
+            "max_group_size": 2
+          },
+          "inference_applied": false
+        },
+        "submitted_params": {
+          "cct_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 240,
+            "nocturnal_factor": 1.14,
+            "pullback_minutes": 10,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 840,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 240,
+            "allow_vehicle_swap": true,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "strict_union_rules": false,
+            "allow_relief_points": false,
+            "max_driving_minutes": 240,
+            "min_layover_minutes": 15,
+            "nocturnal_extra_pct": 20,
+            "weekly_rest_minutes": 2100,
+            "enforce_min_interval": true,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 1,
+            "operator_pairing_hard": true,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 500,
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": false,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "allow_reduced_weekly_rest": false,
+            "min_guaranteed_work_minutes": 420,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": true,
+            "operator_single_vehicle_only": false,
+            "mandatory_break_after_minutes": 240,
+            "operator_change_terminals_only": false,
+            "long_unpaid_break_limit_minutes": 120,
+            "group_infeasibility_mode": "production",
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "use_set_covering": true,
+            "same_depot_required": true,
+            "idle_cost_per_minute": 2,
+            "allow_multi_line_block": true,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "preserve_preferred_pairs": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429
+          },
+          "vsp_params": {
+            "preserve_preferred_pairs": true,
+            "cost_km": 1,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "pullback_minutes": 10,
+            "use_set_covering": true,
+            "allow_vehicle_swap": true,
+            "min_layover_minutes": 15,
+            "same_depot_required": true,
+            "enforce_min_interval": true,
+            "idle_cost_per_minute": 2,
+            "trip_group_keep_bonus": 500,
+            "allow_multi_line_block": true,
+            "strict_hard_validation": false,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "connection_tolerance_minutes": 0,
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429,
+            "group_infeasibility_mode": "production"
+          },
+          "optimization_params": {
+            "cost_km": 1,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "pullback_minutes": 10,
+            "use_set_covering": true,
+            "allow_vehicle_swap": true,
+            "min_layover_minutes": 15,
+            "same_depot_required": true,
+            "enforce_min_interval": true,
+            "idle_cost_per_minute": 2,
+            "trip_group_keep_bonus": 500,
+            "allow_multi_line_block": true,
+            "strict_hard_validation": false,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "preserve_preferred_pairs": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "connection_tolerance_minutes": 0,
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429,
+            "group_infeasibility_mode": "production"
+          }
+        },
+        "resolved_params": {
+          "cct_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 240,
+            "nocturnal_factor": 1.14,
+            "pullback_minutes": 10,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 840,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 240,
+            "allow_vehicle_swap": true,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "strict_union_rules": false,
+            "allow_relief_points": false,
+            "max_driving_minutes": 240,
+            "min_layover_minutes": 15,
+            "nocturnal_extra_pct": 20,
+            "weekly_rest_minutes": 2100,
+            "enforce_min_interval": true,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 1,
+            "operator_pairing_hard": true,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 500,
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": false,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "allow_reduced_weekly_rest": false,
+            "min_guaranteed_work_minutes": 420,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": true,
+            "operator_single_vehicle_only": false,
+            "mandatory_break_after_minutes": 240,
+            "operator_change_terminals_only": false,
+            "long_unpaid_break_limit_minutes": 120,
+            "group_infeasibility_mode": "production",
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "use_set_covering": true,
+            "same_depot_required": true,
+            "idle_cost_per_minute": 2,
+            "allow_multi_line_block": true,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "preserve_preferred_pairs": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429,
+            "mandatory_trip_groups_same_duty": [
+              [
+                5431,
+                5439
+              ],
+              [
+                5426,
+                5429
+              ],
+              [
+                5427,
+                5428
+              ],
+              [
+                5430,
+                5432
+              ],
+              [
+                5438,
+                5445
+              ],
+              [
+                5433,
+                5436
+              ],
+              [
+                5434,
+                5435
+              ],
+              [
+                5437,
+                5441
+              ],
+              [
+                5444,
+                5454
+              ],
+              [
+                5440,
+                5443
+              ],
+              [
+                5442,
+                5446
+              ],
+              [
+                5453,
+                5464
+              ],
+              [
+                5447,
+                5450
+              ],
+              [
+                5448,
+                5449
+              ],
+              [
+                5462,
+                5474
+              ],
+              [
+                5451,
+                5457
+              ],
+              [
+                5452,
+                5455
+              ],
+              [
+                5456,
+                5460
+              ],
+              [
+                5469,
+                5481
+              ],
+              [
+                5459,
+                5465
+              ],
+              [
+                5458,
+                5461
+              ],
+              [
+                5463,
+                5468
+              ],
+              [
+                5477,
+                5490
+              ],
+              [
+                5466,
+                5472
+              ],
+              [
+                5467,
+                5471
+              ],
+              [
+                5470,
+                5475
+              ],
+              [
+                5484,
+                5494
+              ],
+              [
+                5473,
+                5479
+              ],
+              [
+                5476,
+                5480
+              ],
+              [
+                5489,
+                5500
+              ],
+              [
+                5478,
+                5483
+              ],
+              [
+                5482,
+                5487
+              ],
+              [
+                5485,
+                5488
+              ],
+              [
+                5497,
+                5505
+              ],
+              [
+                5486,
+                5491
+              ],
+              [
+                5492,
+                5496
+              ],
+              [
+                5493,
+                5495
+              ],
+              [
+                5503,
+                5511
+              ],
+              [
+                5498,
+                5502
+              ],
+              [
+                5499,
+                5501
+              ],
+              [
+                5507,
+                5516
+              ],
+              [
+                5504,
+                5509
+              ],
+              [
+                5506,
+                5508
+              ],
+              [
+                5515,
+                5523
+              ],
+              [
+                5510,
+                5513
+              ],
+              [
+                5512,
+                5514
+              ],
+              [
+                5522,
+                5529
+              ],
+              [
+                5517,
+                5519
+              ],
+              [
+                5518,
+                5521
+              ],
+              [
+                5528,
+                5536
+              ],
+              [
+                5520,
+                5524
+              ],
+              [
+                5525,
+                5527
+              ],
+              [
+                5526,
+                5530
+              ],
+              [
+                5534,
+                5542
+              ],
+              [
+                5531,
+                5535
+              ],
+              [
+                5532,
+                5533
+              ],
+              [
+                5541,
+                5549
+              ],
+              [
+                5537,
+                5539
+              ],
+              [
+                5538,
+                5540
+              ],
+              [
+                5546,
+                5555
+              ],
+              [
+                5543,
+                5545
+              ],
+              [
+                5544,
+                5547
+              ],
+              [
+                5553,
+                5561
+              ],
+              [
+                5548,
+                5551
+              ],
+              [
+                5550,
+                5552
+              ],
+              [
+                5554,
+                5556
+              ],
+              [
+                5559,
+                5566
+              ],
+              [
+                5557,
+                5558
+              ],
+              [
+                5560,
+                5562
+              ],
+              [
+                5565,
+                5572
+              ],
+              [
+                5563,
+                5564
+              ],
+              [
+                5567,
+                5569
+              ],
+              [
+                5571,
+                5579
+              ],
+              [
+                5568,
+                5570
+              ],
+              [
+                5573,
+                5575
+              ],
+              [
+                5577,
+                5585
+              ],
+              [
+                5574,
+                5576
+              ],
+              [
+                5578,
+                5581
+              ],
+              [
+                5584,
+                5590
+              ],
+              [
+                5580,
+                5582
+              ],
+              [
+                5583,
+                5587
+              ],
+              [
+                5586,
+                5588
+              ],
+              [
+                5591,
+                5597
+              ],
+              [
+                5589,
+                5593
+              ],
+              [
+                5596,
+                5603
+              ],
+              [
+                5592,
+                5594
+              ],
+              [
+                5595,
+                5599
+              ],
+              [
+                5602,
+                5610
+              ],
+              [
+                5598,
+                5600
+              ],
+              [
+                5601,
+                5605
+              ],
+              [
+                5608,
+                5616
+              ],
+              [
+                5604,
+                5606
+              ],
+              [
+                5607,
+                5611
+              ],
+              [
+                5615,
+                5623
+              ],
+              [
+                5609,
+                5612
+              ],
+              [
+                5613,
+                5618
+              ],
+              [
+                5622,
+                5630
+              ],
+              [
+                5614,
+                5617
+              ],
+              [
+                5620,
+                5624
+              ],
+              [
+                5619,
+                5621
+              ],
+              [
+                5628,
+                5635
+              ],
+              [
+                5625,
+                5626
+              ],
+              [
+                5627,
+                5631
+              ],
+              [
+                5638,
+                5647
+              ],
+              [
+                5629,
+                5632
+              ],
+              [
+                5633,
+                5637
+              ],
+              [
+                5634,
+                5636
+              ],
+              [
+                5644,
+                5652
+              ],
+              [
+                5639,
+                5641
+              ],
+              [
+                5640,
+                5643
+              ],
+              [
+                5655,
+                5664
+              ],
+              [
+                5642,
+                5646
+              ],
+              [
+                5645,
+                5649
+              ],
+              [
+                5661,
+                5671
+              ],
+              [
+                5648,
+                5651
+              ],
+              [
+                5650,
+                5653
+              ],
+              [
+                5656,
+                5658
+              ],
+              [
+                5654,
+                5657
+              ],
+              [
+                5667,
+                5677
+              ],
+              [
+                5659,
+                5663
+              ],
+              [
+                5660,
+                5662
+              ],
+              [
+                5675,
+                5684
+              ],
+              [
+                5665,
+                5668
+              ],
+              [
+                5666,
+                5669
+              ],
+              [
+                5670,
+                5673
+              ],
+              [
+                5683,
+                5691
+              ],
+              [
+                5672,
+                5674
+              ],
+              [
+                5676,
+                5679
+              ],
+              [
+                5678,
+                5680
+              ],
+              [
+                5689,
+                5696
+              ],
+              [
+                5681,
+                5686
+              ],
+              [
+                5682,
+                5685
+              ],
+              [
+                5697,
+                5703
+              ],
+              [
+                5688,
+                5692
+              ],
+              [
+                5687,
+                5690
+              ],
+              [
+                5694,
+                5698
+              ],
+              [
+                5693,
+                5695
+              ],
+              [
+                5704,
+                5706
+              ],
+              [
+                5699,
+                5701
+              ],
+              [
+                5700,
+                5702
+              ],
+              [
+                5707,
+                5709
+              ],
+              [
+                5705,
+                5708
+              ],
+              [
+                5711,
+                5713
+              ],
+              [
+                5710,
+                5712
+              ],
+              [
+                5714,
+                5716
+              ],
+              [
+                5715,
+                5717
+              ],
+              [
+                5718,
+                5719
+              ],
+              [
+                5423,
+                5720
+              ],
+              [
+                5424,
+                5425
+              ]
+            ]
+          },
+          "vsp_params": {
+            "preserve_preferred_pairs": true,
+            "cost_km": 1,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "pullback_minutes": 10,
+            "use_set_covering": true,
+            "allow_vehicle_swap": true,
+            "min_layover_minutes": 15,
+            "same_depot_required": true,
+            "enforce_min_interval": true,
+            "idle_cost_per_minute": 2,
+            "trip_group_keep_bonus": 500,
+            "allow_multi_line_block": true,
+            "strict_hard_validation": false,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "connection_tolerance_minutes": 0,
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429,
+            "group_infeasibility_mode": "production",
+            "hard_pairing_vehicle_level": true,
+            "hard_pairing_penalty": 364127.61339445063,
+            "apply_cct": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 240,
+            "nocturnal_factor": 1.14,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 840,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 240,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "strict_union_rules": false,
+            "allow_relief_points": false,
+            "max_driving_minutes": 240,
+            "nocturnal_extra_pct": 20,
+            "weekly_rest_minutes": 2100,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 1,
+            "operator_pairing_hard": true,
+            "terminal_location_ids": [],
+            "overtime_limit_minutes": 120,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "allow_reduced_weekly_rest": false,
+            "min_guaranteed_work_minutes": 420,
+            "enforce_same_depot_start_end": true,
+            "operator_single_vehicle_only": false,
+            "mandatory_break_after_minutes": 240,
+            "operator_change_terminals_only": false,
+            "long_unpaid_break_limit_minutes": 120
+          },
+          "optimization_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 439.6983429020171,
+            "cost_vehicle": 14565.104535778026,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 240,
+            "nocturnal_factor": 1.14,
+            "pullback_minutes": 10,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 840,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 240,
+            "allow_vehicle_swap": true,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "strict_union_rules": false,
+            "allow_relief_points": false,
+            "max_driving_minutes": 240,
+            "min_layover_minutes": 15,
+            "nocturnal_extra_pct": 20,
+            "weekly_rest_minutes": 2100,
+            "enforce_min_interval": true,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 1,
+            "operator_pairing_hard": true,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 500,
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": false,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "allow_reduced_weekly_rest": false,
+            "min_guaranteed_work_minutes": 420,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": true,
+            "operator_single_vehicle_only": false,
+            "mandatory_break_after_minutes": 240,
+            "operator_change_terminals_only": false,
+            "long_unpaid_break_limit_minutes": 120,
+            "group_infeasibility_mode": "production",
+            "time_budget_s": 600,
+            "pricing_enabled": true,
+            "use_set_covering": true,
+            "same_depot_required": true,
+            "idle_cost_per_minute": 2,
+            "allow_multi_line_block": true,
+            "deadhead_cost_per_minute": 1,
+            "enable_column_generation": true,
+            "preserve_preferred_pairs": true,
+            "max_vehicle_shift_minutes": 840,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fixed_vehicle_activation_cost": 14565.104535778026,
+            "preferred_pair_window_minutes": 30,
+            "random_seed": 20260429
+          }
+        },
+        "request_metadata": {}
+      }
+    },
+    "solver_version": "2.0.0",
+    "hard_constraint_report": {
+      "strict": false,
+      "input": {
+        "ok": true,
+        "issues": [],
+        "counts": {
+          "input_issues": 0
+        }
+      },
+      "output": {
+        "ok": false,
+        "issues": [
+          "MANDATORY_GROUP_SPLIT [5584, 5590]",
+          "MANDATORY_GROUP_SPLIT [5591, 5597]"
+        ],
+        "hard_issues": [
+          "MANDATORY_GROUP_SPLIT [5584, 5590]",
+          "MANDATORY_GROUP_SPLIT [5591, 5597]"
+        ],
+        "soft_issues": [],
+        "counts": {
+          "result_issues": 2,
+          "hard_issues": 2,
+          "soft_issues": 0,
+          "unassigned_trips": 0,
+          "uncovered_blocks": 0
+        }
+      }
+    },
+    "parameter_effect_report": {
+      "schema_version": "parameter_effect_report_v1",
+      "active_constraints": {
+        "min_break": {
+          "active": true,
+          "value_minutes": 15
+        },
+        "min_connection_time": {
+          "active": true,
+          "value_minutes": 15
+        },
+        "max_shift_minutes": {
+          "active": true,
+          "value_minutes": 840
+        },
+        "max_driving_minutes": {
+          "active": true,
+          "value_minutes": 240
+        },
+        "zero_gap": {
+          "active": false,
+          "strict_geography": false
+        },
+        "allow_vehicle_swap": {
+          "active": false,
+          "value": true,
+          "effective_operator_single_vehicle_only": false
+        }
+      },
+      "blocked_connections": {
+        "total": 3153,
+        "by_constraint": {
+          "min_connection_time": 2063,
+          "min_break": 1090
+        },
+        "samples": [
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5428,
+            "gap": 0,
+            "limit": 15,
+            "deadhead": 0
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5429,
+            "gap": 0,
+            "limit": 15,
+            "deadhead": 0
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5430,
+            "gap": 2,
+            "limit": 15
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5438,
+            "gap": 12,
+            "limit": 15
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5433,
+            "gap": 17,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5434,
+            "gap": 21,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5437,
+            "gap": 32,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5444,
+            "gap": 37,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5440,
+            "gap": 46,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5442,
+            "gap": 47,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5426,
+            "to_trip_id": 5453,
+            "gap": 57,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5439,
+            "gap": 0,
+            "limit": 15,
+            "deadhead": 0
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5436,
+            "gap": 8,
+            "limit": 15
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5437,
+            "gap": 9,
+            "limit": 15
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5435,
+            "gap": 10,
+            "limit": 15
+          },
+          {
+            "constraint": "min_break",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5444,
+            "gap": 14,
+            "limit": 15
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5440,
+            "gap": 23,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5442,
+            "gap": 24,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5453,
+            "gap": 34,
+            "limit": 999999,
+            "deadhead": 999999
+          },
+          {
+            "constraint": "min_connection_time",
+            "phase": "vsp_candidate",
+            "from_trip_id": 5431,
+            "to_trip_id": 5447,
+            "gap": 39,
+            "limit": 999999,
+            "deadhead": 999999
+          }
+        ]
+      },
+      "impact": {
+        "vsp": {
+          "vehicles": 15,
+          "unassigned_trips": 0,
+          "warnings": []
+        },
+        "csp": {
+          "duties": 19,
+          "cct_violations": 0,
+          "issue_counts": {
+            "MANDATORY_GROUP_SPLIT": 2
+          }
+        },
+        "fallback": {
+          "group_audit_fallback": null,
+          "group_audit_fallback_skipped": {
+            "reason": "instance_scale_guard",
+            "trip_count": 298,
+            "block_count": 15,
+            "max_trips": 220,
+            "max_blocks": 160,
+            "strict_group_mode": false,
+            "strict_max_trips": 1000,
+            "strict_max_blocks": 1000
+          },
+          "scale_fallback_chunk_count": null
+        },
+        "stitching": {
+          "attempted": 0,
+          "accepted": 0,
+          "rejected": 0
+        }
+      }
+    },
+    "operational_kpis": {
+      "vehicles": 15,
+      "crew": 19,
+      "work_minutes": 5819,
+      "paid_minutes": 11157,
+      "paid_work_delta_minutes": 5338,
+      "trips_per_vehicle": 19.87,
+      "avg_block_duration_h": 12.72,
+      "fleet_utilization_pct": 50.6,
+      "total_deadhead_min": 5659,
+      "total_distance_km": 7599.0,
+      "duties_with_overtime": 5,
+      "overtime_rate_pct": 26.3,
+      "avg_overtime_min_per_duty": 9.42,
+      "fairness": {
+        "target_work_minutes": 420,
+        "tolerance_minutes": 30,
+        "d_plus_total": 479,
+        "d_minus_total": 2640,
+        "within_band_count": 0,
+        "outside_band_count": 19,
+        "avg_work_minutes": 306.26
+      },
+      "stretch_kpi": {
+        "operators_with_assignment": 0,
+        "avg_vehicle_changes_per_operator": 0.0
+      },
+      "executive_summary": {
+        "total_cost_brl": 247343.12,
+        "fleet_cost_brl": 227640.73,
+        "crew_cost_brl": 19702.39,
+        "fleet_cost_share_pct": 92.0,
+        "crew_cost_share_pct": 8.0,
+        "cost_per_trip_brl": 830.01,
+        "cost_per_km_brl": 32.55,
+        "cost_per_productive_hour_brl": 2562.7,
+        "fleet_utilization_pct": 50.6,
+        "trips_per_vehicle": 19.87,
+        "overtime_rate_pct": 26.3,
+        "deadhead_pct_of_spread": 53.0,
+        "total_trips": 298,
+        "total_distance_km": 7599.0,
+        "total_driving_hours": 96.52,
+        "total_deadhead_min": 5659
+      }
+    },
+    "performance": {
+      "phase_timings_ms": {
+        "vsp_mcnf_ms": 1212.07,
+        "csp_greedy_ms": 2644.45,
+        "joint_swap_ms": 45198.23,
+        "input_validation_ms": 0.26,
+        "solver_ms": 49066.27,
+        "output_validation_ms": 0.48,
+        "audit_enrichment_ms": 10.16
+      },
+      "input_trip_count": 298,
+      "selected_vsp_algorithm": "mcnf_vsp",
+      "time_budget_s": 600.0,
+      "advanced_stats": {
+        "gap_stats": {
+          "min_gap": 0,
+          "avg_gap": 20.0,
+          "total_gaps_count": 283
+        },
+        "block_distribution": {
+          "avg_trips_per_block": 19.87,
+          "max_trips": 32,
+          "std_dev_trips": 75.18
+        }
+      },
+      "explainability": {
+        "vehicles_reduction": "Stable",
+        "crew_efficiency": "Stable",
+        "compliance_fixing": "Stable"
+      },
+      "benchmark": {
+        "baseline": {
+          "vehicles": 15,
+          "crew": 18,
+          "violations": 0,
+          "total_cost": 247103.1
+        },
+        "final": {
+          "vehicles": 15,
+          "crew": 18,
+          "violations": 0,
+          "total_cost": 247103.1
+        },
+        "improvement": {
+          "vehicles_saved": 0,
+          "crew_saved": 0,
+          "cost_reduction": 0.0
+        }
+      },
+      "group_audit_fallback_skipped": {
+        "reason": "instance_scale_guard",
+        "trip_count": 298,
+        "block_count": 15,
+        "max_trips": 220,
+        "max_blocks": 160,
+        "strict_group_mode": false,
+        "strict_max_trips": 1000,
+        "strict_max_blocks": 1000
+      },
+      "total_elapsed_ms": 49070.0,
+      "trip_count": 298,
+      "vehicle_type_count": 1
+    }
+  },
+  "blocks": [
+    {
+      "block_id": 1,
+      "trips": [
+        5426,
+        5429,
+        5437,
+        5441,
+        5451,
+        5457,
+        5470,
+        5475,
+        5507,
+        5516,
+        5531,
+        5535,
+        5544,
+        5547,
+        5565,
+        5572,
+        5580,
+        5582,
+        5596,
+        5603,
+        5614,
+        5617,
+        5625,
+        5626,
+        5639,
+        5641,
+        5656,
+        5658,
+        5683,
+        5691,
+        5700,
+        5702
+      ],
+      "trip_ids": [
+        5426,
+        5429,
+        5437,
+        5441,
+        5451,
+        5457,
+        5470,
+        5475,
+        5507,
+        5516,
+        5531,
+        5535,
+        5544,
+        5547,
+        5565,
+        5572,
+        5580,
+        5582,
+        5596,
+        5603,
+        5614,
+        5617,
+        5625,
+        5626,
+        5639,
+        5641,
+        5656,
+        5658,
+        5683,
+        5691,
+        5700,
+        5702
+      ],
+      "num_trips": 32,
+      "start_time": 270,
+      "end_time": 1247,
+      "deadhead_minutes": 465,
+      "idle_minutes": 182,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 1,
+        "vehicle_first_trip_id": 5426,
+        "vehicle_last_trip_id": 5702,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 260,
+        "operational_end_minutes": 1257
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 816.0,
+      "time_cost": 95.0,
+      "idle_cost": 40.0,
+      "total_cost": 15516.1
+    },
+    {
+      "block_id": 2,
+      "trips": [
+        5431,
+        5439,
+        5448,
+        5449,
+        5463,
+        5468,
+        5482,
+        5487,
+        5498,
+        5502,
+        5522,
+        5529,
+        5553,
+        5561,
+        5577,
+        5585,
+        5592,
+        5594,
+        5608,
+        5616,
+        5638,
+        5647,
+        5659,
+        5663,
+        5694,
+        5698,
+        5705,
+        5708,
+        5714,
+        5716,
+        5720,
+        5423
+      ],
+      "trip_ids": [
+        5431,
+        5439,
+        5448,
+        5449,
+        5463,
+        5468,
+        5482,
+        5487,
+        5498,
+        5502,
+        5522,
+        5529,
+        5553,
+        5561,
+        5577,
+        5585,
+        5592,
+        5594,
+        5608,
+        5616,
+        5638,
+        5647,
+        5659,
+        5663,
+        5694,
+        5698,
+        5705,
+        5708,
+        5714,
+        5716,
+        5720,
+        5423
+      ],
+      "num_trips": 32,
+      "start_time": 270,
+      "end_time": 1449,
+      "deadhead_minutes": 465,
+      "idle_minutes": 235,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 2,
+        "vehicle_first_trip_id": 5431,
+        "vehicle_last_trip_id": 5423,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 260,
+        "operational_end_minutes": 1459
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 816.0,
+      "time_cost": 119.83,
+      "idle_cost": 40.0,
+      "total_cost": 15540.94
+    },
+    {
+      "block_id": 3,
+      "trips": [
+        5427,
+        5428,
+        5434,
+        5435,
+        5453,
+        5464,
+        5497,
+        5505,
+        5517,
+        5519,
+        5534,
+        5542,
+        5557,
+        5558,
+        5568,
+        5570,
+        5584
+      ],
+      "trip_ids": [
+        5427,
+        5428,
+        5434,
+        5435,
+        5453,
+        5464,
+        5497,
+        5505,
+        5517,
+        5519,
+        5534,
+        5542,
+        5557,
+        5558,
+        5568,
+        5570,
+        5584
+      ],
+      "num_trips": 17,
+      "start_time": 275,
+      "end_time": 822,
+      "deadhead_minutes": 240,
+      "idle_minutes": 74,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 3,
+        "vehicle_first_trip_id": 5427,
+        "vehicle_last_trip_id": 5584,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 265,
+        "operational_end_minutes": 832
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 433.5,
+      "time_cost": 58.83,
+      "idle_cost": 40.0,
+      "total_cost": 15097.44
+    },
+    {
+      "block_id": 4,
+      "trips": [
+        5430,
+        5432,
+        5442,
+        5446,
+        5469,
+        5481,
+        5541,
+        5549,
+        5634,
+        5636,
+        5645,
+        5649,
+        5660,
+        5662,
+        5676,
+        5679,
+        5687,
+        5690,
+        5699,
+        5701
+      ],
+      "trip_ids": [
+        5430,
+        5432,
+        5442,
+        5446,
+        5469,
+        5481,
+        5541,
+        5549,
+        5634,
+        5636,
+        5645,
+        5649,
+        5660,
+        5662,
+        5676,
+        5679,
+        5687,
+        5690,
+        5699,
+        5701
+      ],
+      "num_trips": 20,
+      "start_time": 285,
+      "end_time": 1245,
+      "deadhead_minutes": 285,
+      "idle_minutes": 490,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 4,
+        "vehicle_first_trip_id": 5430,
+        "vehicle_last_trip_id": 5701,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 275,
+        "operational_end_minutes": 1255
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 510.0,
+      "time_cost": 55.83,
+      "idle_cost": 40.0,
+      "total_cost": 15170.94
+    },
+    {
+      "block_id": 5,
+      "trips": [
+        5438,
+        5445,
+        5458,
+        5461,
+        5476,
+        5480,
+        5492,
+        5496,
+        5526,
+        5530,
+        5538,
+        5540,
+        5550,
+        5552,
+        5563,
+        5564,
+        5578,
+        5581,
+        5589,
+        5593,
+        5601,
+        5605,
+        5622,
+        5630,
+        5661,
+        5671,
+        5681,
+        5686,
+        5704,
+        5706
+      ],
+      "trip_ids": [
+        5438,
+        5445,
+        5458,
+        5461,
+        5476,
+        5480,
+        5492,
+        5496,
+        5526,
+        5530,
+        5538,
+        5540,
+        5550,
+        5552,
+        5563,
+        5564,
+        5578,
+        5581,
+        5589,
+        5593,
+        5601,
+        5605,
+        5622,
+        5630,
+        5661,
+        5671,
+        5681,
+        5686,
+        5704,
+        5706
+      ],
+      "num_trips": 30,
+      "start_time": 295,
+      "end_time": 1279,
+      "deadhead_minutes": 435,
+      "idle_minutes": 212,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 5,
+        "vehicle_first_trip_id": 5438,
+        "vehicle_last_trip_id": 5706,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 285,
+        "operational_end_minutes": 1289
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 765.0,
+      "time_cost": 93.67,
+      "idle_cost": 40.0,
+      "total_cost": 15463.77
+    },
+    {
+      "block_id": 6,
+      "trips": [
+        5433,
+        5436,
+        5447,
+        5450,
+        5466,
+        5472,
+        5486,
+        5491,
+        5506,
+        5508,
+        5520,
+        5524,
+        5567,
+        5569,
+        5597
+      ],
+      "trip_ids": [
+        5433,
+        5436,
+        5447,
+        5450,
+        5466,
+        5472,
+        5486,
+        5491,
+        5506,
+        5508,
+        5520,
+        5524,
+        5567,
+        5569,
+        5597
+      ],
+      "num_trips": 15,
+      "start_time": 300,
+      "end_time": 874,
+      "deadhead_minutes": 165,
+      "idle_minutes": 51,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 6,
+        "vehicle_first_trip_id": 5433,
+        "vehicle_last_trip_id": 5597,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 290,
+        "operational_end_minutes": 884
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 382.5,
+      "time_cost": 36.33,
+      "idle_cost": 40.0,
+      "total_cost": 15023.94
+    },
+    {
+      "block_id": 7,
+      "trips": [
+        5444,
+        5454,
+        5484,
+        5494,
+        5515,
+        5523
+      ],
+      "trip_ids": [
+        5444,
+        5454,
+        5484,
+        5494,
+        5515,
+        5523
+      ],
+      "num_trips": 6,
+      "start_time": 320,
+      "end_time": 576,
+      "deadhead_minutes": 75,
+      "idle_minutes": 19,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 7,
+        "vehicle_first_trip_id": 5444,
+        "vehicle_last_trip_id": 5523,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 310,
+        "operational_end_minutes": 586
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 153.0,
+      "time_cost": 34.5,
+      "idle_cost": 40.0,
+      "total_cost": 14792.6
+    },
+    {
+      "block_id": 8,
+      "trips": [
+        5440,
+        5443,
+        5452,
+        5455,
+        5467,
+        5471,
+        5485,
+        5488,
+        5499,
+        5501,
+        5512,
+        5514
+      ],
+      "trip_ids": [
+        5440,
+        5443,
+        5452,
+        5455,
+        5467,
+        5471,
+        5485,
+        5488,
+        5499,
+        5501,
+        5512,
+        5514
+      ],
+      "num_trips": 12,
+      "start_time": 329,
+      "end_time": 548,
+      "deadhead_minutes": 210,
+      "idle_minutes": 263,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 8,
+        "vehicle_first_trip_id": 5440,
+        "vehicle_last_trip_id": 5514,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 319,
+        "operational_end_minutes": 558
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 306.0,
+      "time_cost": 19.33,
+      "idle_cost": 40.0,
+      "total_cost": 14930.44
+    },
+    {
+      "block_id": 9,
+      "trips": [
+        5462,
+        5474,
+        5503,
+        5511,
+        5528,
+        5536,
+        5548,
+        5551,
+        5560,
+        5562,
+        5573,
+        5575,
+        5583,
+        5587,
+        5595,
+        5599,
+        5609,
+        5612,
+        5620,
+        5624,
+        5633,
+        5637,
+        5654,
+        5657,
+        5670,
+        5673,
+        5682,
+        5685,
+        5715,
+        5717
+      ],
+      "trip_ids": [
+        5462,
+        5474,
+        5503,
+        5511,
+        5528,
+        5536,
+        5548,
+        5551,
+        5560,
+        5562,
+        5573,
+        5575,
+        5583,
+        5587,
+        5595,
+        5599,
+        5609,
+        5612,
+        5620,
+        5624,
+        5633,
+        5637,
+        5654,
+        5657,
+        5670,
+        5673,
+        5682,
+        5685,
+        5715,
+        5717
+      ],
+      "num_trips": 30,
+      "start_time": 360,
+      "end_time": 1395,
+      "deadhead_minutes": 435,
+      "idle_minutes": 259,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 9,
+        "vehicle_first_trip_id": 5462,
+        "vehicle_last_trip_id": 5717,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 350,
+        "operational_end_minutes": 1405
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 765.0,
+      "time_cost": 94.33,
+      "idle_cost": 40.0,
+      "total_cost": 15464.44
+    },
+    {
+      "block_id": 10,
+      "trips": [
+        5456,
+        5460,
+        5489,
+        5500,
+        5510,
+        5513,
+        5525,
+        5527,
+        5537,
+        5539,
+        5554,
+        5556,
+        5571,
+        5579,
+        5586,
+        5588,
+        5602,
+        5610,
+        5650,
+        5653,
+        5666,
+        5669,
+        5689,
+        5696,
+        5707,
+        5709
+      ],
+      "trip_ids": [
+        5456,
+        5460,
+        5489,
+        5500,
+        5510,
+        5513,
+        5525,
+        5527,
+        5537,
+        5539,
+        5554,
+        5556,
+        5571,
+        5579,
+        5586,
+        5588,
+        5602,
+        5610,
+        5650,
+        5653,
+        5666,
+        5669,
+        5689,
+        5696,
+        5707,
+        5709
+      ],
+      "num_trips": 26,
+      "start_time": 370,
+      "end_time": 1305,
+      "deadhead_minutes": 375,
+      "idle_minutes": 199,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 10,
+        "vehicle_first_trip_id": 5456,
+        "vehicle_last_trip_id": 5709,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 360,
+        "operational_end_minutes": 1315
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 663.0,
+      "time_cost": 92.67,
+      "idle_cost": 40.0,
+      "total_cost": 15360.77
+    },
+    {
+      "block_id": 11,
+      "trips": [
+        5459,
+        5465,
+        5478,
+        5483,
+        5532,
+        5533,
+        5628,
+        5635,
+        5648,
+        5651,
+        5665,
+        5668,
+        5710,
+        5712
+      ],
+      "trip_ids": [
+        5459,
+        5465,
+        5478,
+        5483,
+        5532,
+        5533,
+        5628,
+        5635,
+        5648,
+        5651,
+        5665,
+        5668,
+        5710,
+        5712
+      ],
+      "num_trips": 14,
+      "start_time": 378,
+      "end_time": 1333,
+      "deadhead_minutes": 195,
+      "idle_minutes": 625,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 11,
+        "vehicle_first_trip_id": 5459,
+        "vehicle_last_trip_id": 5712,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 368,
+        "operational_end_minutes": 1343
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 357.0,
+      "time_cost": 40.0,
+      "idle_cost": 40.0,
+      "total_cost": 15002.1
+    },
+    {
+      "block_id": 12,
+      "trips": [
+        5477,
+        5490,
+        5504,
+        5509,
+        5518,
+        5521,
+        5543,
+        5545,
+        5559,
+        5566,
+        5574,
+        5576,
+        5604,
+        5606,
+        5613,
+        5618,
+        5627,
+        5631,
+        5642,
+        5646,
+        5667,
+        5677,
+        5697,
+        5703,
+        5718,
+        5719,
+        5424,
+        5425
+      ],
+      "trip_ids": [
+        5477,
+        5490,
+        5504,
+        5509,
+        5518,
+        5521,
+        5543,
+        5545,
+        5559,
+        5566,
+        5574,
+        5576,
+        5604,
+        5606,
+        5613,
+        5618,
+        5627,
+        5631,
+        5642,
+        5646,
+        5667,
+        5677,
+        5697,
+        5703,
+        5718,
+        5719,
+        5424,
+        5425
+      ],
+      "num_trips": 28,
+      "start_time": 390,
+      "end_time": 1483,
+      "deadhead_minutes": 405,
+      "idle_minutes": 328,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 12,
+        "vehicle_first_trip_id": 5477,
+        "vehicle_last_trip_id": 5425,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 380,
+        "operational_end_minutes": 1493
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 714.0,
+      "time_cost": 95.0,
+      "idle_cost": 40.0,
+      "total_cost": 15414.1
+    },
+    {
+      "block_id": 13,
+      "trips": [
+        5473,
+        5479,
+        5493,
+        5495,
+        5546,
+        5555,
+        5655,
+        5664,
+        5678,
+        5680,
+        5693,
+        5695
+      ],
+      "trip_ids": [
+        5473,
+        5479,
+        5493,
+        5495,
+        5546,
+        5555,
+        5655,
+        5664,
+        5678,
+        5680,
+        5693,
+        5695
+      ],
+      "num_trips": 12,
+      "start_time": 410,
+      "end_time": 1220,
+      "deadhead_minutes": 165,
+      "idle_minutes": 488,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 13,
+        "vehicle_first_trip_id": 5473,
+        "vehicle_last_trip_id": 5695,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 400,
+        "operational_end_minutes": 1230
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 306.0,
+      "time_cost": 41.17,
+      "idle_cost": 40.0,
+      "total_cost": 14952.27
+    },
+    {
+      "block_id": 14,
+      "trips": [
+        5590,
+        5598,
+        5600,
+        5607,
+        5611,
+        5619,
+        5621,
+        5629,
+        5632,
+        5640,
+        5643,
+        5672,
+        5674,
+        5688,
+        5692
+      ],
+      "trip_ids": [
+        5590,
+        5598,
+        5600,
+        5607,
+        5611,
+        5619,
+        5621,
+        5629,
+        5632,
+        5640,
+        5643,
+        5672,
+        5674,
+        5688,
+        5692
+      ],
+      "num_trips": 15,
+      "start_time": 805,
+      "end_time": 1208,
+      "deadhead_minutes": 210,
+      "idle_minutes": 84,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 14,
+        "vehicle_first_trip_id": 5590,
+        "vehicle_last_trip_id": 5692,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 795,
+        "operational_end_minutes": 1218
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 382.5,
+      "time_cost": 35.67,
+      "idle_cost": 40.0,
+      "total_cost": 15023.27
+    },
+    {
+      "block_id": 15,
+      "trips": [
+        5591,
+        5615,
+        5623,
+        5644,
+        5652,
+        5675,
+        5684,
+        5711,
+        5713
+      ],
+      "trip_ids": [
+        5591,
+        5615,
+        5623,
+        5644,
+        5652,
+        5675,
+        5684,
+        5711,
+        5713
+      ],
+      "num_trips": 9,
+      "start_time": 822,
+      "end_time": 1345,
+      "deadhead_minutes": 120,
+      "idle_minutes": 145,
+      "start_depot_id": -1,
+      "end_depot_id": -1,
+      "meta": {
+        "source_block_id": 15,
+        "vehicle_first_trip_id": 5591,
+        "vehicle_last_trip_id": 5713,
+        "start_buffer_minutes": 10,
+        "end_buffer_minutes": 10,
+        "operational_start_minutes": 812,
+        "operational_end_minutes": 1355
+      },
+      "activation_cost": 14565.1,
+      "connection_cost": 0.0,
+      "distance_cost": 229.5,
+      "time_cost": 53.0,
+      "idle_cost": 40.0,
+      "total_cost": 14887.6
+    }
+  ],
+  "duties": [
+    {
+      "duty_id": 192,
+      "blocks": [
+        2,
+        8,
+        9,
+        11
+      ],
+      "trip_ids": [
+        5431,
+        5439,
+        5448,
+        5449,
+        5463,
+        5468,
+        5482,
+        5487,
+        5498,
+        5502,
+        5512,
+        5514,
+        5548,
+        5551,
+        5560,
+        5562,
+        5609,
+        5612,
+        5628,
+        5635,
+        5648,
+        5651
+      ],
+      "trips": [
+        5431,
+        5439,
+        5448,
+        5449,
+        5463,
+        5468,
+        5482,
+        5487,
+        5498,
+        5502,
+        5512,
+        5514,
+        5548,
+        5551,
+        5560,
+        5562,
+        5609,
+        5612,
+        5628,
+        5635,
+        5648,
+        5651
+      ],
+      "start_time": 270,
+      "end_time": 1083,
+      "work_time": 362,
+      "spread_time": 823,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 721,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 150.83,
+      "guaranteed_cost": 24.17,
+      "waiting_cost": 125.42,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 680.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 1420.12,
+      "quality_metrics": {
+        "utilization": 0.4399,
+        "max_idle_time": 180,
+        "total_idle_time": 461,
+        "break_count": 10,
+        "fragment_count": 10,
+        "short_connection_count": 0,
+        "soft_penalty": 412.69,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 197,
+      "blocks": [
+        1,
+        7,
+        8
+      ],
+      "trip_ids": [
+        5426,
+        5429,
+        5444,
+        5454,
+        5467,
+        5471,
+        5485,
+        5488,
+        5499,
+        5501
+      ],
+      "trips": [
+        5426,
+        5429,
+        5444,
+        5454,
+        5467,
+        5471,
+        5485,
+        5488,
+        5499,
+        5501
+      ],
+      "start_time": 270,
+      "end_time": 499,
+      "work_time": 142,
+      "spread_time": 239,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 447,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 59.17,
+      "guaranteed_cost": 115.83,
+      "waiting_cost": 11.25,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 0.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 625.95,
+      "quality_metrics": {
+        "utilization": 0.5941,
+        "max_idle_time": 28,
+        "total_idle_time": 97,
+        "break_count": 4,
+        "fragment_count": 4,
+        "short_connection_count": 0,
+        "soft_penalty": 237.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 193,
+      "blocks": [
+        3,
+        5,
+        9,
+        6,
+        4,
+        1,
+        15,
+        10
+      ],
+      "trip_ids": [
+        5427,
+        5428,
+        5434,
+        5435,
+        5453,
+        5464,
+        5476,
+        5480,
+        5503,
+        5511,
+        5520,
+        5524,
+        5541,
+        5549,
+        5565,
+        5572,
+        5580,
+        5582,
+        5595,
+        5599,
+        5615,
+        5623,
+        5634,
+        5636,
+        5650,
+        5653
+      ],
+      "trips": [
+        5427,
+        5428,
+        5434,
+        5435,
+        5453,
+        5464,
+        5476,
+        5480,
+        5503,
+        5511,
+        5520,
+        5524,
+        5541,
+        5549,
+        5565,
+        5572,
+        5580,
+        5582,
+        5595,
+        5599,
+        5615,
+        5623,
+        5634,
+        5636,
+        5650,
+        5653
+      ],
+      "start_time": 275,
+      "end_time": 1091,
+      "work_time": 527,
+      "spread_time": 826,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 636,
+      "overtime_minutes": 47,
+      "nocturnal_minutes": 0,
+      "work_cost": 219.58,
+      "guaranteed_cost": 0.0,
+      "waiting_cost": 45.42,
+      "overtime_cost": 9.79,
+      "long_unpaid_break_penalty": 275.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 989.49,
+      "quality_metrics": {
+        "utilization": 0.638,
+        "max_idle_time": 38,
+        "total_idle_time": 299,
+        "break_count": 12,
+        "fragment_count": 12,
+        "short_connection_count": 0,
+        "soft_penalty": 472.31,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 194,
+      "blocks": [
+        4,
+        8,
+        7,
+        2,
+        10,
+        1,
+        5,
+        12
+      ],
+      "trip_ids": [
+        5430,
+        5432,
+        5440,
+        5443,
+        5452,
+        5455,
+        5484,
+        5494,
+        5522,
+        5529,
+        5537,
+        5539,
+        5554,
+        5556,
+        5571,
+        5579,
+        5596,
+        5603,
+        5622,
+        5630,
+        5642,
+        5646
+      ],
+      "trips": [
+        5430,
+        5432,
+        5440,
+        5443,
+        5452,
+        5455,
+        5484,
+        5494,
+        5522,
+        5529,
+        5537,
+        5539,
+        5554,
+        5556,
+        5571,
+        5579,
+        5596,
+        5603,
+        5622,
+        5630,
+        5642,
+        5646
+      ],
+      "start_time": 285,
+      "end_time": 1065,
+      "work_time": 494,
+      "spread_time": 790,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 630,
+      "overtime_minutes": 14,
+      "nocturnal_minutes": 0,
+      "work_cost": 205.83,
+      "guaranteed_cost": 0.0,
+      "waiting_cost": 56.67,
+      "overtime_cost": 2.92,
+      "long_unpaid_break_penalty": 267.5,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 972.62,
+      "quality_metrics": {
+        "utilization": 0.6253,
+        "max_idle_time": 50,
+        "total_idle_time": 296,
+        "break_count": 10,
+        "fragment_count": 10,
+        "short_connection_count": 0,
+        "soft_penalty": 381.75,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 195,
+      "blocks": [
+        5,
+        4,
+        13,
+        12,
+        11
+      ],
+      "trip_ids": [
+        5438,
+        5445,
+        5469,
+        5481,
+        5493,
+        5495,
+        5504,
+        5509,
+        5518,
+        5521,
+        5532,
+        5533,
+        5543,
+        5545
+      ],
+      "trips": [
+        5438,
+        5445,
+        5469,
+        5481,
+        5493,
+        5495,
+        5504,
+        5509,
+        5518,
+        5521,
+        5532,
+        5533,
+        5543,
+        5545
+      ],
+      "start_time": 295,
+      "end_time": 664,
+      "work_time": 250,
+      "spread_time": 379,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 449,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 104.17,
+      "guaranteed_cost": 70.83,
+      "waiting_cost": 12.08,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 2.25,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 629.03,
+      "quality_metrics": {
+        "utilization": 0.6596,
+        "max_idle_time": 28,
+        "total_idle_time": 129,
+        "break_count": 6,
+        "fragment_count": 6,
+        "short_connection_count": 0,
+        "soft_penalty": 180.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 196,
+      "blocks": [
+        6,
+        12,
+        7,
+        1,
+        3,
+        9
+      ],
+      "trip_ids": [
+        5433,
+        5436,
+        5447,
+        5450,
+        5477,
+        5490,
+        5515,
+        5523,
+        5531,
+        5535,
+        5544,
+        5547,
+        5557,
+        5558,
+        5573,
+        5575,
+        5583,
+        5587,
+        5597
+      ],
+      "trips": [
+        5433,
+        5436,
+        5447,
+        5450,
+        5477,
+        5490,
+        5515,
+        5523,
+        5531,
+        5535,
+        5544,
+        5547,
+        5557,
+        5558,
+        5573,
+        5575,
+        5583,
+        5587,
+        5597
+      ],
+      "start_time": 300,
+      "end_time": 874,
+      "work_time": 365,
+      "spread_time": 594,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 494,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 152.08,
+      "guaranteed_cost": 22.92,
+      "waiting_cost": 30.83,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 100.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 745.53,
+      "quality_metrics": {
+        "utilization": 0.6145,
+        "max_idle_time": 36,
+        "total_idle_time": 229,
+        "break_count": 9,
+        "fragment_count": 9,
+        "short_connection_count": 0,
+        "soft_penalty": 324.19,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 191,
+      "blocks": [
+        1
+      ],
+      "trip_ids": [
+        5437,
+        5441,
+        5451,
+        5457,
+        5470,
+        5475
+      ],
+      "trips": [
+        5437,
+        5441,
+        5451,
+        5457,
+        5470,
+        5475
+      ],
+      "start_time": 315,
+      "end_time": 429,
+      "work_time": 80,
+      "spread_time": 114,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 424,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 33.33,
+      "guaranteed_cost": 141.67,
+      "waiting_cost": 1.67,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 0.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 616.37,
+      "quality_metrics": {
+        "utilization": 0.7018,
+        "max_idle_time": 19,
+        "total_idle_time": 34,
+        "break_count": 2,
+        "fragment_count": 2,
+        "short_connection_count": 0,
+        "soft_penalty": 240.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 198,
+      "blocks": [
+        4,
+        11,
+        10,
+        13,
+        6,
+        5,
+        12,
+        1,
+        2
+      ],
+      "trip_ids": [
+        5442,
+        5446,
+        5459,
+        5465,
+        5489,
+        5500,
+        5510,
+        5513,
+        5525,
+        5527,
+        5546,
+        5555,
+        5567,
+        5569,
+        5578,
+        5581,
+        5589,
+        5593,
+        5604,
+        5606,
+        5614,
+        5617,
+        5638,
+        5647,
+        5659,
+        5663
+      ],
+      "trips": [
+        5442,
+        5446,
+        5459,
+        5465,
+        5489,
+        5500,
+        5510,
+        5513,
+        5525,
+        5527,
+        5546,
+        5555,
+        5567,
+        5569,
+        5578,
+        5581,
+        5589,
+        5593,
+        5604,
+        5606,
+        5614,
+        5617,
+        5638,
+        5647,
+        5659,
+        5663
+      ],
+      "start_time": 330,
+      "end_time": 1120,
+      "work_time": 497,
+      "spread_time": 790,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 610,
+      "overtime_minutes": 17,
+      "nocturnal_minutes": 0,
+      "work_cost": 207.08,
+      "guaranteed_cost": 0.0,
+      "waiting_cost": 47.08,
+      "overtime_cost": 3.54,
+      "long_unpaid_break_penalty": 260.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 957.41,
+      "quality_metrics": {
+        "utilization": 0.6291,
+        "max_idle_time": 35,
+        "total_idle_time": 293,
+        "break_count": 12,
+        "fragment_count": 12,
+        "short_connection_count": 0,
+        "soft_penalty": 471.19,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 199,
+      "blocks": [
+        9,
+        5,
+        6,
+        2,
+        3
+      ],
+      "trip_ids": [
+        5462,
+        5474,
+        5492,
+        5496,
+        5506,
+        5508,
+        5528,
+        5536,
+        5553,
+        5561,
+        5568,
+        5570,
+        5584
+      ],
+      "trips": [
+        5462,
+        5474,
+        5492,
+        5496,
+        5506,
+        5508,
+        5528,
+        5536,
+        5553,
+        5561,
+        5568,
+        5570,
+        5584
+      ],
+      "start_time": 360,
+      "end_time": 822,
+      "work_time": 317,
+      "spread_time": 482,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 475,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 132.08,
+      "guaranteed_cost": 42.92,
+      "waiting_cost": 22.92,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 18.75,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 656.37,
+      "quality_metrics": {
+        "utilization": 0.6577,
+        "max_idle_time": 31,
+        "total_idle_time": 165,
+        "break_count": 6,
+        "fragment_count": 6,
+        "short_connection_count": 0,
+        "soft_penalty": 180.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 200,
+      "blocks": [
+        10,
+        11,
+        1,
+        5,
+        12,
+        14,
+        13
+      ],
+      "trip_ids": [
+        5456,
+        5460,
+        5478,
+        5483,
+        5507,
+        5516,
+        5526,
+        5530,
+        5538,
+        5540,
+        5559,
+        5566,
+        5574,
+        5576,
+        5586,
+        5588,
+        5602,
+        5610,
+        5619,
+        5621,
+        5629,
+        5632,
+        5655,
+        5664,
+        5678,
+        5680
+      ],
+      "trips": [
+        5456,
+        5460,
+        5478,
+        5483,
+        5507,
+        5516,
+        5526,
+        5530,
+        5538,
+        5540,
+        5559,
+        5566,
+        5574,
+        5576,
+        5586,
+        5588,
+        5602,
+        5610,
+        5619,
+        5621,
+        5629,
+        5632,
+        5655,
+        5664,
+        5678,
+        5680
+      ],
+      "start_time": 370,
+      "end_time": 1169,
+      "work_time": 509,
+      "spread_time": 809,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 619,
+      "overtime_minutes": 29,
+      "nocturnal_minutes": 0,
+      "work_cost": 212.08,
+      "guaranteed_cost": 0.0,
+      "waiting_cost": 45.83,
+      "overtime_cost": 6.04,
+      "long_unpaid_break_penalty": 277.5,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 981.16,
+      "quality_metrics": {
+        "utilization": 0.6292,
+        "max_idle_time": 35,
+        "total_idle_time": 300,
+        "break_count": 12,
+        "fragment_count": 12,
+        "short_connection_count": 0,
+        "soft_penalty": 472.5,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 201,
+      "blocks": [
+        5,
+        6,
+        12,
+        14
+      ],
+      "trip_ids": [
+        5458,
+        5461,
+        5486,
+        5491,
+        5667,
+        5677,
+        5688,
+        5692
+      ],
+      "trips": [
+        5458,
+        5461,
+        5486,
+        5491,
+        5667,
+        5677,
+        5688,
+        5692
+      ],
+      "start_time": 379,
+      "end_time": 1208,
+      "work_time": 155,
+      "spread_time": 839,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 1049,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 64.58,
+      "guaranteed_cost": 110.42,
+      "waiting_cost": 262.08,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 1237.5,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 2114.28,
+      "quality_metrics": {
+        "utilization": 0.1847,
+        "max_idle_time": 611,
+        "total_idle_time": 684,
+        "break_count": 3,
+        "fragment_count": 3,
+        "short_connection_count": 0,
+        "soft_penalty": 1579.35,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 202,
+      "blocks": [
+        6,
+        3,
+        5,
+        2,
+        12,
+        14,
+        9,
+        13
+      ],
+      "trip_ids": [
+        5466,
+        5472,
+        5497,
+        5505,
+        5517,
+        5519,
+        5534,
+        5542,
+        5550,
+        5552,
+        5563,
+        5564,
+        5577,
+        5585,
+        5592,
+        5594,
+        5608,
+        5616,
+        5627,
+        5631,
+        5640,
+        5643,
+        5654,
+        5657,
+        5670,
+        5673,
+        5682,
+        5685,
+        5693,
+        5695
+      ],
+      "trips": [
+        5466,
+        5472,
+        5497,
+        5505,
+        5517,
+        5519,
+        5534,
+        5542,
+        5550,
+        5552,
+        5563,
+        5564,
+        5577,
+        5585,
+        5592,
+        5594,
+        5608,
+        5616,
+        5627,
+        5631,
+        5640,
+        5643,
+        5654,
+        5657,
+        5670,
+        5673,
+        5682,
+        5685,
+        5693,
+        5695
+      ],
+      "start_time": 394,
+      "end_time": 1220,
+      "work_time": 552,
+      "spread_time": 836,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 616,
+      "overtime_minutes": 72,
+      "nocturnal_minutes": 0,
+      "work_cost": 230.0,
+      "guaranteed_cost": 0.0,
+      "waiting_cost": 26.67,
+      "overtime_cost": 15.0,
+      "long_unpaid_break_penalty": 237.5,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 948.87,
+      "quality_metrics": {
+        "utilization": 0.6603,
+        "max_idle_time": 26,
+        "total_idle_time": 284,
+        "break_count": 14,
+        "fragment_count": 14,
+        "short_connection_count": 0,
+        "soft_penalty": 559.5,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 203,
+      "blocks": [
+        13,
+        11,
+        5
+      ],
+      "trip_ids": [
+        5473,
+        5479,
+        5665,
+        5668,
+        5681,
+        5686
+      ],
+      "trips": [
+        5473,
+        5479,
+        5665,
+        5668,
+        5681,
+        5686
+      ],
+      "start_time": 410,
+      "end_time": 1188,
+      "work_time": 86,
+      "spread_time": 788,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 1082,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 35.83,
+      "guaranteed_cost": 139.17,
+      "waiting_cost": 275.83,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 1282.5,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 2173.03,
+      "quality_metrics": {
+        "utilization": 0.1091,
+        "max_idle_time": 667,
+        "total_idle_time": 702,
+        "break_count": 2,
+        "fragment_count": 2,
+        "short_connection_count": 0,
+        "soft_penalty": 2140.82,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 204,
+      "blocks": [
+        14,
+        9,
+        4
+      ],
+      "trip_ids": [
+        5590,
+        5598,
+        5600,
+        5607,
+        5611,
+        5620,
+        5624,
+        5633,
+        5637,
+        5645,
+        5649,
+        5660,
+        5662,
+        5676,
+        5679,
+        5687,
+        5690,
+        5699,
+        5701,
+        5715,
+        5717
+      ],
+      "trips": [
+        5590,
+        5598,
+        5600,
+        5607,
+        5611,
+        5620,
+        5624,
+        5633,
+        5637,
+        5645,
+        5649,
+        5660,
+        5662,
+        5676,
+        5679,
+        5687,
+        5690,
+        5699,
+        5701,
+        5715,
+        5717
+      ],
+      "start_time": 805,
+      "end_time": 1395,
+      "work_time": 331,
+      "spread_time": 610,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 536,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 50,
+      "work_cost": 140.83,
+      "guaranteed_cost": 34.17,
+      "waiting_cost": 48.33,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 225.0,
+      "nocturnal_extra_cost": 416.67,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 1304.7,
+      "quality_metrics": {
+        "utilization": 0.5426,
+        "max_idle_time": 100,
+        "total_idle_time": 279,
+        "break_count": 10,
+        "fragment_count": 10,
+        "short_connection_count": 0,
+        "soft_penalty": 378.56,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 205,
+      "blocks": [
+        15,
+        5,
+        12,
+        1
+      ],
+      "trip_ids": [
+        5591,
+        5601,
+        5605,
+        5613,
+        5618,
+        5625,
+        5626,
+        5639,
+        5641,
+        5656,
+        5658,
+        5683,
+        5691,
+        5700,
+        5702
+      ],
+      "trips": [
+        5591,
+        5601,
+        5605,
+        5613,
+        5618,
+        5625,
+        5626,
+        5639,
+        5641,
+        5656,
+        5658,
+        5683,
+        5691,
+        5700,
+        5702
+      ],
+      "start_time": 822,
+      "end_time": 1247,
+      "work_time": 252,
+      "spread_time": 445,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 488,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 105.0,
+      "guaranteed_cost": 70.0,
+      "waiting_cost": 28.33,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 39.75,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 682.78,
+      "quality_metrics": {
+        "utilization": 0.5663,
+        "max_idle_time": 32,
+        "total_idle_time": 193,
+        "break_count": 7,
+        "fragment_count": 7,
+        "short_connection_count": 0,
+        "soft_penalty": 227.44,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 208,
+      "blocks": [
+        15,
+        14,
+        12
+      ],
+      "trip_ids": [
+        5644,
+        5652,
+        5672,
+        5674,
+        5697,
+        5703,
+        5711,
+        5713,
+        5718,
+        5719,
+        5424,
+        5425
+      ],
+      "trips": [
+        5644,
+        5652,
+        5672,
+        5674,
+        5697,
+        5703,
+        5711,
+        5713,
+        5718,
+        5719,
+        5424,
+        5425
+      ],
+      "start_time": 1005,
+      "end_time": 1483,
+      "work_time": 314,
+      "spread_time": 488,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 517,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 63,
+      "work_cost": 134.51,
+      "guaranteed_cost": 40.49,
+      "waiting_cost": 40.42,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 25.5,
+      "nocturnal_extra_cost": 525.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 1205.62,
+      "quality_metrics": {
+        "utilization": 0.6434,
+        "max_idle_time": 42,
+        "total_idle_time": 174,
+        "break_count": 5,
+        "fragment_count": 5,
+        "short_connection_count": 0,
+        "soft_penalty": 135.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 209,
+      "blocks": [
+        5,
+        11
+      ],
+      "trip_ids": [
+        5661,
+        5671,
+        5704,
+        5706,
+        5710,
+        5712
+      ],
+      "trips": [
+        5661,
+        5671,
+        5704,
+        5706,
+        5710,
+        5712
+      ],
+      "start_time": 1055,
+      "end_time": 1333,
+      "work_time": 194,
+      "spread_time": 288,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 476,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 13,
+      "work_cost": 81.59,
+      "guaranteed_cost": 93.41,
+      "waiting_cost": 23.33,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 0.0,
+      "nocturnal_extra_cost": 108.33,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 746.37,
+      "quality_metrics": {
+        "utilization": 0.6736,
+        "max_idle_time": 70,
+        "total_idle_time": 94,
+        "break_count": 2,
+        "fragment_count": 2,
+        "short_connection_count": 0,
+        "soft_penalty": 69.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 206,
+      "blocks": [
+        15,
+        2,
+        10
+      ],
+      "trip_ids": [
+        5675,
+        5684,
+        5694,
+        5698,
+        5707,
+        5709,
+        5714,
+        5716,
+        5720,
+        5423
+      ],
+      "trips": [
+        5675,
+        5684,
+        5694,
+        5698,
+        5707,
+        5709,
+        5714,
+        5716,
+        5720,
+        5423
+      ],
+      "start_time": 1105,
+      "end_time": 1449,
+      "work_time": 263,
+      "spread_time": 354,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 452,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 82,
+      "work_cost": 114.37,
+      "guaranteed_cost": 60.63,
+      "waiting_cost": 13.33,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 0.0,
+      "nocturnal_extra_cost": 683.33,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 1311.37,
+      "quality_metrics": {
+        "utilization": 0.7429,
+        "max_idle_time": 35,
+        "total_idle_time": 91,
+        "break_count": 4,
+        "fragment_count": 4,
+        "short_connection_count": 0,
+        "soft_penalty": 90.0,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    },
+    {
+      "duty_id": 207,
+      "blocks": [
+        10,
+        2
+      ],
+      "trip_ids": [
+        5666,
+        5669,
+        5689,
+        5696,
+        5705,
+        5708
+      ],
+      "trips": [
+        5666,
+        5669,
+        5689,
+        5696,
+        5705,
+        5708
+      ],
+      "start_time": 1113,
+      "end_time": 1288,
+      "work_time": 129,
+      "spread_time": 175,
+      "rest_violations": 0,
+      "shift_violations": 0,
+      "paid_minutes": 436,
+      "overtime_minutes": 0,
+      "nocturnal_minutes": 0,
+      "work_cost": 53.75,
+      "guaranteed_cost": 121.25,
+      "waiting_cost": 6.67,
+      "overtime_cost": 0.0,
+      "long_unpaid_break_penalty": 0.0,
+      "nocturnal_extra_cost": 0.0,
+      "holiday_extra_cost": 0.0,
+      "cct_penalties_cost": 0.0,
+      "total_cost": 621.37,
+      "quality_metrics": {
+        "utilization": 0.7371,
+        "max_idle_time": 26,
+        "total_idle_time": 46,
+        "break_count": 2,
+        "fragment_count": 2,
+        "short_connection_count": 0,
+        "soft_penalty": 166.5,
+        "thresholds": {
+          "utilization_target": 0.3,
+          "max_spread_soft_minutes": 720,
+          "max_idle_soft_minutes": 180,
+          "min_work_soft_minutes": 240,
+          "short_connection_threshold_minutes": 15
+        }
+      }
+    }
+  ],
+  "status": "completed",
+  "elapsed_ms_wall": 49080.7
+}

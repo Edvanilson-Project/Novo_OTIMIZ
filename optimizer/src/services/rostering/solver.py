@@ -11,8 +11,12 @@ from ...domain.models import (
     NominalRosteringSolution
 )
 from .evaluator import RosteringEvaluator
+from ...core.config import get_settings
+
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
 
 class NominalRosteringSolver:
     """
@@ -119,10 +123,17 @@ class NominalRosteringSolver:
                 if vehicles:
                     prob += pulp.lpSum(y_vars[(i, vid)] for vid in vehicles) <= 1, f"op_single_vehicle_{i}"
 
-        # ── 3. Resolução ────────────────────────────────────────────────────
+        # ── 3. Resolução do Modelo ──────────────────────────────────────────
+        timeout_s = int((cct_params or {}).get("rostering_timeout_seconds", 120))
+        logger.info(f"Resolvendo Rostering com {len(operators)} ops e {len(duties)} duties (timeout={timeout_s}s)")
+        
         try:
             # CBC Solver (Quiet mode)
-            solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=20)
+            solver = pulp.PULP_CBC_CMD(
+                msg=0, 
+                timeLimit=timeout_s, 
+                threads=settings.ilp_threads
+            )
             prob.solve(solver)
         except Exception as e:
             logger.exception("Falha no solver de Rostering: %s", e)
@@ -156,7 +167,42 @@ class NominalRosteringSolver:
                         f"Score={score} | Motivo: {'; '.join(expl) if expl else 'Base'}"
                     )
         else:
-            logs.append(f"Solver Status Inesperado: {pulp.LpStatus[prob.status]}")
+            status_str = pulp.LpStatus[prob.status]
+            logs.append(f"Solver Status Inesperado: {status_str} - Iniciando Fallback Greedy")
+            
+            # --- FALLBACK GREEDY ---
+            # Ordenar valid_pairs por score descendente
+            sorted_pairs = sorted(valid_pairs, key=lambda p: affinity_matrix[p], reverse=True)
+            used_ops = set()
+            used_duties = set()
+            
+            for (i, j) in sorted_pairs:
+                if i not in used_ops and j not in used_duties:
+                    op = operators[i]
+                    duty = duties[j]
+                    score = affinity_matrix[(i, j)]
+                    expl = explanation_matrix[(i, j)]
+                    
+                    assignments.append(NominalAssignment(
+                        operator_id=op.id,
+                        duty_id=duty.id,
+                        score=score,
+                        explanations=expl
+                    ))
+                    assigned_duties.add(j)
+                    used_ops.add(i)
+                    used_duties.add(j)
+                    logs.append(
+                        f"FALLBACK MATCH: {op.name} -> Jornada #{duty.id} | Score={score}"
+                    )
+            
+            fallback_meta = {
+                "fallback_used": True,
+                "fallback_reason": status_str,
+                "original_solver": "nominal_assignment_pulp",
+                "fallback_solver": "greedy_priority_assignment",
+                "assigned_count": len(assignments)
+            }
 
         unassigned_duties = [d.id for j, d in enumerate(duties) if j not in assigned_duties]
         
@@ -167,5 +213,6 @@ class NominalRosteringSolver:
             unassigned_duties=unassigned_duties,
             total_utility=float(pulp.value(prob.objective) or 0.0) if prob.status == pulp.constants.LpStatusOptimal else 0.0,
             elapsed_ms=(end_time - start_time) * 1000,
-            logs=logs
+            logs=logs,
+            meta=locals().get("fallback_meta", {})
         )

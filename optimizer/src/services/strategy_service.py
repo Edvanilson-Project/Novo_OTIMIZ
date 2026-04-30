@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Sequence
 
 from ..algorithms.evaluator import CostEvaluator
 from ..domain.models import Trip, VehicleType
+from ..core.config import get_settings
+
+settings = get_settings()
+
 
 try:
     import pulp  # type: ignore
@@ -215,7 +219,7 @@ class StrategyService:
         if max_vehicles > 0:
             problem += vehicles <= max_vehicles
 
-        problem.solve(pulp.PULP_CBC_CMD(timeLimit=2, msg=False))
+        problem.solve(pulp.PULP_CBC_CMD(timeLimit=2, msg=False, threads=settings.ilp_threads))
 
         est_vehicles = int(round(float(pulp.value(vehicles) or 1)))
         est_crew = int(round(float(pulp.value(crew) or 1)))

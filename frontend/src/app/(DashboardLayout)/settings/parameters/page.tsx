@@ -32,6 +32,7 @@ import {
   IconSettings,
   IconRoute,
   IconBolt,
+  IconHelp,
 } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { parametersApi } from "@/lib/api";
@@ -93,6 +94,7 @@ interface CompanyParameters {
   overtime_limit_minutes: number | null;
   max_driving_minutes: number | null;
   min_break_minutes: number | null;
+  enforce_min_interval: boolean | null;
   connection_tolerance_minutes: number | null;
   mandatory_break_after_minutes: number | null;
   split_break_first_minutes: number | null;
@@ -135,7 +137,13 @@ interface CompanyParameters {
   nocturnal_extra_pct: number | null;
   apply_cct: boolean | null;
   strict_hard_validation: boolean | null;
+  strict_zero_gap_validation: boolean | null;
+  strict_operational_mode: boolean | null;
+  strict_hard_constraints: boolean | null;
+  strict_gps_validation: boolean | null;
+  strict_terminal_sync_validation: boolean | null;
   strict_union_rules: boolean | null;
+  operational_quality_mode: string | null;
   terminal_location_ids: number[];
   goal_weights: Record<string, number> | null;
   dynamic_rules: any[] | null;
@@ -193,6 +201,7 @@ const DEFAULTS: CompanyParameters = {
   overtime_limit_minutes: null,
   max_driving_minutes: null,
   min_break_minutes: null,
+  enforce_min_interval: true,
   connection_tolerance_minutes: null,
   mandatory_break_after_minutes: null,
   split_break_first_minutes: null,
@@ -235,7 +244,13 @@ const DEFAULTS: CompanyParameters = {
   nocturnal_extra_pct: null,
   apply_cct: true,
   strict_hard_validation: true,
+  strict_zero_gap_validation: false,
+  strict_operational_mode: false,
+  strict_hard_constraints: false,
+  strict_gps_validation: true,
+  strict_terminal_sync_validation: true,
   strict_union_rules: true,
+  operational_quality_mode: 'balanced',
   terminal_location_ids: [],
   goal_weights: null,
   dynamic_rules: null,
@@ -253,7 +268,13 @@ const BOOLEAN_DEFAULTS: Partial<Record<keyof CompanyParameters, boolean>> = {
   enforce_single_line_duty: false,
   operator_single_vehicle_only: true,
   apply_cct: true,
+  enforce_min_interval: true,
   strict_hard_validation: true,
+  strict_zero_gap_validation: false,
+  strict_operational_mode: false,
+  strict_hard_constraints: false,
+  strict_gps_validation: true,
+  strict_terminal_sync_validation: true,
   strict_union_rules: true,
 };
 const EMPTY_GOAL_WEIGHTS: Record<string, number> = {};
@@ -261,6 +282,18 @@ const EMPTY_DYNAMIC_RULES: any[] = [];
 
 function normalizeParameters(data: Partial<CompanyParameters>): CompanyParameters {
   const merged = { ...DEFAULTS, ...data } as CompanyParameters;
+
+  // Converter de decimal (0.5) para percentual (50) para exibição na tela com arredondamento para evitar erros de precisão
+  if (merged.waiting_time_pay_pct !== null) {
+    merged.waiting_time_pay_pct = Math.round(merged.waiting_time_pay_pct * 100);
+  }
+  if (merged.holiday_extra_pct !== null) {
+    merged.holiday_extra_pct = Math.round(merged.holiday_extra_pct * 100);
+  }
+  if (merged.nocturnal_extra_pct !== null) {
+    merged.nocturnal_extra_pct = Math.round(merged.nocturnal_extra_pct * 100);
+  }
+
   for (const [key, fallback] of Object.entries(BOOLEAN_DEFAULTS) as [keyof CompanyParameters, boolean][]) {
     if (merged[key] === null || merged[key] === undefined) {
       (merged as any)[key] = fallback;
@@ -326,9 +359,15 @@ function intArrayField(
         value={value}
         onChange={(e) => {
           const raw = e.target.value.trim();
-          const parsed = raw
-            ? raw.split(/[,\s]+/).map((item) => Number.parseInt(item, 10)).filter((item) => Number.isFinite(item))
-            : [];
+          const parts = raw ? raw.split(/[,\s]+/).filter(Boolean) : [];
+          const invalidItems = parts.filter((item) => !/^\d+$/.test(item));
+
+          if (invalidItems.length > 0) {
+            // Evita salvar se houver itens invalidos (nao numericos)
+            return;
+          }
+
+          const parsed = parts.map((item) => Number.parseInt(item, 10));
           setParams((prev) => ({ ...prev, [key]: parsed }));
         }}
         helperText="IDs separados por virgula"
@@ -343,12 +382,16 @@ function JsonField({
   value,
   onChange,
   fallback,
+  fieldName,
+  onErrorChange,
 }: {
   label: string;
   tooltip: string;
   value: unknown;
   onChange: (value: any) => void;
   fallback: unknown;
+  fieldName: string;
+  onErrorChange: (field: string, error: string) => void;
 }) {
   const [text, setText] = useState(() => JSON.stringify(value ?? fallback, null, 2));
   const [error, setError] = useState("");
@@ -370,8 +413,11 @@ function JsonField({
           try {
             onChange(nextText.trim() ? JSON.parse(nextText) : fallback);
             setError("");
+            onErrorChange(fieldName, "");
           } catch {
-            setError("JSON invalido, corrija antes de salvar");
+            const message = "JSON invalido, corrija antes de salvar";
+            setError(message);
+            onErrorChange(fieldName, message);
           }
         }}
       />
@@ -406,7 +452,24 @@ function boolField(
 export default function ParametersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [params, setParams] = useState<CompanyParameters>({ ...DEFAULTS });
+  const [initialParams, setInitialParams] = useState<CompanyParameters | null>(null);
+
+  const setJsonFieldError = (field: string, error: string) => {
+    setJsonErrors((prev) => {
+      const next = { ...prev };
+
+      if (error) {
+        next[field] = error;
+      } else {
+        delete next[field];
+      }
+
+      return next;
+    });
+  };
   const [notification, setNotification] = useState<{
     open: boolean;
     message: string;
@@ -424,7 +487,9 @@ export default function ParametersPage() {
   const fetchParameters = async () => {
     try {
       const data = await parametersApi.get();
-      setParams(normalizeParameters(data));
+      const normalized = normalizeParameters(data);
+      setParams(normalized);
+      setInitialParams(normalized);
     } catch (error) {
       console.error("Erro ao buscar parametros:", error);
       setNotification({ open: true, message: "Erro ao carregar parametros. Usando valores padrao.", severity: "error" });
@@ -434,9 +499,19 @@ export default function ParametersPage() {
   };
 
   const handleSave = async () => {
+    if (Object.keys(jsonErrors).length > 0) {
+      setNotification({
+        open: true,
+        message: "Corrija os JSONs inválidos antes de salvar.",
+        severity: "error",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       await parametersApi.update(params);
+      setInitialParams(params);
       setNotification({ open: true, message: "Configuracoes salvas com sucesso!", severity: "success" });
     } catch (error) {
       console.error("Erro ao salvar parametros:", error);
@@ -453,6 +528,11 @@ export default function ParametersPage() {
       </Box>
     );
   }
+
+  const hasJsonErrors = Object.keys(jsonErrors).length > 0;
+  const hasUnsavedChanges =
+    initialParams !== null &&
+    JSON.stringify(params) !== JSON.stringify(initialParams);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -490,10 +570,10 @@ export default function ParametersPage() {
                   {numField(params, setParams, "cost_duty", "Custo por Jornada (Motorista)", "Influencia o número total de motoristas", "peso", true)}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                  {numField(params, setParams, "waiting_time_pay_pct", "% Pagamento Espera", "Percentual do tempo de espera que e pago (0.0 a 1.0)", "%", true)}
+                  {numField(params, setParams, "waiting_time_pay_pct", "% Pagamento Espera", "Percentual do tempo de espera que e pago (0 a 100)", "%", true)}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                  {numField(params, setParams, "holiday_extra_pct", "% Extra Feriado", "Adicional percentual sobre horas em feriado", "%", true)}
+                  {numField(params, setParams, "holiday_extra_pct", "% Extra Feriado", "Adicional percentual sobre horas em feriado (0 a 100)", "%", true)}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                   {numField(params, setParams, "sunday_off_weight", "Peso Folga Domingo", "Peso para priorizar folga dominical no solver", "", true)}
@@ -573,6 +653,9 @@ export default function ParametersPage() {
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                   {numField(params, setParams, "min_break_minutes", "Intervalo Minimo", "Duracao minima de intervalo", "min")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  {boolField(params, setParams, "enforce_min_interval", "Bloquear Intervalo Curto", "Impede que viagens com intervalo positivo menor que o minimo configurado fiquem no mesmo bloco ou jornada")}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                   {numField(params, setParams, "mandatory_break_after_minutes", "Pausa Obrigatoria Apos", "Tempo de trabalho continuo antes de pausa obrigatoria", "min")}
@@ -716,7 +799,7 @@ export default function ParametersPage() {
                   {numField(params, setParams, "nocturnal_factor", "Fator Noturno", "Multiplicador de custo para horas noturnas", "x", true)}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                  {numField(params, setParams, "nocturnal_extra_pct", "% Extra Noturno", "Percentual adicional sobre horas noturnas", "%", true)}
+                  {numField(params, setParams, "nocturnal_extra_pct", "% Extra Noturno", "Percentual adicional sobre horas noturnas (0 a 100)", "%", true)}
                 </Grid>
               </Grid>
             </AccordionDetails>
@@ -739,27 +822,113 @@ export default function ParametersPage() {
                   {boolField(params, setParams, "strict_hard_validation", "Validacao Estrita", "Rejeita solucoes que violem restricoes hard")}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "strict_zero_gap_validation", "Gap Zero Estrito", "Exige continuidade geografica quando duas viagens encostam no mesmo minuto")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "strict_operational_mode", "Modo Operacional Estrito", "Desativa tolerancia operacional em conexoes de veiculo")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "strict_hard_constraints", "Hard Constraints Estritas", "Rejeita tolerancias nas restricoes operacionais do VSP")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "strict_gps_validation", "Validar GPS Estrito", "Rejeita viagens com coordenadas/GPS invalidos quando a validacao de entrada estiver ativa")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "strict_terminal_sync_validation", "Validar Sincronia Terminal", "Rejeita viagens marcadas como nao sincronizadas com terminal do motorista")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
                   {boolField(params, setParams, "strict_union_rules", "Regras Sindicais Estritas", "Aplica regras sindicais em modo estrito")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Modo de Qualidade Operacional
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    size="small"
+                    value={params.operational_quality_mode ?? 'balanced'}
+                    onChange={(_, value) => {
+                      if (value) setParams((prev) => ({ ...prev, operational_quality_mode: value }));
+                    }}
+                  >
+                    <ToggleButton value="strict">Strict</ToggleButton>
+                    <ToggleButton value="balanced">Balanced</ToggleButton>
+                    <ToggleButton value="optimized">Optimized</ToggleButton>
+                  </ToggleButtonGroup>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                    Strict pode adicionar +1 duty/crew para evitar excecoes criticas; balanced aceita ate 1 com warning; optimized prioriza menor custo.
+                  </Typography>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
                   <JsonField
-                    label="Pesos do Objetivo"
-                    tooltip="JSON de pesos consumido pelo optimizer, como fairness, overtime, spread e passive_transfer"
+                    label="Pesos dos Objetivos"
+                    tooltip="JSON com os pesos dos objetivos do solver"
                     value={params.goal_weights}
                     fallback={EMPTY_GOAL_WEIGHTS}
+                    fieldName="goal_weights"
+                    onErrorChange={setJsonFieldError}
                     onChange={(value) => setParams((prev) => ({ ...prev, goal_weights: value }))}
                   />
                 </Grid>
-                <Grid size={{ xs: 12, md: 6 }}>
-                  <JsonField
-                    label="Regras Dinamicas"
-                    tooltip="Lista JSON de regras dinamicas de custo aplicadas pelo motor"
-                    value={params.dynamic_rules}
-                    fallback={EMPTY_DYNAMIC_RULES}
-                    onChange={(value) => setParams((prev) => ({ ...prev, dynamic_rules: value }))}
-                  />
-                </Grid>
-              </Grid>
+                 <Grid size={{ xs: 12, md: 6 }}>
+                    <JsonField
+                      label="Regras Dinâmicas"
+                      tooltip="Lista JSON com regras dinâmicas"
+                      value={params.dynamic_rules}
+                      fallback={EMPTY_DYNAMIC_RULES}
+                      fieldName="dynamic_rules"
+                      onErrorChange={setJsonFieldError}
+                      onChange={(value) => setParams((prev) => ({ ...prev, dynamic_rules: value }))}
+                    />
+                   <Button
+                     size="small"
+                     startIcon={<IconHelp size={16} />}
+                     onClick={() => setIsHelpOpen(!isHelpOpen)}
+                     sx={{ mt: 1 }}
+                   >
+                     {isHelpOpen ? "Ocultar Ajuda" : "Ver Exemplos de Regras"}
+                   </Button>
+                 </Grid>
+               </Grid>
+
+               {isHelpOpen && (
+                 <Alert severity="info" sx={{ mt: 2, "& .MuiAlert-message": { width: "100%" } }}>
+                   <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                     💡 Cola de Regras Dinâmicas e Pesos
+                   </Typography>
+                   <Grid container spacing={2}>
+                     <Grid size={{ xs: 12, md: 6 }}>
+                       <Typography variant="caption" sx={{ fontWeight: 600, display: "block" }}>
+                         Exemplo: Adicional de Feriado (Multiplicar custo extra por 1.5)
+                       </Typography>
+                       <Box component="pre" sx={{ bgcolor: "rgba(0,0,0,0.05)", p: 1, borderRadius: 1, fontSize: "0.75rem", overflowX: "auto" }}>
+{`{
+  "condition": {"field": "is_holiday", "op": "==", "value": true},
+  "action": {"target": "holiday_extra", "type": "multiply", "value": 1.5}
+}`}
+                       </Box>
+                     </Grid>
+                     <Grid size={{ xs: 12, md: 6 }}>
+                       <Typography variant="caption" sx={{ fontWeight: 600, display: "block" }}>
+                         Exemplo: Bônus para Viagens Noturnas (Reduzir custo base)
+                       </Typography>
+                       <Box component="pre" sx={{ bgcolor: "rgba(0,0,0,0.05)", p: 1, borderRadius: 1, fontSize: "0.75rem", overflowX: "auto" }}>
+{`{
+  "condition": {"field": "start_hour", "op": ">=", "value": 22},
+  "action": {"target": "work_cost", "type": "subtract", "value": 50}
+}`}
+                       </Box>
+                     </Grid>
+                     <Grid size={{ xs: 12 }}>
+                       <Typography variant="caption" sx={{ display: "block", mt: 1 }}>
+                         <strong>Campos Disponíveis (Field):</strong> is_holiday, start_hour, end_hour, duration, is_sunday, line_id<br/>
+                         <strong>Alvos de Custo (Target):</strong> work_cost, overtime_cost, holiday_extra, nocturnal_extra, cct_penalties
+                       </Typography>
+                     </Grid>
+                   </Grid>
+                 </Alert>
+               )}
             </AccordionDetails>
           </Accordion>
 
@@ -944,7 +1113,7 @@ export default function ParametersPage() {
               size="large"
               color="primary"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || hasJsonErrors || !hasUnsavedChanges}
             >
               {saving ? "Salvando..." : "Salvar Todas as Configuracoes"}
             </Button>

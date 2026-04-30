@@ -14,12 +14,18 @@ from ..base import BaseAlgorithm
 from ..csp.greedy import GreedyCSP
 from ..csp.set_partitioning import SetPartitioningCSP
 from ..evaluator import CostEvaluator
-from ..utils import preferred_pair_penalty, quick_cost_sorted
 from ..vsp.genetic import GeneticVSP
 from ..vsp.greedy import GreedyVSP, build_preferred_pairs
 from ..vsp.mcnf import MCNFVSP
 from ..vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..vsp.tabu_search import TabuSearchVSP
+from ..utils import (
+    is_connection_feasible,
+    preferred_pair_penalty,
+    quick_cost_sorted,
+    ConstraintEngine,
+    compute_block_gap_stats,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -41,10 +47,14 @@ class HybridPipeline(BaseAlgorithm):
         # Alinha parâmetros operacionais compartilhados entre CCT e VSP.
         passthrough_fields = (
             "min_layover_minutes",
+            "min_break_minutes",
+            "enforce_min_interval",
             "connection_tolerance_minutes",
             "pullout_minutes",
             "pullback_minutes",
             "strict_hard_validation",
+            "meal_break_minutes",
+            "mandatory_break_after_minutes",
         )
         for field in passthrough_fields:
             if field not in self.vsp_params and self.cct_params.get(field) is not None:
@@ -203,6 +213,10 @@ class HybridPipeline(BaseAlgorithm):
 
         sa_saved = max(0.0, sa_budget_total - total_sa_elapsed)
 
+        # PERF: Early stop se já temos solução perfeita sem out-of-budget
+        if best_issues == 0 and self._check_timeout():
+            return self._finalize(best_vsp, trips, vehicle_types)
+
         if self._check_timeout():
             return self._finalize(best_vsp, trips, vehicle_types)
 
@@ -227,6 +241,11 @@ class HybridPipeline(BaseAlgorithm):
 
         if self._check_timeout():
             return self._finalize(best_vsp, trips, vehicle_types)
+
+        # PERF 2.4: Early stop — se issues==0 e Tabu já não melhorou
+        if best_issues == 0 and ts_issues == 0 and abs(ts_cost - best_cost) / max(1.0, best_cost) < 0.01:
+            logger.info("[PIPELINE] Early stop: solução estável, pulando Genetic")
+            return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
         remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
         if n > 50:
@@ -286,14 +305,46 @@ class HybridPipeline(BaseAlgorithm):
         if len(vsp_sol.blocks) > 1500:
             from ..csp.chunked_orchestrator import ChunkedCSPOrchestrator
             t_phase = time.perf_counter()
-            csp_final = ChunkedCSPOrchestrator(
+            csp_chunked = ChunkedCSPOrchestrator(
                 vsp_params=self.vsp_params, chunk_threshold=1500, **kwargs,
             ).solve(vsp_sol.blocks, trips)
             phase_timings_ms["csp_chunked_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-        else:
             t_phase = time.perf_counter()
             csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
             phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+            
+            # Capturar baseline para benchmark de qualidade (Antes do Polish/JointSwap)
+            from ..evaluator import CostEvaluator
+            evaluator = CostEvaluator()
+            chunked_key = (
+                csp_chunked.cct_violations,
+                len(csp_chunked.uncovered_blocks or []),
+                csp_chunked.num_crew,
+                evaluator.total_cost(OptimizationResult(vsp=vsp_sol, csp=csp_chunked, algorithm="candidate"), vehicle_types),
+            )
+            greedy_key = (
+                csp_greedy.cct_violations,
+                len(csp_greedy.uncovered_blocks or []),
+                csp_greedy.num_crew,
+                evaluator.total_cost(OptimizationResult(vsp=vsp_sol, csp=csp_greedy, algorithm="candidate"), vehicle_types),
+            )
+            csp_final = csp_chunked if chunked_key <= greedy_key else csp_greedy
+            baseline_csp = csp_final
+            csp_final.meta.setdefault("selection", {})
+            csp_final.meta["selection"].update({
+                "selected_by": "hybrid_pipeline",
+                "selected_csp": getattr(csp_final, "algorithm", ""),
+                "chunked_score": chunked_key,
+                "greedy_score": greedy_key,
+            })
+            baseline_result = OptimizationResult(vsp=vsp_sol, csp=csp_final, algorithm="baseline")
+            baseline_metrics = {
+                "vehicles": len(vsp_sol.blocks),
+                "crew": csp_final.num_crew,
+                "violations": csp_final.cct_violations,
+                "total_cost": round(evaluator.total_cost(baseline_result, vehicle_types), 2)
+            }
+            
             remaining_budget_s = max(0.0, self.time_budget_s - self._elapsed())
             max_ilp_trips = int(self.vsp_params.get("max_csp_ilp_trips", DEFAULT_MAX_CSP_ILP_TRIPS) or DEFAULT_MAX_CSP_ILP_TRIPS)
             max_ilp_blocks = int(self.vsp_params.get("max_csp_ilp_blocks", DEFAULT_MAX_CSP_ILP_BLOCKS) or DEFAULT_MAX_CSP_ILP_BLOCKS)
@@ -309,27 +360,40 @@ class HybridPipeline(BaseAlgorithm):
                 ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
                 ilp.time_budget_s = ilp_budget
                 t_phase = time.perf_counter()
-                csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                try:
+                    csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                except Exception as e:
+                    logger.error(f"[PIPELINE] Falha crítica no ILP solver: {e}. Mantendo baseline CSP selecionado.")
+                    csp_ilp = baseline_csp
                 phase_timings_ms["csp_set_partitioning_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-                ilp_better = csp_ilp.cct_violations < csp_greedy.cct_violations
+                ilp_better = (
+                    csp_ilp.cct_violations,
+                    len(csp_ilp.uncovered_blocks or []),
+                    csp_ilp.num_crew,
+                ) < (
+                    baseline_csp.cct_violations,
+                    len(baseline_csp.uncovered_blocks or []),
+                    baseline_csp.num_crew,
+                )
                 ilp_tie_and_not_worse_crew = (
-                    csp_ilp.cct_violations == csp_greedy.cct_violations
-                    and csp_ilp.num_crew <= csp_greedy.num_crew
+                    csp_ilp.cct_violations == baseline_csp.cct_violations
+                    and len(csp_ilp.uncovered_blocks or []) <= len(baseline_csp.uncovered_blocks or [])
+                    and csp_ilp.num_crew <= baseline_csp.num_crew
                 )
                 min_work = int(kwargs.get("min_work_minutes", 0))
                 if min_work > 0 and csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew):
-                    greedy_shorts = sum(1 for d in csp_greedy.duties if d.work_time < min_work)
+                    baseline_shorts = sum(1 for d in baseline_csp.duties if d.work_time < min_work)
                     ilp_shorts = sum(1 for d in csp_ilp.duties if d.work_time < min_work)
-                    if ilp_shorts > greedy_shorts:
+                    if ilp_shorts > baseline_shorts:
                         logger.info(
-                            "[PIPELINE] ILP has more short duties (%d vs %d), keeping greedy",
-                            ilp_shorts, greedy_shorts,
+                            "[PIPELINE] ILP has more short duties (%d vs %d), keeping selected CSP baseline",
+                            ilp_shorts, baseline_shorts,
                         )
-                        csp_final = csp_greedy
+                        csp_final = baseline_csp
                     else:
                         csp_final = csp_ilp
                 else:
-                    csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
+                    csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else baseline_csp
             else:
                 logger.info(
                     "[PIPELINE] Skipping CSP ILP polish: remaining_budget=%.2fs trips=%d blocks=%d",
@@ -337,17 +401,70 @@ class HybridPipeline(BaseAlgorithm):
                     len(trips),
                     len(vsp_sol.blocks),
                 )
-                csp_final = csp_greedy
+        else:
+            # Caso para escalas normais (<= 1500 blocos)
+            t_phase = time.perf_counter()
+            csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
+            phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+            csp_final = csp_greedy
+            
+            # Baseline para benchmark de qualidade
+            from ..evaluator import CostEvaluator
+            evaluator = CostEvaluator()
+            baseline_result = OptimizationResult(vsp=vsp_sol, csp=csp_greedy, algorithm="baseline")
+            baseline_metrics = {
+                "vehicles": len(vsp_sol.blocks),
+                "crew": csp_greedy.num_crew,
+                "violations": csp_greedy.cct_violations,
+                "total_cost": round(evaluator.total_cost(baseline_result, vehicle_types), 2)
+            }
         from ..joint_opt import joint_duty_vehicle_swap
         t_phase = time.perf_counter()
         csp_final, vsp_sol = joint_duty_vehicle_swap(
             csp_final,
             vsp_sol,
             trips,
+            vehicle_types,
             self.cct_params,
             {**kwargs, "vsp_params": self.vsp_params},
         )
         phase_timings_ms["joint_swap_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+        # ── Benchmark final e decisão de regressão ──────────────────────────
+        if 'baseline_metrics' in locals() and baseline_metrics:
+            from ..evaluator import CostEvaluator
+            evaluator = CostEvaluator()
+            current_result = OptimizationResult(vsp=vsp_sol, csp=csp_final)
+            final_cost = evaluator.total_cost(current_result, vehicle_types)
+            baseline_cost = baseline_metrics["total_cost"]
+            
+            if final_cost > baseline_cost:
+                logger.warning(
+                    "[PIPELINE] Pós-otimização piorou o custo total (%.2f > %.2f). Revertendo para baseline.",
+                    final_cost, baseline_cost
+                )
+                vsp_sol = baseline_result.vsp
+                csp_final = baseline_result.csp
+        
+        # ── Benchmarking Avançado (Recalculado após reversão se necessário) ──
+        total_gaps = []
+        for b in vsp_sol.blocks:
+            if len(b.trips) > 1:
+                total_gaps.extend([b.trips[i+1].start_time - b.trips[i].end_time for i in range(len(b.trips)-1)])
+        
+        block_sizes = [len(b.trips) for b in vsp_sol.blocks]
+        advanced_stats = {
+            "gap_stats": {
+                "min_gap": min(total_gaps) if total_gaps else 0,
+                "avg_gap": round(sum(total_gaps) / len(total_gaps), 1) if total_gaps else 0,
+                "total_gaps_count": len(total_gaps)
+            },
+            "block_distribution": {
+                "avg_trips_per_block": round(sum(block_sizes) / len(block_sizes), 2) if block_sizes else 0,
+                "max_trips": max(block_sizes) if block_sizes else 0,
+                "std_dev_trips": round(sum((x - (sum(block_sizes)/len(block_sizes)))**2 for x in block_sizes) / len(block_sizes), 2) if block_sizes else 0
+            }
+        }
+
         result = OptimizationResult(
             vsp=vsp_sol,
             csp=csp_final,
@@ -362,21 +479,43 @@ class HybridPipeline(BaseAlgorithm):
                 "input_trip_count": len(trips),
                 "selected_vsp_algorithm": getattr(vsp_sol, "algorithm", "greedy_vsp"),
                 "time_budget_s": self.time_budget_s,
+                "advanced_stats": advanced_stats,
+                "explainability": {
+                    "vehicles_reduction": "VSP Merge + Tail Relocation" if len(vsp_sol.blocks) < (baseline_metrics["vehicles"] if 'baseline_metrics' in locals() else 0) else "Stable",
+                    "crew_efficiency": "Pair Repair + Joint Swap" if csp_final.num_crew < (baseline_metrics["crew"] if 'baseline_metrics' in locals() else 0) else "Stable",
+                    "compliance_fixing": "LNS + CSP Feedback" if csp_final.cct_violations < (baseline_metrics["violations"] if 'baseline_metrics' in locals() else 0) else "Stable"
+                },
+                "benchmark": {
+                    "baseline": baseline_metrics if 'baseline_metrics' in locals() else None,
+                    "final": {
+                        "vehicles": len(vsp_sol.blocks),
+                        "crew": csp_final.num_crew,
+                        "violations": csp_final.cct_violations,
+                        "total_cost": round(result.total_cost, 2)
+                    }
+                }
             }
         )
+        
+        if 'baseline_metrics' in locals() and baseline_metrics:
+            improvement = {
+                "vehicles_saved": baseline_metrics["vehicles"] - len(vsp_sol.blocks),
+                "crew_saved": baseline_metrics["crew"] - csp_final.num_crew,
+                "cost_reduction": round(baseline_metrics["total_cost"] - result.total_cost, 2)
+            }
+            result.meta["performance"]["benchmark"]["improvement"] = improvement
+
         return result
         
 
 
 def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
     vsp_params = vsp_params or {}
-    # Inicializar todas as penalidades como Decimal
     unassigned_penalty = Decimal('0.0')
     long_block_penalty = Decimal('0.0')
     infeasible_penalty = Decimal('0.0')
     pair_penalty = Decimal('0.0')
 
-    # Penalidade por viagens não atribuídas
     unassigned_penalty = Decimal(len(getattr(sol, "unassigned_trips", []))) * Decimal('5000.0')
 
     crew_block_limit = int(vsp_params.get("crew_block_limit_minutes", 0) or 0)
@@ -392,10 +531,8 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
             [trip for block in getattr(sol, "blocks", []) for trip in getattr(block, "trips", [])],
             min_layover, int(vsp_params.get("preferred_pair_window_minutes", 120) or 120),
         )
-        # Converter os parâmetros de penalidade para Decimal
         pair_break_penalty = Decimal(str(vsp_params.get("pair_break_penalty", 1000.0)))
         paired_trip_bonus = Decimal(str(vsp_params.get("paired_trip_bonus", 40.0)))
-        # Cálculo do hard_pairing_penalty com Decimal
         if bool(vsp_params.get("hard_pairing_vehicle_level", False)):
             if "hard_pairing_penalty" in vsp_params:
                 hard_pairing_penalty = Decimal(str(vsp_params["hard_pairing_penalty"]))
@@ -412,7 +549,6 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
         paired_trip_bonus = Decimal('0.0')
         hard_pairing_penalty = Decimal('0.0')
 
-    # Chamar preferred_pair_penalty com parâmetros float (pois a função espera float)
     pair_penalty = Decimal(str(preferred_pair_penalty(
         getattr(sol, "blocks", []),
         preferred_pairs,
@@ -421,48 +557,35 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
         float(hard_pairing_penalty),
     )))
 
-    # Penalidades por inviabilidade (gaps negativos ou insuficientes)
+    # CONSISTÊNCIA 3.1: Usar ConstraintEngine para penalidade de inviabilidade
+    # (mesmo modelo que o post-opt usa, incluindo strict_zero_gap_validation)
+    engine = ConstraintEngine(vsp_params)
     for block in getattr(sol, "blocks", []):
         trips = list(getattr(block, "trips", []))
         for index in range(len(trips) - 1):
-            current = trips[index]
-            nxt = trips[index + 1]
-            gap = nxt.start_time - current.end_time
-            deadhead_need = int(current.deadhead_times.get(nxt.origin_id, 0))
-            need = max(min_layover, deadhead_need)
-            if gap < 0:
-                infeasible_penalty += Decimal('20000.0') + Decimal(abs(gap)) * Decimal('500.0')
-            elif gap < need:
-                infeasible_penalty += Decimal('15000.0') + Decimal(need - gap) * Decimal('400.0')
+            if not engine.is_connection_feasible(trips[index], trips[index + 1]):
+                gap = int(trips[index + 1].start_time - trips[index].end_time)
+                if gap < 0:
+                    infeasible_penalty += Decimal('20000.0') + Decimal(abs(gap)) * Decimal('500.0')
+                else:
+                    infeasible_penalty += Decimal('15000.0')
 
-    # Custo rápido dos blocos (a função retorna float, convertemos para Decimal)
     quick_cost = Decimal(str(quick_cost_sorted(sol.blocks)))
-
     total = quick_cost + unassigned_penalty + long_block_penalty + infeasible_penalty + pair_penalty
     return float(total)
 
 
 def _vsp_hard_issue_count(sol, vsp_params=None) -> int:
     vsp_params = vsp_params or {}
-    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
     same_depot_required = bool(vsp_params.get("same_depot_required", False))
     issues = 0
+    # CONSISTÊNCIA 3.1: Usar ConstraintEngine para contagem de issues
+    engine = ConstraintEngine(vsp_params)
+
     for block in getattr(sol, "blocks", []):
         trips = list(getattr(block, "trips", []))
         for index in range(len(trips) - 1):
-            current = trips[index]
-            nxt = trips[index + 1]
-            gap = int(nxt.start_time - current.end_time)
-            # Contiguous trip_group pair (ida/volta): no layover needed
-            if (
-                gap == 0
-                and getattr(current, "trip_group_id", None) is not None
-                and current.trip_group_id == getattr(nxt, "trip_group_id", None)
-            ):
-                continue
-            deadhead_need = int(current.deadhead_times.get(nxt.origin_id, 0))
-            need = max(min_layover, deadhead_need)
-            if gap < need:
+            if not engine.is_connection_feasible(trips[index], trips[index + 1]):
                 issues += 1
         if same_depot_required and trips:
             if trips[0].depot_id is not None and trips[-1].depot_id is not None and trips[0].depot_id != trips[-1].depot_id:

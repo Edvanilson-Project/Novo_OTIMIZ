@@ -81,7 +81,8 @@ class RoutingClient:
         if settings.osrm_enabled:
             try:
                 url = f"{self.osrm_url}/route/v1/driving/{orig_lon},{orig_lat};{dest_lon},{dest_lat}?overview=false"
-                response = requests.get(url, timeout=2.0)
+                # TIMEOUT v2.0: 3s conexão, 10s leitura para rotas individuais
+                response = requests.get(url, timeout=(3.0, 10.0))
                 if response.status_code == 200:
                     result = response.json()
                     if result.get('code') == 'Ok' and result.get('routes'):
@@ -158,74 +159,85 @@ class RoutingClient:
         locations: List[Tuple[float, float, int]],
         location_ids: List[int],
     ) -> Optional[Dict[Tuple[int, int], float]]:
-        """Versão robusta com tratamento completo de erros."""
-        try:
-            # OSRM espera: lon,lat;lon,lat;...
-            coords_str = ";".join(f"{lon},{lat}" for lat, lon, _ in locations)
-            url = f"{self.osrm_url}/table/v1/driving/{coords_str}?annotations=duration"
+        """Versão robusta com tratamento de erros e BATCHING (500x500)."""
+        if not locations:
+            return {}
 
-            response = requests.get(url, timeout=max(5.0, len(locations) * 0.05))
-            if response.status_code != 200:
-                logger.warning(f"OSRM /table retornou status {response.status_code}.")
-                return None
+        n = len(locations)
+        # BATCHING: OSRM tem limites de payload. Dividimos em blocos de 500.
+        batch_size = 500
+        full_matrix: Dict[Tuple[int, int], float] = {}
 
-            data = response.json()
-            if data.get('code') != 'Ok':
-                logger.warning(f"OSRM /table falhou: {data.get('message', 'Unknown')}")
-                return None
-
-            durations = data.get('durations', [])
-            if not durations or len(durations) != len(locations):
-                logger.warning("OSRM /table retornou matriz de duração incompleta.")
-                return None
-
-            matrix: Dict[Tuple[int, int], float] = {}
-            for i, row in enumerate(durations):
-                for j, dur_secs in enumerate(row):
-                    if i == j:
-                        continue
-                    origin_id = location_ids[i]
-                    dest_id = location_ids[j]
-                    # OSRM retorna duração em segundos; converter para minutos
-                    if dur_secs is None:
-                        # Localização inalcançável — aplicar penalidade Big-M de routing
-                        matrix[(origin_id, dest_id)] = 999_999.0
-                    else:
-                        matrix[(origin_id, dest_id)] = max(0.0, float(dur_secs) / 60.0)
-
-            # VALIDAÇÃO: Verificar integridade da matriz
-            expected_pairs = len(locations) * (len(locations) - 1)
-            if len(matrix) < expected_pairs:
-                logger.warning(f"Matriz incompleta: {len(matrix)}/{expected_pairs} pares")
+        for i in range(0, n, batch_size):
+            for j in range(0, n, batch_size):
+                sources = locations[i : i + batch_size]
+                destinations = locations[j : j + batch_size]
                 
-                # Preencher pares faltantes com Big-M de roteamento
-                for i in range(len(locations)):
-                    for j in range(len(locations)):
-                        if i == j:
-                            continue
-                        key = (location_ids[i], location_ids[j])
-                        if key not in matrix:
-                            # Usar distância Haversine como fallback
-                            lat1, lon1, _ = locations[i]
-                            lat2, lon2, _ = locations[j]
-                            _, dur_min = self._haversine_fallback(lat1, lon1, lat2, lon2)
-                            matrix[key] = dur_min
-                            logger.debug(f"Par {key} preenchido com fallback: {dur_min}min")
-            
-            # VALIDAÇÃO: Verificar valores nulos ou negativos
-            for key, duration in list(matrix.items()):
-                if duration is None or duration < 0:
-                    matrix[key] = 999_999.0  # Big-M de roteamento
+                source_ids = location_ids[i : i + batch_size]
+                dest_ids = location_ids[j : j + batch_size]
 
-            logger.info(
-                "OSRM /table: %d localizações → %d pares calculados em 1 requisição.",
-                len(locations), len(matrix),
-            )
-            return matrix
+                # Construir URL para este lote
+                batch_locations = sources + (destinations if i != j else [])
+                # coords: todos os sources seguidos de todos os destinations
+                all_coords = sources + destinations
+                coords_str = ";".join(f"{lon},{lat}" for lat, lon, _ in all_coords)
+                
+                source_indices = ";".join(str(idx) for idx in range(len(sources)))
+                dest_indices = ";".join(str(idx) for idx in range(len(sources), len(sources) + len(destinations)))
+                
+                url = (
+                    f"{self.osrm_url}/table/v1/driving/{coords_str}?"
+                    f"sources={source_indices}&destinations={dest_indices}&annotations=duration"
+                )
 
-        except Exception as e:
-            logger.warning(f"OSRM /table inacessível ({e}). Ativando fallback Haversine.")
+                try:
+                    # TIMEOUT v2.0: 5s conexão, 30s leitura para matrizes
+                    response = requests.get(url, timeout=(5.0, 30.0))
+                    if response.status_code != 200:
+                        logger.warning(f"OSRM /table batch ({i},{j}) retornou status {response.status_code}.")
+                        continue
+
+                    data = response.json()
+                    if data.get('code') != 'Ok':
+                        logger.warning(f"OSRM /table batch falhou: {data.get('message', 'Unknown')}")
+                        continue
+
+                    durations = data.get('durations', [])
+                    for row_idx, row in enumerate(durations):
+                        for col_idx, dur_secs in enumerate(row):
+                            origin_id = source_ids[row_idx]
+                            dest_id = dest_ids[col_idx]
+                            if origin_id == dest_id:
+                                continue
+                            
+                            if dur_secs is None:
+                                full_matrix[(origin_id, dest_id)] = 999_999.0
+                            else:
+                                full_matrix[(origin_id, dest_id)] = max(0.0, float(dur_secs) / 60.0)
+                                
+                except Exception as e:
+                    logger.warning(f"Falha no lote OSRM ({i},{j}): {e}")
+                    continue
+
+        if not full_matrix:
             return None
+
+        # VALIDAÇÃO: Preencher buracos se necessário
+        expected_pairs = n * (n - 1)
+        if len(full_matrix) < expected_pairs:
+            logger.warning(f"Matriz incompleta após batching: {len(full_matrix)}/{expected_pairs}")
+            for i_idx in range(n):
+                for j_idx in range(n):
+                    if i_idx == j_idx:
+                        continue
+                    key = (location_ids[i_idx], location_ids[j_idx])
+                    if key not in full_matrix:
+                        lat1, lon1, _ = locations[i_idx]
+                        lat2, lon2, _ = locations[j_idx]
+                        _, dur_min = self._haversine_fallback(lat1, lon1, lat2, lon2)
+                        full_matrix[key] = dur_min
+
+        return full_matrix
 
     def _haversine_matrix(
         self,

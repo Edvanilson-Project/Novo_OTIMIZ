@@ -23,12 +23,20 @@ def _copy_chrom(chrom: 'Chromosome') -> 'Chromosome':
     return [seq[:] for seq in chrom]
 
 from ...core.config import get_settings
-from ...core.exceptions import InfeasibleProblemError
+
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from ..evaluator import CostEvaluator
-from ..utils import block_is_feasible, blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
+from ..utils import (
+    is_block_feasible,
+    preferred_pair_penalty,
+    preferred_pair_penalty_from_trips,
+    quick_cost_sorted,
+    quick_cost_from_trips,
+    sort_block_trips,
+    is_connection_feasible
+)
 from .greedy import GreedyVSP, build_preferred_pairs
 
 settings = get_settings()
@@ -76,35 +84,60 @@ def _fitness(
     paired_trip_bonus: float = 40.0,
     hard_pairing_penalty: float = 0.0,
     min_gap: int = 8,
+    min_break: int = 30,
+    enforce_min_interval: bool = False,
+    connection_tolerance: int = 0,
 ) -> float:
     """Menor custo estimado = maior fitness (retorna negativo do custo).
-    Penaliza fortemente blocos inviáveis e deadhead violations.
+    Otimizado para evitar instanciar objetos Block.
     """
-    blocks = _blocks_from_chromosome(chrom, trip_map, vt)
-    sort_block_trips(blocks)
-    # Penaliza viagens não cobertas
-    covered = {tid for seq in chrom for tid in seq}
-    missing = len(trip_map) - len(covered)
-    base_cost = quick_cost_sorted(blocks, fixed_vehicle_cost, idle_cost_per_minute,
-                                  max_work_minutes, crew_cost_weight)
-    base_cost += preferred_pair_penalty(
-        blocks,
+    # 1. Converter IDs em Trips e ordenar para garantir viabilidade temporal
+    sequences: List[List[Trip]] = []
+    for seq in chrom:
+        trips = [trip_map[tid] for tid in seq if tid in trip_map]
+        if trips:
+            trips.sort(key=lambda t: t.start_time)
+            sequences.append(trips)
+            
+    # 2. Penaliza viagens não cobertas
+    covered_tids = {tid for seq in chrom for tid in seq if tid in trip_map}
+    missing = len(trip_map) - len(covered_tids)
+    
+    # 3. Cálculo de custos direcional (float ultra-rápido)
+    base_cost = quick_cost_from_trips(
+        sequences, fixed_vehicle_cost, idle_cost_per_minute,
+        max_work_minutes, crew_cost_weight
+    )
+    
+    base_cost += preferred_pair_penalty_from_trips(
+        sequences,
         preferred_pairs or {},
         pair_break_penalty,
         paired_trip_bonus,
         hard_pairing_penalty,
     )
-    # Penalidade por duplicatas
-    all_tids = [tid for seq in chrom for tid in seq]
-    duplicates = len(all_tids) - len(set(all_tids))
-    # Penalidade por blocos com deadhead inviável
-    infeasible_count = sum(1 for b in blocks if not block_is_feasible(b, min_gap))
-    # Penalidades escaladas pelo custo fixo do veículo para garantir que
-    # soluções infactíveis NUNCA superem factíveis no fitness, independente
-    # da instância (pequena ou 10k+ trips).
-    missing_penalty = max(5000.0, 10.0 * fixed_vehicle_cost)
-    duplicate_penalty = max(10000.0, 20.0 * fixed_vehicle_cost)
-    infeasible_penalty = max(3000.0, 5.0 * fixed_vehicle_cost)
+    
+    # 4. Penalidade por duplicatas
+    all_tids_flat = [tid for seq in chrom for tid in seq]
+    duplicates = len(all_tids_flat) - len(set(all_tids_flat))
+    
+    # 5. Penalidade por blocos com deadhead inviável
+    v_params = {
+        "min_layover_minutes": min_gap,
+        "min_break_minutes": min_break,
+        "enforce_min_interval": enforce_min_interval,
+        "connection_tolerance_minutes": connection_tolerance,
+    }
+    infeasible_count = sum(1 for trips in sequences if not is_block_feasible(trips, v_params))
+    
+    # 6. Big-M Penalties Dinâmicos
+    num_trips = len(trip_map)
+    base_big_m = max(1000000.0, num_trips * fixed_vehicle_cost * 10.0)
+
+    missing_penalty = base_big_m * 10.0
+    duplicate_penalty = base_big_m * 10.0
+    infeasible_penalty = base_big_m
+    
     return -(base_cost + missing * missing_penalty + duplicates * duplicate_penalty + infeasible_count * infeasible_penalty)
 
 
@@ -115,7 +148,12 @@ def _tournament(population: List[Chromosome], scores: List[float], k: int = 3) -
     return _copy_chrom(population[best])
 
 
-def _repair_chromosome(chrom: Chromosome, all_trip_ids: set, trip_map: Dict[int, Trip] = None) -> Chromosome:
+def _repair_chromosome(
+    chrom: Chromosome,
+    all_trip_ids: set,
+    trip_map: Dict[int, Trip] = None,
+    **kwargs,
+) -> Chromosome:
     """
     Repara um cromossomo após crossover/mutação:
     1. Remove trip_ids duplicados (mantém a primeira ocorrência no cromossomo)
@@ -150,10 +188,18 @@ def _repair_chromosome(chrom: Chromosome, all_trip_ids: set, trip_map: Dict[int,
                 for i, seq in enumerate(repaired):
                     last_tid = seq[-1]
                     if last_tid in trip_map:
-                        gap = t_start - trip_map[last_tid].end_time
-                        if 0 <= gap < best_gap:
-                            best_gap = gap
+                        if is_connection_feasible(
+                            trip_map[last_tid],
+                            trip_map[tid],
+                            min_layover=kwargs.get("min_gap", 8),
+                            min_break=kwargs.get("min_break", 30),
+                            enforce_min_interval=kwargs.get("enforce_min_interval", False),
+                            connection_tolerance=kwargs.get("connection_tolerance", 0),
+                        ):
+                            # We don't have the exact gap here since is_connection_feasible returns bool
+                            # For repair heuristic, we'll just take the first feasible block
                             best_idx = i
+                            break
                 if best_idx is not None:
                     repaired[best_idx].append(tid)
                 else:
@@ -170,7 +216,7 @@ def _repair_chromosome(chrom: Chromosome, all_trip_ids: set, trip_map: Dict[int,
 
 
 def _crossover(
-    parent1: Chromosome, parent2: Chromosome, trip_map: Dict[int, Trip] = None
+    parent1: Chromosome, parent2: Chromosome, trip_map: Dict[int, Trip] = None, **kwargs
 ) -> Tuple[Chromosome, Chromosome]:
     """Troca um bloco aleatório entre pais, com reparo de duplicatas (corrige B2)."""
     if not parent1 or not parent2:
@@ -190,16 +236,28 @@ def _crossover(
     child2[idx2] = seq1
 
     # Repara duplicatas e trips ausentes — CORREÇÃO B2
-    child1 = _repair_chromosome(child1, all_tids, trip_map)
-    child2 = _repair_chromosome(child2, all_tids, trip_map)
+    child1 = _repair_chromosome(child1, all_tids, trip_map, **kwargs)
+    child2 = _repair_chromosome(child2, all_tids, trip_map, **kwargs)
     return child1, child2
 
 
-def _mutate(chrom: Chromosome, mutation_rate: float, trip_map: Dict[int, Trip] = None, min_gap: int = 8) -> Chromosome:
+def _mutate(
+    chrom: Chromosome,
+    mutation_rate: float,
+    trip_map: Dict[int, Trip] = None,
+    min_gap: int = 8,
+    **kwargs,
+) -> Chromosome:
     """Operador de mutação com split, move e merge. Re-ordena para garantir factibilidade."""
     if random.random() > mutation_rate:
         return chrom
-    all_tids = {tid for seq in chrom for tid in seq}
+
+    # CORREÇÃO: Usar a fonte da verdade se disponível para evitar perda de viagens
+    if trip_map:
+        all_tids = set(trip_map.keys())
+    else:
+        all_tids = {tid for seq in chrom for tid in seq}
+        
     chrom_copy = _copy_chrom(chrom)
 
     # Se só tem 1 bloco: split ou não faz nada
@@ -241,8 +299,13 @@ def _mutate(chrom: Chromosome, mutation_rate: float, trip_map: Dict[int, Trip] =
                     if combined_trips:
                         # Ordenar viagens por start_time
                         combined_trips.sort(key=lambda t: t.start_time)
-                        temp_block = Block(id=0, trips=combined_trips)
-                        if not block_is_feasible(temp_block, min_gap):
+                        v_params = {
+                            "min_layover_minutes": min_gap,
+                            "min_break_minutes": kwargs.get("min_break", 30),
+                            "enforce_min_interval": kwargs.get("enforce_min_interval", False),
+                            "connection_tolerance_minutes": kwargs.get("connection_tolerance", 0),
+                        }
+                        if not is_block_feasible(combined_trips, v_params):
                             should_merge = False
 
                 if should_merge:
@@ -253,7 +316,7 @@ def _mutate(chrom: Chromosome, mutation_rate: float, trip_map: Dict[int, Trip] =
         # Remove blocos vazios
         chrom_copy = [seq for seq in chrom_copy if seq]
 
-    return _repair_chromosome(chrom_copy, all_tids, trip_map)  # Garante consistência
+    return _repair_chromosome(chrom_copy, all_tids, trip_map, **kwargs)  # Garante consistência
 
 
 class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
@@ -309,6 +372,12 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             else 0.0
         )
         min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        
+        # Parâmetros de conexão do vsp_params
+        min_break = int(self.vsp_params.get("min_break_minutes", 30) or 30)
+        enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", False))
+        connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0) or 0)
+
         fit_fn = lambda c: _fitness(
             c,
             trip_map,
@@ -322,6 +391,9 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             paired_trip_bonus,
             hard_pairing_penalty,
             min_gap,
+            min_break,
+            enforce_min_interval,
+            connection_tolerance,
         )
 
         # Semente inicial — greedy já factível
@@ -356,6 +428,15 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             variant = [seq for seq in variant if seq]
             if not variant:
                 variant = _copy_chrom(seed_chrom)
+            variant = _repair_chromosome(
+                variant,
+                all_tids,
+                trip_map,
+                min_gap=min_gap,
+                min_break=int(min_break) if min_break is not None else 30,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+            )
             population.append(variant)
 
         best_chrom = _copy_chrom(seed_chrom)
@@ -376,10 +457,34 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             while len(new_pop) < self.pop_size:
                 p1 = _tournament(population, scores)
                 p2 = _tournament(population, scores)
-                c1, c2 = _crossover(p1, p2, trip_map)
-                new_pop.append(_mutate(c1, self.mutation_rate, trip_map, min_gap))
+                c1, c2 = _crossover(
+                    p1,
+                    p2,
+                    trip_map,
+                    min_gap=min_gap,
+                    min_break=min_break,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                )
+                new_pop.append(_mutate(
+                    c1,
+                    self.mutation_rate,
+                    trip_map,
+                    min_gap,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ))
                 if len(new_pop) < self.pop_size:
-                    new_pop.append(_mutate(c2, self.mutation_rate, trip_map, min_gap))
+                    new_pop.append(_mutate(
+                        c2,
+                        self.mutation_rate,
+                        trip_map,
+                        min_gap,
+                        min_break=int(min_break) if min_break is not None else 30,
+                        enforce_min_interval=enforce_min_interval,
+                        connection_tolerance=connection_tolerance,
+                    ))
 
             population = new_pop
             scores = [fit_fn(c) for c in population]
@@ -401,9 +506,14 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             cur_trips = [b.trips[0]]
             for t in b.trips[1:]:
                 prev = cur_trips[-1]
-                gap = t.start_time - prev.end_time
-                needed = int(prev.deadhead_times.get(t.origin_id, 0))
-                if gap < needed:
+                if not is_connection_feasible(
+                    prev,
+                    t,
+                    min_layover=min_gap,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
                     new_b = Block(id=_next_id, trips=list(cur_trips))
                     if b.vehicle_type_id is not None:
                         new_b.vehicle_type_id = b.vehicle_type_id

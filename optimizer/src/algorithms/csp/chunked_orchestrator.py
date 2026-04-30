@@ -104,14 +104,26 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             try:
                 sol = solver.solve(chunk_blocks, chunk_trips)
             except Exception as exc:
-                _log.exception("Chunk %d falhou: %s — pulando", idx, exc)
-                continue
+                _log.exception("Chunk %d falhou: %s — marcando blocos como descobertos", idx, exc)
+                sol = CSPSolution(
+                    uncovered_blocks=list(chunk_blocks),
+                    cct_violations=len(chunk_blocks),
+                    algorithm=self.name,
+                    warnings=[f"chunk_{idx}_failed: {exc}"],
+                    meta={
+                        "chunk_failed": True,
+                        "chunk_idx": idx,
+                        "failed_blocks": len(chunk_blocks),
+                    },
+                )
             elapsed = (time.perf_counter() - ts) * 1000
             chunk_solutions.append(sol)
             chunk_meta.append({
                 "chunk_idx": idx,
                 "blocks": len(chunk_blocks),
                 "duties": len(sol.duties),
+                "uncovered_blocks": len(sol.uncovered_blocks or []),
+                "failed": bool((sol.meta or {}).get("chunk_failed")),
                 "elapsed_ms": round(elapsed, 1),
                 "violations": sol.cct_violations,
             })

@@ -30,7 +30,7 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('boolean', { default: true })
   force_round_trip: boolean;
 
-  @Column('boolean', { default: true })
+  @Column('boolean', { default: false })
   allow_vehicle_swap: boolean;
 
   // ── Jornada Base ──
@@ -61,6 +61,9 @@ export class CompanyParameters extends TenantBaseEntity {
 
   @Column('integer', { nullable: true })
   min_break_minutes: number;
+
+  @Column('boolean', { default: true })
+  enforce_min_interval: boolean;
 
   @Column('integer', { nullable: true })
   connection_tolerance_minutes: number;
@@ -152,7 +155,7 @@ export class CompanyParameters extends TenantBaseEntity {
   @Column('boolean', { default: true })
   enforce_trip_groups_hard: boolean;
 
-  @Column('boolean', { default: false })
+  @Column('boolean', { default: true })
   operator_pairing_hard: boolean;
 
   @Column('float', { default: 240.0 })
@@ -189,7 +192,28 @@ export class CompanyParameters extends TenantBaseEntity {
   strict_hard_validation: boolean;
 
   @Column('boolean', { nullable: true })
+  strict_zero_gap_validation: boolean;
+
+  @Column('boolean', { nullable: true })
+  strict_operational_mode: boolean;
+
+  @Column('boolean', { nullable: true })
+  strict_hard_constraints: boolean;
+
+  @Column('boolean', { nullable: true })
+  strict_gps_validation: boolean;
+
+  @Column('boolean', { nullable: true })
+  strict_terminal_sync_validation: boolean;
+
+  @Column('boolean', { nullable: true })
   strict_union_rules: boolean;
+
+  @Column({ nullable: true, default: 'strict' })
+  group_infeasibility_mode: string;
+
+  @Column({ nullable: true, default: 'balanced' })
+  operational_quality_mode: string;
 
   // ── Terminais ──
   @Column('integer', { array: true, default: '{}' })

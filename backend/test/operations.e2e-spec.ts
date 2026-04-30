@@ -93,4 +93,14 @@ describe('Operations E2E (Módulo 4)', () => {
 
     expect(res.body.message).toContain('endTime são obrigatórios');
   });
+
+  it('Deve bloquear otimizacao quando companyId solicitado diverge do tenant autenticado', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/operations/optimize')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ algorithm: 'hybrid_pipeline', companyId: companyA.id + 999 })
+      .expect(400);
+
+    expect(res.body.message).toContain('CompanyId divergente do tenant autenticado');
+  });
 });

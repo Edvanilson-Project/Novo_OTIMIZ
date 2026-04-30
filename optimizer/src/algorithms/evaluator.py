@@ -175,10 +175,16 @@ class CostEvaluator(ICostEvaluator):
             return
 
         # Mapeamento de pesos e custos base
-        self.cost_vehicle = self._to_decimal(params.get("cost_vehicle", self.cost_vehicle))
+        self.cost_vehicle = self._to_decimal(
+            params.get(
+                "cost_vehicle",
+                params.get("fixed_vehicle_activation_cost", params.get("vehicle_fixed_cost", self.cost_vehicle)),
+            )
+        )
         self.cost_km = self._to_decimal(params.get("cost_km", self.cost_km))
         self.cost_duty = self._to_decimal(params.get("cost_duty", self.cost_duty))
         self.violation_penalty = self._to_decimal(params.get("cct_violation_penalty", self.violation_penalty))
+        self.idle_cost_per_minute = self._to_decimal(params.get("idle_cost_per_minute", self.idle_cost_per_minute))
         
         # Custos por minuto (Mapeamento Direto do Frontend)
         driver_cost = params.get("driver_cost_per_minute") or 0.0
@@ -419,6 +425,10 @@ class CostEvaluator(ICostEvaluator):
         dynamic_adjustments_total = Decimal('0.0')
 
         for duty in solution.duties:
+            duty_cct_penalties = (
+                self._to_decimal(duty.rest_violations + duty.shift_violations)
+                * self.violation_penalty
+            )
 
             # Cálculo de Minutos Noturnos Robusto (Trata virada da meia-noite)
             noct_minutes = 0
@@ -490,7 +500,7 @@ class CostEvaluator(ICostEvaluator):
             )
             is_sunday = bool(
                 duty.meta.get("is_sunday", False)
-                or any(getattr(t, "service_day", -1) == 0 for seg in duty.segments for t in seg.trips)
+                or any(bool(getattr(t, "is_sunday", False)) for seg in duty.segments for t in seg.trips)
             )
             
             if is_holiday or is_sunday:
@@ -501,7 +511,6 @@ class CostEvaluator(ICostEvaluator):
                 )
                 if is_sunday and self.sunday_off_weight > 0:
                     duty_cct_penalties += self.sunday_off_weight
-            duty_cct_penalties = (duty.rest_violations + duty.shift_violations) * self.violation_penalty
             if duty.meta.get("illegal_relief"):
                 duty_cct_penalties += Decimal('1000000')  # Big-M penalty for illegal terminal relief
 
@@ -535,7 +544,7 @@ class CostEvaluator(ICostEvaluator):
                     ),
                     "is_sunday": bool(
                         getattr(duty, "meta", {}).get("is_sunday", False)
-                        or any(getattr(t, "service_day", -1) == 0 for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
+                        or any(bool(getattr(t, "is_sunday", False)) for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
                     ),
                     "is_nocturnal": getattr(duty, "nocturnal_minutes", 0) > 0,
                     "has_overtime": (getattr(duty, "overtime_minutes", 0) or 0) > 0,

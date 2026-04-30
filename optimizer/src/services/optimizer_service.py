@@ -3,13 +3,16 @@ OptimizerService — orquestra a seleção e execução de algoritmos.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
 import math
 import re
 import time
-from typing import Any, Dict, List, Optional
+from collections import Counter
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from .ai_service import AiService
 
@@ -28,11 +31,29 @@ from ..algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..algorithms.vsp.tabu_search import TabuSearchVSP
 from ..core.config import get_settings
 from ..core.exceptions import HardConstraintViolationError, InfeasibleProblemError, InvalidAlgorithmError, NoProblemDataError, OptimizerError
-from ..domain.models import AlgorithmType, OptimizationResult, Trip, VehicleType
+from ..domain.models import AlgorithmType, Block, CSPSolution, Duty, OptimizationResult, Trip, VehicleType, VSPSolution
 from .hard_constraint_validator import HardConstraintValidator
+from ..algorithms.utils import is_connection_feasible
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+
+def _finalize_duties(csp: Any, *args: Any, **kwargs: Any) -> CSPSolution:
+    if hasattr(csp, "finalize_selected_duties"):
+        logger.info("[OP-QUALITY] finalize_duties_method=direct")
+        return csp.finalize_selected_duties(*args, **kwargs)
+
+    greedy = getattr(csp, "greedy", None)
+    if greedy is not None and hasattr(greedy, "finalize_selected_duties"):
+        logger.info("[OP-QUALITY] finalize_duties_method=greedy")
+        return greedy.finalize_selected_duties(*args, **kwargs)
+
+    logger.warning("[OP-QUALITY] finalize_duties_method=fallback")
+    raise OptimizerError(
+        "CSP object does not expose finalize_selected_duties directly or via greedy",
+        details={"csp_type": type(csp).__name__},
+    )
 
 
 class OptimizerService:
@@ -62,6 +83,7 @@ class OptimizerService:
         cct_params: Any = None,
         vsp_params: Any = None,
         optimization_params: Any = None,
+        request_metadata: Any = None,
     ) -> OptimizationResult:
         if not trips:
             raise NoProblemDataError("trips list is empty")
@@ -79,6 +101,14 @@ class OptimizerService:
             intent_params.update(
                 optimization_params if isinstance(optimization_params, dict) else optimization_params.dict()
             )
+        resolved_operational_quality_mode = self._resolve_operational_quality_mode(
+            optimization_params=optimization_params,
+            vsp_params=vsp_params,
+            cct_params=cct_params,
+            request_metadata=request_metadata,
+        )
+        intent_params["operational_quality_mode"] = resolved_operational_quality_mode
+        submitted_optimization_params = dict(intent_params)
         
         # Sincronização de Intenções do Frontend com Parâmetros de Solver
         if intent_params.get("force_round_trip"):
@@ -110,11 +140,60 @@ class OptimizerService:
             vsp_params["max_vehicle_shift_minutes"] = intent_params["max_shift_minutes"]
 
         self._align_vsp_params_with_cct(cct_params, vsp_params)
+        logger.info(
+            "[OP-QUALITY] run started mode=%s algorithm=%s trips=%d",
+            resolved_operational_quality_mode,
+            algorithm.value if hasattr(algorithm, "value") else str(algorithm),
+            len(trips),
+        )
+        logger.warning(
+            "[PARAMS-AUDIT] cct enforce_min_interval=%s min_break=%s min_layover=%s tolerance=%s | "
+            "vsp enforce_min_interval=%s min_layover=%s tolerance=%s",
+            cct_params.get("enforce_min_interval"),
+            cct_params.get("min_break_minutes"),
+            cct_params.get("min_layover_minutes"),
+            cct_params.get("connection_tolerance_minutes"),
+            vsp_params.get("enforce_min_interval"),
+            vsp_params.get("min_layover_minutes"),
+            vsp_params.get("connection_tolerance_minutes"),
+        )
+        if bool(vsp_params.get("force_round_trip", False)):
+            cct_params.setdefault("enforce_trip_groups_hard", True)
+            cct_params.setdefault("operator_pairing_hard", True)
+        if bool(vsp_params.get("enforce_same_depot_start_end", False)):
+            cct_params.setdefault("enforce_same_depot_start_end", True)
+        effective_optimization_params = {
+            **cct_params,
+            **vsp_params,
+            **intent_params,
+        }
         normalized_time_budget_s = (
             float(time_budget_s)
             if time_budget_s is not None
             else float(vsp_params.get("time_budget_s") or settings.hybrid_time_budget_seconds or 60)
         )
+        if vsp_params.get("random_seed") is None:
+            deterministic_seed = self._derive_deterministic_seed(
+                trips,
+                algorithm,
+                cct_params,
+                vsp_params,
+                normalized_time_budget_s,
+            )
+            vsp_params["random_seed"] = deterministic_seed
+            effective_optimization_params["random_seed"] = deterministic_seed
+        submitted_cct_params = dict(cct_params)
+        submitted_vsp_params = dict(vsp_params)
+        
+        # [PIPELINE SAFETY] O orçamento deve ser pelo menos 2 min menor que o soft limit do Celery
+        # para garantir o graceful shutdown (SIGTERM -> save result -> return JSON).
+        max_safe_budget = settings.celery_task_soft_time_limit - 120
+        if normalized_time_budget_s > max_safe_budget:
+            logger.warning(
+                f"[SAFETY] Orçamento solicitado ({normalized_time_budget_s}s) excede o limite de segurança "
+                f"do Celery. Capeando para {max_safe_budget}s."
+            )
+            normalized_time_budget_s = float(max_safe_budget)
         replay_fingerprint = self._build_replay_fingerprint(
             trips,
             algorithm,
@@ -123,14 +202,45 @@ class OptimizerService:
             normalized_time_budget_s,
         )
         had_explicit_mandatory_groups = bool(cct_params.get("mandatory_trip_groups_same_duty"))
+        group_inference_report = self._build_group_inference_report(trips, request_metadata)
         self._inject_trip_group_constraints(trips, cct_params, vsp_params)
+        group_inference_report["optimizer_effective_stats"] = self._summarize_trip_groups(trips)
+        group_inference_report["inference_applied"] = (
+            int(group_inference_report["optimizer_effective_stats"].get("group_count", 0))
+            != int(group_inference_report["optimizer_input_stats"].get("group_count", 0))
+            or int(group_inference_report["optimizer_effective_stats"].get("grouped_trip_count", 0))
+            != int(group_inference_report["optimizer_input_stats"].get("grouped_trip_count", 0))
+        )
+        self._log_group_inference_report(group_inference_report)
+        run_snapshot = self._build_run_snapshot(
+            trips,
+            vehicle_types,
+            algorithm,
+            submitted_cct_params,
+            submitted_vsp_params,
+            submitted_optimization_params,
+            cct_params,
+            vsp_params,
+            effective_optimization_params,
+            normalized_time_budget_s,
+            replay_fingerprint,
+            group_inference_report,
+            request_metadata,
+        )
         if not had_explicit_mandatory_groups and not bool(cct_params.get("enforce_trip_groups_hard", False)):
             cct_params.pop("mandatory_trip_groups_same_duty", None)
         self._ensure_deadhead_coverage(trips, vsp_params)
         
         strict_hard_validation = bool(
-            vsp_params.get("strict_hard_validation", cct_params.get("strict_hard_validation", True))
+            vsp_params.get("strict_hard_validation", cct_params.get("strict_hard_validation", False))
         )
+        group_infeasibility_mode = self._group_infeasibility_mode(
+            cct_params,
+            vsp_params,
+            effective_optimization_params,
+            request_metadata,
+        )
+        self._validate_strict_algorithm_support(algorithm, trips, cct_params, vsp_params)
 
         t_input = time.perf_counter()
         input_report = self.validator.audit_input(trips, cct_params, vsp_params)
@@ -141,32 +251,66 @@ class OptimizerService:
                 details=self.build_failure_payload(
                     HardConstraintViolationError(input_report["issues"]),
                     trips,
+                    vehicle_types,
                     algorithm,
                     cct_params,
                     vsp_params,
+                    effective_optimization_params,
+                    request_metadata=request_metadata,
                     stage="input_validation",
                     replay_fingerprint=replay_fingerprint,
+                    run_snapshot=run_snapshot,
                 ),
             )
 
+        scale_profile = self._build_scale_profile(trips, cct_params, vsp_params)
         t_solver = time.perf_counter()
-        result = self._dispatch(
-            algorithm,
-            trips,
-            vehicle_types,
-            depot_id,
-            normalized_time_budget_s,
-            cct_params,
-            vsp_params,
-            optimization_params,
-        )
+        try:
+            if self._should_use_scale_decomposition(algorithm, trips, cct_params, vsp_params, scale_profile):
+                result = self._run_decomposed_hybrid(
+                    trips,
+                    vehicle_types,
+                    depot_id,
+                    cct_params,
+                    vsp_params,
+                    effective_optimization_params,
+                    normalized_time_budget_s,
+                    scale_profile,
+                )
+            else:
+                result = self._dispatch(
+                    algorithm,
+                    trips,
+                    vehicle_types,
+                    depot_id,
+                    cct_params,
+                    vsp_params,
+                    effective_optimization_params,
+                    normalized_time_budget_s,
+                )
+        except OptimizerError as exc:
+            details = dict(getattr(exc, "details", {}) or {})
+            details.setdefault("group_inference_report", group_inference_report)
+            details.setdefault("run_snapshot", run_snapshot)
+            if "failed_chunks" in details and "hard_constraint_report" not in details:
+                details["hard_constraint_report"] = self._build_scale_failure_hard_constraint_report(
+                    details.get("failed_chunks") or []
+                )
+            exc.details = details
+            raise
         primary_trip_group_audit = self._build_trip_group_audit(result, trips)
 
         def _group_audit_rank(sol: OptimizationResult, audit: Dict[str, Any]) -> tuple:
+            quality = ((sol.csp.meta or {}).get("quality_summary") or {}) if getattr(sol, "csp", None) is not None else {}
             return (
                 int(audit.get("split_groups", 0)),
                 -float(audit.get("same_roster_ratio", 0.0) or 0.0),
-                int(sol.cct_violations or 0),
+                int(getattr(sol.csp, "cct_violations", 0) or 0),
+                int(quality.get("low_utilization_duties", 0) or 0),
+                int(quality.get("high_spread_duties", 0) or 0),
+                int(quality.get("fragmented_duties", 0) or 0),
+                int(quality.get("short_connection_total", 0) or 0),
+                -float(quality.get("avg_utilization", 0.0) or 0.0),
                 float(sol.total_cost or 0.0),
                 len(sol.vsp.blocks or []),
                 len(sol.csp.duties or []),
@@ -177,7 +321,23 @@ class OptimizerService:
 
         fallback_max_trips = int(vsp_params.get("group_audit_fallback_max_trips", 220) or 220)
         fallback_max_blocks = int(vsp_params.get("group_audit_fallback_max_blocks", 160) or 160)
-        fallback_allowed = len(trips) <= fallback_max_trips and len(result.vsp.blocks or []) <= fallback_max_blocks
+        strict_group_mode = self._strict_trip_group_mode(trips, cct_params, vsp_params)
+        strict_fallback_max_trips = int(
+            vsp_params.get("strict_group_fallback_max_trips", 1000) or 1000
+        )
+        strict_fallback_max_blocks = int(
+            vsp_params.get("strict_group_fallback_max_blocks", 1000) or 1000
+        )
+        standard_fallback_allowed = (
+            len(trips) <= fallback_max_trips
+            and len(result.vsp.blocks or []) <= fallback_max_blocks
+        )
+        strict_fallback_allowed = (
+            strict_group_mode
+            and len(trips) <= strict_fallback_max_trips
+            and len(result.vsp.blocks or []) <= strict_fallback_max_blocks
+        )
+        fallback_allowed = standard_fallback_allowed or strict_fallback_allowed
 
         if (
             str(algorithm.value if hasattr(algorithm, "value") else algorithm) == AlgorithmType.HYBRID_PIPELINE.value
@@ -185,7 +345,8 @@ class OptimizerService:
             and not bool(vsp_params.get("disable_group_audit_fallback", False))
             and fallback_allowed
         ):
-            fallback_runs = 2
+            fallback_algorithm = AlgorithmType.GREEDY if strict_group_mode else AlgorithmType.SIMULATED_ANNEALING
+            fallback_runs = 1 if strict_group_mode else 2
             fallback_time_budget_s = max(45.0, normalized_time_budget_s * 0.25)
             fallback_seed_base_raw = replay_fingerprint.get("input_hash")
             try:
@@ -200,13 +361,14 @@ class OptimizerService:
                 fallback_vsp_params = dict(vsp_params)
                 fallback_vsp_params["random_seed"] = fallback_seed_base + (attempt * 97)
                 fallback_result = self._dispatch(
-                    AlgorithmType.SIMULATED_ANNEALING,
+                    fallback_algorithm,
                     trips,
                     vehicle_types,
                     depot_id,
-                    fallback_time_budget_s,
                     cct_params,
                     fallback_vsp_params,
+                    effective_optimization_params,
+                    fallback_time_budget_s,
                 )
                 fallback_trip_group_audit = self._build_trip_group_audit(fallback_result, trips)
                 fallback_result.meta["trip_group_audit"] = fallback_trip_group_audit
@@ -218,13 +380,24 @@ class OptimizerService:
 
             if best_fallback_result is not None and best_fallback_audit is not None and best_fallback_rank is not None:
                 if best_fallback_rank < _group_audit_rank(result, primary_trip_group_audit):
+                    before_split_groups = int(primary_trip_group_audit.get("split_groups", 0))
+                    after_split_groups = int(best_fallback_audit.get("split_groups", 0))
                     logger.info(
-                        "[OptimizerService] Hybrid fallback accepted: split_groups %d -> %d",
-                        int(primary_trip_group_audit.get("split_groups", 0)),
-                        int(best_fallback_audit.get("split_groups", 0)),
+                        "[OptimizerService] Hybrid fallback (%s) accepted: split_groups %d -> %d",
+                        fallback_algorithm.value,
+                        before_split_groups,
+                        after_split_groups,
                     )
                     result = best_fallback_result
                     primary_trip_group_audit = best_fallback_audit
+                    result.meta.setdefault("performance", {})
+                    result.meta["performance"]["group_audit_fallback"] = {
+                        "reason": "strict_group_repair" if strict_group_mode else "group_audit_repair",
+                        "algorithm": fallback_algorithm.value,
+                        "attempts": fallback_runs,
+                        "before_split_groups": before_split_groups,
+                        "after_split_groups": after_split_groups,
+                    }
         elif (
             str(algorithm.value if hasattr(algorithm, "value") else algorithm) == AlgorithmType.HYBRID_PIPELINE.value
             and int(primary_trip_group_audit.get("split_groups", 0)) > 0
@@ -237,7 +410,56 @@ class OptimizerService:
                 "block_count": len(result.vsp.blocks or []),
                 "max_trips": fallback_max_trips,
                 "max_blocks": fallback_max_blocks,
+                "strict_group_mode": strict_group_mode,
+                "strict_max_trips": strict_fallback_max_trips,
+                "strict_max_blocks": strict_fallback_max_blocks,
             }
+
+        if (
+            str(algorithm.value if hasattr(algorithm, "value") else algorithm) == AlgorithmType.HYBRID_PIPELINE.value
+            and strict_group_mode
+            and int(primary_trip_group_audit.get("split_groups", 0)) > 0
+            and fallback_allowed
+        ):
+            try:
+                repaired_result = self._repair_split_trip_groups_with_dedicated_blocks(
+                    result,
+                    trips,
+                    cct_params,
+                    vsp_params,
+                    effective_optimization_params,
+                )
+            except OptimizerError as exc:
+                if getattr(exc, "code", None) != "GROUP_INFEASIBLE":
+                    raise
+                result = self._apply_group_infeasibility_policy(
+                    result,
+                    primary_trip_group_audit,
+                    exc,
+                    group_infeasibility_mode,
+                    trips,
+                    stage="group_repair",
+                )
+                repaired_result = None
+            if repaired_result is not None:
+                repaired_audit = self._build_trip_group_audit(repaired_result, trips)
+                repaired_result.meta["trip_group_audit"] = repaired_audit
+                if _group_audit_rank(repaired_result, repaired_audit) < _group_audit_rank(result, primary_trip_group_audit):
+                    before_split_groups = int(primary_trip_group_audit.get("split_groups", 0))
+                    after_split_groups = int(repaired_audit.get("split_groups", 0))
+                    logger.info(
+                        "[OptimizerService] Dedicated block group repair accepted: split_groups %d -> %d",
+                        before_split_groups,
+                        after_split_groups,
+                    )
+                    result = repaired_result
+                    primary_trip_group_audit = repaired_audit
+                    result.meta.setdefault("performance", {})
+                    result.meta["performance"]["group_audit_repair"] = {
+                        "reason": "strict_group_dedicated_blocks",
+                        "before_split_groups": before_split_groups,
+                        "after_split_groups": after_split_groups,
+                    }
 
         self._ensure_vsp_operational_warnings(result, vehicle_types, vsp_params)
         solver_ms = (time.perf_counter() - t_solver) * 1000
@@ -254,32 +476,40 @@ class OptimizerService:
         output_validation_ms = (time.perf_counter() - t_output) * 1000
         result.meta["hard_constraint_report"]["output"] = output_report
         if strict_hard_validation and not output_report["ok"]:
-            raise HardConstraintViolationError(
-                output_report["issues"],
-                details=self.build_failure_payload(
-                    HardConstraintViolationError(output_report["issues"]),
-                    trips,
-                    algorithm,
-                    cct_params,
-                    vsp_params,
-                    stage="output_validation",
-                    replay_fingerprint=replay_fingerprint,
-                ),
-            )
+            if self._is_controlled_group_relaxation(result, output_report, group_infeasibility_mode):
+                result.meta["hard_constraint_report"]["strict_relaxation_override"] = {
+                    "mode": group_infeasibility_mode,
+                    "reason": "GROUP_INFEASIBLE controlled production relaxation",
+                    "hard_issues_preserved": list(output_report.get("hard_issues") or []),
+                    "relaxed_constraints": list((result.meta.get("group_infeasibility_handling") or {}).get("relaxed_constraints") or []),
+                    "affected_groups": list((result.meta.get("group_infeasibility_handling") or {}).get("affected_groups") or []),
+                }
+            else:
+                raise HardConstraintViolationError(
+                    output_report["issues"],
+                    details=self.build_failure_payload(
+                        HardConstraintViolationError(output_report["issues"]),
+                        trips,
+                        vehicle_types,
+                        algorithm,
+                        cct_params,
+                        vsp_params,
+                        effective_optimization_params,
+                        request_metadata=request_metadata,
+                        stage="output_validation",
+                        replay_fingerprint=replay_fingerprint,
+                        run_snapshot=run_snapshot,
+                    ),
+                )
 
         t_audit = time.perf_counter()
         # Injetar regras dinâmicas e pesos de custo no avaliador
         self.evaluator.set_dynamic_rules(cct_params.get("dynamic_rules") or [])
         
         # Configurar pesos de custo e regras de negócio usando o DTO unificado
-        if optimization_params:
-            self.evaluator.set_costs(optimization_params)
-            # Correção do bug result_meta -> result.meta
-            result.meta["ilp_timeout_seconds"] = (
-                optimization_params.get("ilp_timeout_seconds", 120) 
-                if isinstance(optimization_params, dict) 
-                else getattr(optimization_params, "ilp_timeout_seconds", 120)
-            )
+        if effective_optimization_params:
+            self.evaluator.set_costs(effective_optimization_params)
+            result.meta["ilp_timeout_seconds"] = int(effective_optimization_params.get("ilp_timeout_seconds", 120) or 120)
         
         cost_breakdown = self.evaluator.total_cost_breakdown(result, vehicle_types)
         result.total_cost = float(cost_breakdown["total"])
@@ -288,6 +518,12 @@ class OptimizerService:
         result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)
         result.meta["trip_group_audit"] = self._build_trip_group_audit(result, trips)
         result.meta["phase_summary"] = self._build_phase_summary(result, cost_breakdown)
+        result.meta["parameter_effect_report"] = self._build_parameter_effect_report(
+            result,
+            trips,
+            cct_params,
+            vsp_params,
+        )
         result.meta["reproducibility"] = self._build_reproducibility_snapshot(
             algorithm,
             trips,
@@ -323,10 +559,34 @@ class OptimizerService:
             {
                 "n_trips": len(trips),
                 "n_vehicle_types": len(vehicle_types),
+                "submitted_cct_params": submitted_cct_params,
+                "submitted_vsp_params": submitted_vsp_params,
+                "submitted_optimization_params": submitted_optimization_params,
                 "cct_params": cct_params,
                 "vsp_params": vsp_params,
+                "optimization_params": effective_optimization_params,
+                "request_metadata": dict(request_metadata or {}),
                 "replay_fingerprint": replay_fingerprint,
+                "group_inference_report": group_inference_report,
+                "run_snapshot": run_snapshot,
             }
+        )
+        result.meta["run_snapshot"] = run_snapshot
+        result = self._apply_operational_quality_mode(
+            result=result,
+            trips=trips,
+            vehicle_types=vehicle_types,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=effective_optimization_params,
+        )
+        result = self._ensure_operational_quality_decision(
+            result=result,
+            trips=trips,
+            vehicle_types=vehicle_types,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=effective_optimization_params,
         )
 
         # ── AI Copilot: insight em linguagem natural (nice-to-have) ──────────
@@ -373,20 +633,40 @@ class OptimizerService:
         self,
         exc: Exception,
         trips: List[Trip],
+        vehicle_types: List[VehicleType],
         algorithm: AlgorithmType | str,
         cct_params: Dict[str, Any] | None,
         vsp_params: Dict[str, Any] | None,
+        optimization_params: Dict[str, Any] | None,
+        request_metadata: Any = None,
         stage: str = "solver",
         replay_fingerprint: Optional[Dict[str, Any]] = None,
+        run_snapshot: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         cct_params = cct_params or {}
         vsp_params = vsp_params or {}
+        optimization_params = optimization_params or {}
         replay_fingerprint = replay_fingerprint or self._build_replay_fingerprint(
             trips,
             algorithm,
             cct_params,
             vsp_params,
             float(vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds) or settings.hybrid_time_budget_seconds),
+        )
+        run_snapshot = run_snapshot or self._build_run_snapshot(
+            trips,
+            vehicle_types,
+            algorithm,
+            cct_params,
+            vsp_params,
+            optimization_params,
+            cct_params,
+            vsp_params,
+            optimization_params,
+            float(replay_fingerprint.get("time_budget_s") or settings.hybrid_time_budget_seconds),
+            replay_fingerprint,
+            self._build_group_inference_report(trips, request_metadata),
+            request_metadata,
         )
         algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
         issue_strings: List[str] = []
@@ -444,9 +724,278 @@ class OptimizerService:
                 "line_ids": sorted({int(trip.line_id) for trip in trips}) if trips else [],
                 "cct_params": cct_params,
                 "vsp_params": vsp_params,
+                "optimization_params": optimization_params,
                 "input_hash": replay_fingerprint.get("input_hash"),
                 "params_hash": replay_fingerprint.get("params_hash"),
                 "time_budget_s": replay_fingerprint.get("time_budget_s"),
+            },
+            "run_snapshot": run_snapshot,
+        }
+
+    def _group_infeasibility_mode(
+        self,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+        request_metadata: Any = None,
+    ) -> str:
+        metadata = dict(request_metadata or {})
+        raw = (
+            metadata.get("group_infeasibility_mode")
+            or optimization_params.get("group_infeasibility_mode")
+            or vsp_params.get("group_infeasibility_mode")
+            or cct_params.get("group_infeasibility_mode")
+            or "strict"
+        )
+        mode = str(raw).strip().lower()
+        if mode not in {"strict", "production", "assisted"}:
+            return "strict"
+        return mode
+
+    def _group_infeasibility_details(
+        self,
+        exc: OptimizerError,
+        audit: Dict[str, Any],
+        trips: List[Trip],
+        stage: str,
+        mode: str,
+    ) -> Dict[str, Any]:
+        exc_details = dict(getattr(exc, "details", {}) or {})
+        affected_groups: List[Dict[str, Any]] = []
+        if exc_details.get("group_id") is not None or exc_details.get("trip_ids"):
+            affected_groups.append(
+                {
+                    "trip_group_id": exc_details.get("group_id"),
+                    "trip_ids": list(exc_details.get("trip_ids") or []),
+                    "reason_code": exc_details.get("reason_code", "GROUP_INFEASIBLE"),
+                    "issues": list(exc_details.get("issues") or []),
+                }
+            )
+        for sample in audit.get("sample_splits") or []:
+            group_id = sample.get("trip_group_id")
+            if any(item.get("trip_group_id") == group_id for item in affected_groups):
+                continue
+            affected_groups.append(
+                {
+                    "trip_group_id": group_id,
+                    "trip_ids": list(sample.get("trip_ids") or []),
+                    "reason_code": "MANDATORY_GROUP_SPLIT",
+                    "block_ids": list(sample.get("block_ids") or []),
+                    "duty_ids": list(sample.get("duty_ids") or []),
+                    "roster_ids": list(sample.get("roster_ids") or []),
+                }
+            )
+        grouped_trip_ids = {
+            int(trip.id)
+            for trip in trips
+            if getattr(trip, "trip_group_id", None) is not None
+        }
+        return {
+            "mode": mode,
+            "stage": stage,
+            "error_code": "GROUP_INFEASIBLE",
+            "message": str(exc),
+            "relaxed_constraints": [
+                {
+                    "constraint": "mandatory_trip_group_same_roster",
+                    "relaxation": "minimal_group_break",
+                    "control": "only affected groups listed in affected_groups",
+                }
+            ],
+            "affected_groups": affected_groups[:20],
+            "trip_group_audit": audit,
+            "grouped_trip_count": len(grouped_trip_ids),
+            "recommendation": exc_details.get(
+                "recommendation",
+                "Revise os trip_group_id/pairId ou autorize intervenção manual para os grupos listados.",
+            ),
+        }
+
+    def _apply_group_infeasibility_policy(
+        self,
+        result: OptimizationResult,
+        audit: Dict[str, Any],
+        exc: OptimizerError,
+        mode: str,
+        trips: List[Trip],
+        stage: str,
+    ) -> OptimizationResult:
+        details = self._group_infeasibility_details(exc, audit, trips, stage, mode)
+        if mode == "production":
+            result.meta["group_infeasibility_handling"] = {
+                **details,
+                "status": "relaxed",
+                "explanation": (
+                    "GROUP_INFEASIBLE confirmado. A execução retornou a melhor solução encontrada "
+                    "com quebra mínima e auditada dos grupos afetados."
+                ),
+            }
+            result.meta["relaxed_constraints"] = details["relaxed_constraints"]
+            result.meta["affected_groups"] = details["affected_groups"]
+            warning = "GROUP_INFEASIBLE_RELAXED mode=production"
+            if warning not in result.vsp.warnings:
+                result.vsp.warnings.append(warning)
+            return result
+
+        assisted_details = {
+            **dict(getattr(exc, "details", {}) or {}),
+            "group_infeasibility_handling": {
+                **details,
+                "status": "manual_intervention_required" if mode == "assisted" else "failed",
+            },
+            "affected_groups": details["affected_groups"],
+            "relaxed_constraints": [] if mode != "production" else details["relaxed_constraints"],
+        }
+        raise OptimizerError(
+            "GROUP_INFEASIBLE requer intervenção manual." if mode == "assisted" else str(exc),
+            code="GROUP_INFEASIBLE",
+            details=assisted_details,
+        )
+
+    def _is_controlled_group_relaxation(
+        self,
+        result: OptimizationResult,
+        output_report: Dict[str, Any],
+        mode: str,
+    ) -> bool:
+        if mode != "production":
+            return False
+        if not (result.meta or {}).get("group_infeasibility_handling"):
+            return False
+        hard_issues = [str(item) for item in output_report.get("hard_issues") or []]
+        if not hard_issues:
+            return False
+        allowed_prefixes = ("MANDATORY_GROUP_SPLIT",)
+        return all(any(issue.startswith(prefix) for prefix in allowed_prefixes) for issue in hard_issues)
+
+    def _connection_block_reason(
+        self,
+        current: Trip,
+        nxt: Trip,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        gap = int(nxt.start_time) - int(current.end_time)
+        if gap < 0:
+            return "overlap", {"gap": gap}
+
+        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
+        enforce_min_interval = bool(vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False)))
+        strict_zero_gap_validation = bool(vsp_params.get("strict_zero_gap_validation", cct_params.get("strict_zero_gap_validation", False)))
+        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960)
+        deadhead = int(current.deadhead_times.get(nxt.origin_id, 0))
+
+        if gap == 0 and strict_zero_gap_validation and current.destination_id != nxt.origin_id:
+            return "zero_gap", {"gap": gap, "from_terminal": current.destination_id, "to_terminal": nxt.origin_id}
+        if enforce_min_interval and 0 < gap < min_break:
+            return "min_break", {"gap": gap, "limit": min_break}
+        if gap < max(min_layover, deadhead):
+            return "min_connection_time", {"gap": gap, "limit": max(min_layover, deadhead), "deadhead": deadhead}
+        if max_vehicle_shift > 0 and int(nxt.end_time) - int(current.start_time) > max_vehicle_shift:
+            return "max_shift_minutes", {
+                "spread": int(nxt.end_time) - int(current.start_time),
+                "limit": max_vehicle_shift,
+            }
+        return None
+
+    def _build_parameter_effect_report(
+        self,
+        result: OptimizationResult,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
+        min_connection = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
+        max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
+        enforce_min_interval = bool(vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False)))
+        strict_zero_gap = bool(vsp_params.get("strict_zero_gap_validation", cct_params.get("strict_zero_gap_validation", False)))
+        allow_vehicle_swap = bool(vsp_params.get("allow_vehicle_swap", not cct_params.get("operator_single_vehicle_only", False)))
+        output_report = ((result.meta or {}).get("hard_constraint_report") or {}).get("output") or {}
+        issue_counts = Counter(str(issue).split(" ", 1)[0] for issue in output_report.get("issues") or [])
+
+        blocked_by_constraint: Counter[str] = Counter()
+        samples: List[Dict[str, Any]] = []
+        ordered = sorted(trips, key=lambda item: (item.start_time, item.end_time, item.id))
+        max_sample_gap = max(min_connection, min_break, 60)
+        for idx, current in enumerate(ordered):
+            for nxt in ordered[idx + 1 :]:
+                gap = int(nxt.start_time) - int(current.end_time)
+                if gap > max_sample_gap:
+                    break
+                reason = self._connection_block_reason(current, nxt, cct_params, vsp_params)
+                if reason is None:
+                    continue
+                code, context = reason
+                if code == "overlap":
+                    continue
+                blocked_by_constraint[code] += 1
+                if len(samples) < 20:
+                    samples.append(
+                        {
+                            "constraint": code,
+                            "phase": "vsp_candidate",
+                            "from_trip_id": int(current.id),
+                            "to_trip_id": int(nxt.id),
+                            **context,
+                        }
+                    )
+
+        for duty in result.csp.duties or []:
+            if int(getattr(duty, "spread_time", 0) or 0) > max_shift:
+                blocked_by_constraint["max_shift_minutes"] += 1
+            meta_drive = int((duty.meta or {}).get("max_continuous_drive_minutes", 0) or 0)
+            if getattr(duty, "continuous_driving_violation", False) or meta_drive > max_driving:
+                blocked_by_constraint["max_driving_minutes"] += 1
+            if not allow_vehicle_swap and issue_counts.get("OPERATOR_MULTIPLE_VEHICLES", 0):
+                blocked_by_constraint["allow_vehicle_swap"] += issue_counts["OPERATOR_MULTIPLE_VEHICLES"]
+
+        performance = (result.meta or {}).get("performance") or {}
+        scale_perf = performance.get("scale_decomposition") or {}
+        stitching = scale_perf.get("stitching") or ((result.vsp.meta or {}).get("scale_decomposition") or {}).get("stitching") or {}
+        fallback_meta = {
+            "group_audit_fallback": performance.get("group_audit_fallback"),
+            "group_audit_fallback_skipped": performance.get("group_audit_fallback_skipped"),
+            "scale_fallback_chunk_count": scale_perf.get("fallback_chunk_count"),
+        }
+        return {
+            "schema_version": "parameter_effect_report_v1",
+            "active_constraints": {
+                "min_break": {"active": enforce_min_interval, "value_minutes": min_break},
+                "min_connection_time": {"active": min_connection > 0, "value_minutes": min_connection},
+                "max_shift_minutes": {"active": max_shift > 0, "value_minutes": max_shift},
+                "max_driving_minutes": {"active": max_driving > 0, "value_minutes": max_driving},
+                "zero_gap": {"active": strict_zero_gap, "strict_geography": strict_zero_gap},
+                "allow_vehicle_swap": {
+                    "active": not allow_vehicle_swap,
+                    "value": allow_vehicle_swap,
+                    "effective_operator_single_vehicle_only": bool(cct_params.get("operator_single_vehicle_only", False)),
+                },
+            },
+            "blocked_connections": {
+                "total": int(sum(blocked_by_constraint.values())),
+                "by_constraint": dict(blocked_by_constraint),
+                "samples": samples,
+            },
+            "impact": {
+                "vsp": {
+                    "vehicles": len(result.vsp.blocks or []),
+                    "unassigned_trips": len(result.vsp.unassigned_trips or []),
+                    "warnings": list(result.vsp.warnings or [])[:10],
+                },
+                "csp": {
+                    "duties": len(result.csp.duties or []),
+                    "cct_violations": int(result.csp.cct_violations or 0),
+                    "issue_counts": dict(issue_counts),
+                },
+                "fallback": fallback_meta,
+                "stitching": {
+                    "attempted": int(stitching.get("attempted", 0) or 0),
+                    "accepted": int(stitching.get("accepted", 0) or 0),
+                    "rejected": int(stitching.get("rejected", 0) or 0),
+                },
             },
         }
 
@@ -493,6 +1042,123 @@ class OptimizerService:
             "trip_count": len(trips_snapshot),
             "line_ids": sorted({int(trip["line_id"]) for trip in trips_snapshot}),
             "time_budget_s": float(time_budget_s),
+        }
+
+    def _derive_deterministic_seed(
+        self,
+        trips: List[Trip],
+        algorithm: AlgorithmType | str,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        time_budget_s: float,
+    ) -> int:
+        algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
+        trips_snapshot = [
+            {
+                "id": int(trip.id),
+                "line_id": int(trip.line_id),
+                "trip_group_id": int(trip.trip_group_id) if trip.trip_group_id is not None else None,
+                "start_time": int(trip.start_time),
+                "end_time": int(trip.end_time),
+                "origin_id": int(trip.origin_id),
+                "destination_id": int(trip.destination_id),
+                "duration": int(trip.duration),
+                "distance_km": float(trip.distance_km),
+                "direction": trip.direction,
+            }
+            for trip in sorted(trips, key=lambda item: (item.id, item.start_time, item.end_time))
+        ]
+        vsp_snapshot = dict(vsp_params)
+        vsp_snapshot.pop("random_seed", None)
+        seed_source = {
+            "algorithm": algorithm_name,
+            "time_budget_s": float(time_budget_s),
+            "trips": trips_snapshot,
+            "cct_params": cct_params,
+            "vsp_params": vsp_snapshot,
+        }
+        seed_hex = hashlib.sha256(self._stable_json(seed_source).encode("ascii")).hexdigest()[:8]
+        return int(seed_hex, 16)
+
+    def _build_vehicle_types_hash(self, vehicle_types: List[VehicleType]) -> str:
+        snapshot = [
+            {
+                "id": int(vehicle.id),
+                "name": str(vehicle.name),
+                "passenger_capacity": int(vehicle.passenger_capacity),
+                "cost_per_km": float(vehicle.cost_per_km),
+                "cost_per_hour": float(vehicle.cost_per_hour),
+                "fixed_cost": float(vehicle.fixed_cost),
+                "is_electric": bool(vehicle.is_electric),
+                "battery_capacity_kwh": float(vehicle.battery_capacity_kwh),
+                "minimum_soc": float(vehicle.minimum_soc),
+                "charge_rate_kw": float(vehicle.charge_rate_kw),
+                "energy_cost_per_kwh": float(vehicle.energy_cost_per_kwh),
+                "depot_id": int(vehicle.depot_id) if vehicle.depot_id is not None else None,
+            }
+            for vehicle in sorted(vehicle_types, key=lambda item: (item.id, item.name))
+        ]
+        return hashlib.sha256(self._stable_json(snapshot).encode("ascii")).hexdigest()[:12]
+
+    def _build_run_snapshot(
+        self,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        algorithm: AlgorithmType | str,
+        submitted_cct_params: Dict[str, Any],
+        submitted_vsp_params: Dict[str, Any],
+        submitted_optimization_params: Dict[str, Any],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+        time_budget_s: float,
+        replay_fingerprint: Dict[str, Any],
+        group_inference_report: Dict[str, Any],
+        request_metadata: Any = None,
+    ) -> Dict[str, Any]:
+        metadata = dict(request_metadata or {})
+        algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
+        strict_flags = {
+            "strict_hard_validation": bool(
+                vsp_params.get("strict_hard_validation", cct_params.get("strict_hard_validation", False))
+            ),
+            "strict_zero_gap_validation": bool(
+                vsp_params.get("strict_zero_gap_validation", cct_params.get("strict_zero_gap_validation", False))
+            ),
+            "strict_operational_mode": bool(
+                vsp_params.get("strict_operational_mode", cct_params.get("strict_operational_mode", False))
+            ),
+            "strict_hard_constraints": bool(
+                vsp_params.get("strict_hard_constraints", cct_params.get("strict_hard_constraints", False))
+            ),
+        }
+        return {
+            "schema_version": "optimization_run_snapshot_v1",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "algorithm": algorithm_name,
+            "seed": vsp_params.get("random_seed", optimization_params.get("random_seed")),
+            "time_budget_s": float(time_budget_s),
+            "company_id": metadata.get("company_id"),
+            "scenario_id": metadata.get("scenario_id") or metadata.get("run_id"),
+            "run_id": metadata.get("run_id"),
+            "strict_flags": strict_flags,
+            "trips_hash": replay_fingerprint.get("input_hash"),
+            "vehicle_types_hash": self._build_vehicle_types_hash(vehicle_types),
+            "trip_count": len(trips),
+            "vehicle_type_count": len(vehicle_types),
+            "replay_fingerprint": dict(replay_fingerprint),
+            "trip_group_inference_report": group_inference_report,
+            "submitted_params": {
+                "cct_params": submitted_cct_params,
+                "vsp_params": submitted_vsp_params,
+                "optimization_params": submitted_optimization_params,
+            },
+            "resolved_params": {
+                "cct_params": cct_params,
+                "vsp_params": vsp_params,
+                "optimization_params": optimization_params,
+            },
+            "request_metadata": metadata,
         }
 
     def _dominant_failure_phase(self, issues: List[str]) -> str:
@@ -655,6 +1321,1203 @@ class OptimizerService:
             "same_roster_ratio": round((same_roster_groups / total_groups), 4) if total_groups > 0 else 0.0,
             "sample_splits": sample_splits,
         }
+
+    def _repair_split_trip_groups_with_dedicated_blocks(
+        self,
+        result: OptimizationResult,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+    ) -> Optional[OptimizationResult]:
+        audit = self._build_trip_group_audit(result, trips)
+        if int(audit.get("split_groups", 0)) <= 0:
+            return None
+
+        trip_by_id = {int(trip.id): trip for trip in trips}
+        groups: Dict[int, List[int]] = {}
+        for trip in trips:
+            if trip.trip_group_id is None:
+                continue
+            groups.setdefault(int(trip.trip_group_id), []).append(int(trip.id))
+
+        trip_to_roster: Dict[int, Optional[int]] = {}
+        for duty in result.csp.duties:
+            roster_id = duty.meta.get("roster_id")
+            for task in duty.tasks:
+                for trip in task.trips:
+                    trip_to_roster[int(trip.id)] = int(roster_id) if roster_id is not None else None
+
+        split_member_groups: List[List[int]] = []
+        for member_ids in groups.values():
+            unique_member_ids = sorted(set(member_ids))
+            if len(unique_member_ids) < 2:
+                continue
+            assigned_rosters = {trip_to_roster.get(trip_id) for trip_id in unique_member_ids}
+            if None in assigned_rosters or len(assigned_rosters) > 1:
+                split_member_groups.append(unique_member_ids)
+
+        if not split_member_groups:
+            return None
+
+        original_block_by_trip: Dict[int, Block] = {}
+        for block in result.vsp.blocks:
+            for trip in block.trips:
+                original_block_by_trip[int(trip.id)] = block
+
+        next_block_id = max((int(block.id) for block in result.vsp.blocks), default=0) + 1
+        repaired_blocks: List[Block] = []
+        repair_trip_ids: set[int] = set()
+
+        split_groups: List[List[Trip]] = []
+        for member_ids in split_member_groups:
+            group_trips = [
+                trip_by_id[trip_id]
+                for trip_id in member_ids
+                if trip_id in trip_by_id
+            ]
+            if len(group_trips) < 2:
+                continue
+            ordered_group_trips = sorted(group_trips, key=lambda trip: (trip.start_time, trip.id))
+            infeasible_issues = self._validate_repair_group_block(ordered_group_trips, cct_params, vsp_params)
+            if infeasible_issues:
+                group_id = getattr(ordered_group_trips[0], "trip_group_id", None)
+                issue_prefixes = sorted({str(issue).split(" ", 1)[0] for issue in infeasible_issues if issue})
+                reason_code = issue_prefixes[0] if issue_prefixes else "GROUP_CONNECTION_INFEASIBLE"
+                raise OptimizerError(
+                    (
+                        "Mandatory trip group cannot be repaired into one vehicle block "
+                        f"without violating hard VSP constraints: group={group_id}"
+                    ),
+                    code="GROUP_INFEASIBLE",
+                    details={
+                        "group_id": int(group_id) if group_id is not None else None,
+                        "trip_ids": [int(trip.id) for trip in ordered_group_trips],
+                        "reason_code": reason_code,
+                        "issues": infeasible_issues,
+                        "recommendation": (
+                            "Corrija o trip_group_id/pairId de entrada ou relaxe o pareamento hard "
+                            "para esta grade; o solver não deve mascarar grupos fisicamente inviáveis."
+                        ),
+                    },
+                )
+            split_groups.append(ordered_group_trips)
+            repair_trip_ids.update(int(trip.id) for trip in group_trips)
+
+        if not split_groups:
+            return None
+
+        for block in result.vsp.blocks:
+            current_segment: List[Trip] = []
+
+            def flush_segment() -> None:
+                nonlocal next_block_id, current_segment
+                if not current_segment:
+                    return
+                repaired_blocks.append(
+                    Block(
+                        id=next_block_id,
+                        trips=list(current_segment),
+                        vehicle_type_id=block.vehicle_type_id,
+                        warnings=list(block.warnings),
+                        meta={
+                            **dict(block.meta or {}),
+                            "source_block_id": int(block.id),
+                            "group_repair_segment": True,
+                        },
+                    )
+                )
+                next_block_id += 1
+                current_segment = []
+
+            for trip in block.trips:
+                if int(trip.id) in repair_trip_ids:
+                    flush_segment()
+                else:
+                    current_segment.append(trip)
+            flush_segment()
+
+        for group_trips in split_groups:
+            source_blocks = [
+                original_block_by_trip[int(trip.id)]
+                for trip in group_trips
+                if int(trip.id) in original_block_by_trip
+            ]
+            source_block = source_blocks[0] if source_blocks else None
+            repaired_blocks.append(
+                Block(
+                    id=next_block_id,
+                    trips=list(group_trips),
+                    vehicle_type_id=source_block.vehicle_type_id if source_block is not None else None,
+                    warnings=[],
+                    meta={
+                        "source_block_ids": sorted({int(block.id) for block in source_blocks}),
+                        "group_repair_dedicated_block": True,
+                        "covered_trip_group_ids": sorted(
+                            {
+                                int(trip.trip_group_id)
+                                for trip in group_trips
+                                if getattr(trip, "trip_group_id", None) is not None
+                            }
+                        ),
+                    },
+                )
+            )
+            next_block_id += 1
+
+        repaired_blocks.sort(key=lambda block: (block.start_time, block.id))
+        repaired_vsp = VSPSolution(
+            blocks=repaired_blocks,
+            total_cost=result.vsp.total_cost,
+            unassigned_trips=list(result.vsp.unassigned_trips or []),
+            algorithm=f"{result.vsp.algorithm or 'vsp'}+group_repair",
+            iterations=result.vsp.iterations,
+            elapsed_ms=result.vsp.elapsed_ms,
+            warnings=[
+                *(result.vsp.warnings or []),
+                f"GROUP_REPAIR_DEDICATED_BLOCKS groups={len(split_groups)}",
+            ],
+            meta={
+                **dict(result.vsp.meta or {}),
+                "group_repair": {
+                    "strategy": "dedicated_blocks",
+                    "groups_repaired": len(split_groups),
+                    "trips_repaired": sorted(repair_trip_ids),
+                },
+            },
+        )
+        csp = self._make_csp(cct_params, vsp_params, optimization_params).solve(repaired_vsp.blocks, trips)
+        repaired_result = OptimizationResult(
+            vsp=repaired_vsp,
+            csp=csp,
+            total_cost=result.total_cost,
+            total_elapsed_ms=result.total_elapsed_ms,
+            algorithm=result.algorithm,
+            meta={**dict(result.meta or {})},
+        )
+        return repaired_result
+
+    def _validate_repair_group_block(
+        self,
+        group_trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> List[str]:
+        issues: List[str] = []
+        if len(group_trips) < 2:
+            return issues
+
+        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
+        enforce_min_interval = bool(
+            vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False))
+        )
+        connection_tolerance = int(
+            vsp_params.get(
+                "connection_tolerance_minutes",
+                cct_params.get("connection_tolerance_minutes", 0),
+            )
+            or 0
+        )
+        strict_zero_gap_validation = bool(
+            vsp_params.get(
+                "strict_zero_gap_validation",
+                cct_params.get("strict_zero_gap_validation", False),
+            )
+        )
+        strict_operational_mode = bool(
+            vsp_params.get(
+                "strict_operational_mode",
+                cct_params.get("strict_operational_mode", False),
+            )
+        )
+        strict_hard_constraints = bool(
+            vsp_params.get(
+                "strict_hard_constraints",
+                cct_params.get("strict_hard_constraints", False),
+            )
+        )
+
+        for current, nxt in zip(group_trips, group_trips[1:]):
+            if int(nxt.start_time) < int(current.end_time):
+                issues.append(f"GROUP_OVERLAP_INFEASIBLE T{current.id}->{nxt.id}")
+                continue
+            if not is_connection_feasible(
+                current,
+                nxt,
+                min_layover=min_layover,
+                min_break=min_break,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+                strict_zero_gap_validation=strict_zero_gap_validation,
+                strict_operational_mode=strict_operational_mode,
+                strict_hard_constraints=strict_hard_constraints,
+            ):
+                issues.append(f"GROUP_CONNECTION_INFEASIBLE T{current.id}->{nxt.id}")
+        return issues
+
+    def _build_scale_profile(
+        self,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        grouped: Dict[int, List[int]] = {}
+        for trip in trips:
+            if trip.trip_group_id is not None:
+                grouped.setdefault(int(trip.trip_group_id), []).append(int(trip.id))
+        group_sizes = [len(set(ids)) for ids in grouped.values() if len(set(ids)) >= 2]
+        direct_max = int(vsp_params.get("scale_direct_max_trips", 1000) or 1000)
+        decompose_min = int(vsp_params.get("scale_decompose_min_trips", 2000) or 2000)
+        if len(trips) <= direct_max:
+            mode = "direct_strict"
+        elif len(trips) < decompose_min:
+            mode = "strict_with_controlled_fallback"
+        else:
+            mode = "decomposed_required"
+        return {
+            "trip_count": len(trips),
+            "group_count": len(group_sizes),
+            "grouped_trip_count": sum(group_sizes),
+            "avg_group_size": round(sum(group_sizes) / len(group_sizes), 3) if group_sizes else 0.0,
+            "max_group_size": max(group_sizes) if group_sizes else 0,
+            "direct_max_trips": direct_max,
+            "decompose_min_trips": decompose_min,
+            "chunk_target_trips": int(vsp_params.get("scale_chunk_target_trips", 600) or 600),
+            "chunk_max_trips": int(vsp_params.get("scale_chunk_max_trips", 800) or 800),
+            "mode": mode,
+            "strict_trip_group_mode": self._strict_trip_group_mode(trips, cct_params, vsp_params),
+        }
+
+    def _summarize_trip_groups(self, trips: List[Trip]) -> Dict[str, int]:
+        grouped: Dict[int, set[int]] = {}
+        for trip in trips:
+            group_id = getattr(trip, "trip_group_id", None)
+            if group_id is None:
+                continue
+            grouped.setdefault(int(group_id), set()).add(int(trip.id))
+
+        group_sizes = [len(ids) for ids in grouped.values() if len(ids) >= 2]
+        return {
+            "group_count": len(group_sizes),
+            "grouped_trip_count": sum(group_sizes),
+            "max_group_size": max(group_sizes) if group_sizes else 0,
+        }
+
+    def _build_group_inference_report(
+        self,
+        trips: List[Trip],
+        request_metadata: Any,
+    ) -> Dict[str, Any]:
+        metadata = dict(request_metadata or {})
+        optimizer_input_stats = self._summarize_trip_groups(trips)
+        mode = str(metadata.get("trip_group_inference_mode") or ("direct_input" if not metadata else "unspecified"))
+        has_backend_stats = "backend_trip_group_stats" in metadata
+        backend_stats_raw = metadata.get("backend_trip_group_stats") or {}
+        backend_stats = {
+            "group_count": int(backend_stats_raw.get("group_count", optimizer_input_stats["group_count"]) or 0),
+            "grouped_trip_count": int(backend_stats_raw.get("grouped_trip_count", optimizer_input_stats["grouped_trip_count"]) or 0),
+            "max_group_size": int(backend_stats_raw.get("max_group_size", optimizer_input_stats["max_group_size"]) or 0),
+        }
+
+        if has_backend_stats and backend_stats != optimizer_input_stats:
+            raise OptimizerError(
+                "Incoming trip_group_id payload diverged between backend and optimizer input.",
+                code="TRIP_GROUP_PAYLOAD_DIVERGENCE",
+                details={
+                    "trip_group_inference_mode": mode,
+                    "backend_trip_group_stats": backend_stats,
+                    "optimizer_input_stats": optimizer_input_stats,
+                },
+            )
+
+        return {
+            "mode": mode,
+            "backend_trip_group_stats": backend_stats,
+            "optimizer_input_stats": optimizer_input_stats,
+        }
+
+    def _log_group_inference_report(self, report: Dict[str, Any]) -> None:
+        backend_stats = report.get("backend_trip_group_stats") or {}
+        input_stats = report.get("optimizer_input_stats") or {}
+        effective_stats = report.get("optimizer_effective_stats") or {}
+        logger.info(
+            "[GROUPS] mode=%s backend=%d/%d input=%d/%d effective=%d/%d inferred=%s",
+            report.get("mode"),
+            int(backend_stats.get("group_count", 0) or 0),
+            int(backend_stats.get("grouped_trip_count", 0) or 0),
+            int(input_stats.get("group_count", 0) or 0),
+            int(input_stats.get("grouped_trip_count", 0) or 0),
+            int(effective_stats.get("group_count", 0) or 0),
+            int(effective_stats.get("grouped_trip_count", 0) or 0),
+            bool(report.get("inference_applied", False)),
+        )
+
+    def _build_scale_failure_hard_constraint_report(
+        self,
+        failed_chunks: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        issues: List[str] = []
+        problem_groups: List[List[int]] = []
+        for chunk in failed_chunks:
+            chunk_issues = chunk.get("issues") or []
+            if isinstance(chunk_issues, list):
+                issues.extend(str(item) for item in chunk_issues if item)
+            error_message = str(chunk.get("error") or "")
+            error_details = chunk.get("error_details") or {}
+            detail_issues = error_details.get("issues") or []
+            if isinstance(detail_issues, list):
+                issues.extend(str(item) for item in detail_issues if item)
+            detail_trip_ids = error_details.get("trip_ids") or []
+            if error_details.get("error_code") == "GROUP_INFEASIBLE" and detail_trip_ids:
+                problem_groups.append([int(trip_id) for trip_id in detail_trip_ids])
+                issues.append(f"GROUP_INFEASIBLE {detail_trip_ids}")
+            for match in re.findall(r"MANDATORY_GROUP_SPLIT \[([^\]]+)\]", error_message):
+                try:
+                    group = [int(part.strip()) for part in match.split(",") if part.strip()]
+                except ValueError:
+                    continue
+                if group:
+                    problem_groups.append(group)
+                    issues.append(f"MANDATORY_GROUP_SPLIT {group}")
+
+        deduped_issues = list(dict.fromkeys(issues))
+        deduped_groups: List[List[int]] = []
+        seen_groups: set[Tuple[int, ...]] = set()
+        for group in problem_groups:
+            key = tuple(group)
+            if key in seen_groups:
+                continue
+            seen_groups.add(key)
+            deduped_groups.append(group)
+
+        return {
+            "ok": False,
+            "issues": deduped_issues,
+            "failed_chunks": failed_chunks[:20],
+            "problem_trip_groups": deduped_groups,
+        }
+
+    def _should_use_scale_decomposition(
+        self,
+        algorithm: AlgorithmType,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        scale_profile: Dict[str, Any],
+    ) -> bool:
+        if bool(vsp_params.get("disable_scale_decomposition", False)):
+            return False
+        algorithm_value = algorithm.value if hasattr(algorithm, "value") else str(algorithm)
+        if algorithm_value != AlgorithmType.HYBRID_PIPELINE.value:
+            return False
+        if bool(vsp_params.get("force_scale_decomposition", False)):
+            return True
+        return len(trips) >= int(scale_profile.get("decompose_min_trips", 2000) or 2000)
+
+    def _partition_scale_chunks(
+        self,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        scale_profile: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        scale_profile = scale_profile or self._build_scale_profile(trips, cct_params, vsp_params)
+        target = max(1, int(scale_profile.get("chunk_target_trips", 600) or 600))
+        max_size = max(target, int(scale_profile.get("chunk_max_trips", 800) or 800))
+        time_window = max(60, int(vsp_params.get("scale_chunk_time_window_minutes", 360) or 360))
+
+        grouped_units: Dict[Tuple[str, int], List[Trip]] = {}
+        for trip in trips:
+            if trip.trip_group_id is None:
+                key = ("trip", int(trip.id))
+            else:
+                key = ("group", int(trip.trip_group_id))
+            grouped_units.setdefault(key, []).append(trip)
+
+        def unit_sort_key(unit: List[Trip]) -> Tuple[int, int, int, Tuple[Any, Any], int]:
+            ordered = sorted(unit, key=lambda item: (item.start_time, item.id))
+            line_counts = Counter(int(trip.line_id) for trip in ordered)
+            line_id = line_counts.most_common(1)[0][0] if line_counts else 0
+            first = ordered[0]
+            service_day = int(first.start_time) // 1440
+            time_bucket = int(first.start_time) // time_window
+            if first.origin_latitude is not None and first.origin_longitude is not None:
+                region_key: Tuple[Any, Any] = (round(float(first.origin_latitude), 2), round(float(first.origin_longitude), 2))
+            else:
+                region_key = (int(first.origin_id), int(first.destination_id))
+            return (line_id, service_day, time_bucket, region_key, int(first.start_time))
+
+        units = sorted((sorted(unit, key=lambda item: (item.start_time, item.id)) for unit in grouped_units.values()), key=unit_sort_key)
+        chunks: List[Dict[str, Any]] = []
+        current: List[Trip] = []
+        current_key: Optional[Tuple[int, int, int, Tuple[Any, Any]]] = None
+
+        def flush() -> None:
+            nonlocal current, current_key
+            if not current:
+                return
+            ordered = sorted(current, key=lambda item: (item.start_time, item.id))
+            chunks.append(
+                {
+                    "index": len(chunks),
+                    "trips": ordered,
+                    "trip_count": len(ordered),
+                    "line_ids": sorted({int(trip.line_id) for trip in ordered}),
+                    "trip_group_ids": sorted({int(trip.trip_group_id) for trip in ordered if trip.trip_group_id is not None}),
+                    "start_time": min(int(trip.start_time) for trip in ordered),
+                    "end_time": max(int(trip.end_time) for trip in ordered),
+                    "partition_key": current_key,
+                }
+            )
+            current = []
+            current_key = None
+
+        for unit in units:
+            key_full = unit_sort_key(unit)
+            key = key_full[:4]
+            unit_size = len(unit)
+            if unit_size > max_size:
+                flush()
+                current = list(unit)
+                current_key = key
+                flush()
+                continue
+            if current and len(current) + unit_size > max_size:
+                flush()
+            elif current and key != current_key and len(current) >= target:
+                flush()
+            current.extend(unit)
+            current_key = current_key or key
+        flush()
+        return chunks
+
+    def _restrict_mandatory_groups_to_chunk(
+        self,
+        cct_params: Dict[str, Any],
+        chunk_trips: List[Trip],
+        chunk_index: int,
+    ) -> None:
+        mandatory_groups = cct_params.get("mandatory_trip_groups_same_duty") or []
+        if not mandatory_groups:
+            return
+        chunk_trip_ids = {int(trip.id) for trip in chunk_trips}
+        filtered: List[List[int]] = []
+        partial: List[Dict[str, Any]] = []
+        for group in mandatory_groups:
+            group_ids = {int(item) for item in group}
+            inside = group_ids & chunk_trip_ids
+            if not inside:
+                continue
+            if inside != group_ids:
+                partial.append(
+                    {
+                        "group": sorted(group_ids),
+                        "inside": sorted(inside),
+                        "outside": sorted(group_ids - chunk_trip_ids),
+                    }
+                )
+                continue
+            filtered.append(sorted(group_ids))
+        if partial:
+            raise OptimizerError(
+                f"Scale chunk {chunk_index} split mandatory trip groups before solve.",
+                code="SCALE_CHUNK_GROUP_SPLIT",
+                details={"chunk_index": chunk_index, "partial_groups": partial[:10]},
+            )
+        cct_params["mandatory_trip_groups_same_duty"] = filtered
+        trip_by_id = {int(trip.id): trip for trip in chunk_trips}
+        for index, group_ids in enumerate(filtered):
+            existing_group_ids = {
+                int(trip_by_id[trip_id].trip_group_id)
+                for trip_id in group_ids
+                if trip_id in trip_by_id and trip_by_id[trip_id].trip_group_id is not None
+            }
+            synthetic_group_id = -(10_000_000 + chunk_index * 100_000 + index)
+            materialized_group_id = next(iter(existing_group_ids)) if len(existing_group_ids) == 1 else synthetic_group_id
+            for trip_id in group_ids:
+                trip = trip_by_id.get(trip_id)
+                if trip is not None and trip.trip_group_id is None:
+                    trip.trip_group_id = materialized_group_id
+
+    def _run_decomposed_hybrid(
+        self,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        depot_id: Optional[int],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+        time_budget_s: float,
+        scale_profile: Dict[str, Any],
+    ) -> OptimizationResult:
+        chunks = self._partition_scale_chunks(trips, cct_params, vsp_params, scale_profile)
+        logger.warning(
+            "[SCALE] Decomposed hybrid_pipeline: trips=%d groups=%d chunks=%d target=%s max=%s",
+            len(trips),
+            int(scale_profile.get("group_count", 0) or 0),
+            len(chunks),
+            scale_profile.get("chunk_target_trips"),
+            scale_profile.get("chunk_max_trips"),
+        )
+        if not chunks:
+            raise NoProblemDataError("scale decomposition produced no chunks")
+
+        strict_mode = bool(
+            vsp_params.get(
+                "strict_hard_constraints",
+                cct_params.get("strict_hard_constraints", False),
+            )
+        )
+        chunk_budget = self._scale_chunk_budget(time_budget_s, len(chunks), vsp_params)
+        chunk_records: List[Dict[str, Any]] = []
+        failed_chunks: List[Dict[str, Any]] = []
+
+        for chunk in chunks:
+            chunk_index = int(chunk["index"])
+            chunk_trips = list(chunk["trips"])
+            logger.info(
+                "[SCALE] chunk[%d/%d] trips=%d lines=%s groups=%d window=%s-%s",
+                chunk_index + 1,
+                len(chunks),
+                len(chunk_trips),
+                chunk.get("line_ids"),
+                len(chunk.get("trip_group_ids") or []),
+                chunk.get("start_time"),
+                chunk.get("end_time"),
+            )
+            base_chunk_cct = dict(cct_params)
+            base_chunk_vsp = dict(vsp_params)
+            base_chunk_vsp["disable_scale_decomposition"] = True
+            base_chunk_vsp["scale_chunk_index"] = chunk_index
+            self._restrict_mandatory_groups_to_chunk(base_chunk_cct, chunk_trips, chunk_index)
+            if strict_mode:
+                base_chunk_cct["strict_hard_validation"] = True
+                base_chunk_vsp["strict_hard_validation"] = True
+
+            chunk_result: Optional[OptimizationResult] = None
+            chunk_status = "completed"
+            primary_error: Optional[Exception] = None
+            try:
+                chunk_result = self.run(
+                    trips=chunk_trips,
+                    vehicle_types=vehicle_types,
+                    algorithm=AlgorithmType.HYBRID_PIPELINE,
+                    depot_id=depot_id,
+                    time_budget_s=chunk_budget,
+                    cct_params=base_chunk_cct,
+                    vsp_params=base_chunk_vsp,
+                    optimization_params=dict(optimization_params or {}),
+                )
+            except Exception as exc:
+                primary_error = exc
+                logger.warning("[SCALE] chunk[%d] primary hybrid failed: %s", chunk_index, exc)
+
+            def run_fallback(reason: str) -> Optional[OptimizationResult]:
+                fallback_cct = dict(base_chunk_cct)
+                fallback_vsp = dict(base_chunk_vsp)
+                fallback_vsp["scale_chunk_fallback"] = "greedy"
+
+                def append_failed_chunk(
+                    exc: Exception,
+                    fallback_reason: str,
+                    *,
+                    error_details: Optional[Dict[str, Any]] = None,
+                ) -> None:
+                    details = dict(error_details or getattr(exc, "details", {}) or {})
+                    failed_chunks.append(
+                        {
+                            "chunk_index": chunk_index,
+                            "trip_count": len(chunk_trips),
+                            "line_ids": chunk.get("line_ids"),
+                            "error": str(exc),
+                            "error_code": getattr(exc, "code", exc.__class__.__name__),
+                            "error_details": details,
+                            "issues": list(details.get("issues") or []),
+                            "primary_error": str(primary_error) if primary_error else None,
+                            "fallback_reason": fallback_reason,
+                        }
+                    )
+
+                def run_group_preserving_repair_fallback() -> Optional[OptimizationResult]:
+                    relaxed_cct = dict(fallback_cct)
+                    relaxed_vsp = dict(fallback_vsp)
+                    relaxed_cct["strict_hard_validation"] = False
+                    relaxed_vsp["strict_hard_validation"] = False
+                    relaxed_vsp["scale_chunk_fallback"] = "greedy_group_repair"
+                    relaxed_result = self._dispatch(
+                        AlgorithmType.GREEDY,
+                        chunk_trips,
+                        vehicle_types,
+                        depot_id,
+                        relaxed_cct,
+                        relaxed_vsp,
+                        dict(optimization_params or {}),
+                        max(15.0, min(chunk_budget, 60.0)),
+                    )
+                    relaxed_validation = self._validate_scale_chunk_result(
+                        relaxed_result,
+                        chunk_trips,
+                        fallback_cct,
+                        fallback_vsp,
+                    )
+                    if relaxed_validation["ok"]:
+                        logger.info(
+                            "[SCALE] chunk[%d] relaxed greedy fallback completed after %s",
+                            chunk_index,
+                            reason,
+                        )
+                        return relaxed_result
+                    repaired_result = self._repair_split_trip_groups_with_dedicated_blocks(
+                        relaxed_result,
+                        chunk_trips,
+                        fallback_cct,
+                        fallback_vsp,
+                        optimization_params,
+                    )
+                    repaired_validation = self._validate_scale_chunk_result(
+                        repaired_result,
+                        chunk_trips,
+                        fallback_cct,
+                        fallback_vsp,
+                    )
+                    if not repaired_validation["ok"]:
+                        raise OptimizerError(
+                            "Scale chunk fallback remained invalid after local group repair.",
+                            code=repaired_validation["error_code"],
+                            details={
+                                "issues": repaired_validation["issues"],
+                                "trip_group_audit": repaired_validation["trip_group_audit"],
+                                "hard_constraint_report": repaired_validation["hard_constraint_report"],
+                            },
+                        )
+                    repaired_result.meta.setdefault("performance", {})
+                    repaired_result.meta["performance"]["scale_chunk_group_repair"] = {
+                        "chunk_index": chunk_index,
+                        "reason": reason,
+                        "fallback": "greedy_group_repair",
+                    }
+                    logger.info(
+                        "[SCALE] chunk[%d] greedy group-repair fallback completed after %s",
+                        chunk_index,
+                        reason,
+                    )
+                    return repaired_result
+
+                try:
+                    fallback_result = self.run(
+                        trips=chunk_trips,
+                        vehicle_types=vehicle_types,
+                        algorithm=AlgorithmType.GREEDY,
+                        depot_id=depot_id,
+                        time_budget_s=max(15.0, min(chunk_budget, 60.0)),
+                        cct_params=fallback_cct,
+                        vsp_params=fallback_vsp,
+                        optimization_params=dict(optimization_params or {}),
+                    )
+                    logger.info("[SCALE] chunk[%d] fallback greedy completed after %s", chunk_index, reason)
+                    return fallback_result
+                except Exception as fallback_exc:
+                    try:
+                        repaired_fallback = run_group_preserving_repair_fallback()
+                        if repaired_fallback is not None:
+                            return repaired_fallback
+                    except OptimizerError as repair_exc:
+                        append_failed_chunk(repair_exc, reason, error_details=getattr(repair_exc, "details", {}) or {})
+                        logger.error("[SCALE] chunk[%d] fallback repair failed: %s", chunk_index, repair_exc)
+                        return None
+                    append_failed_chunk(fallback_exc, reason)
+                    logger.error("[SCALE] chunk[%d] fallback failed: %s", chunk_index, fallback_exc)
+                    return None
+
+            if chunk_result is None:
+                chunk_result = run_fallback("primary_exception")
+                if chunk_result is None:
+                    continue
+                chunk_status = "fallback_completed"
+
+            validation = self._validate_scale_chunk_result(chunk_result, chunk_trips, base_chunk_cct, base_chunk_vsp)
+            if not validation["ok"]:
+                repaired_result = self._try_scale_chunk_group_repair(
+                    chunk_result,
+                    chunk_trips,
+                    base_chunk_cct,
+                    base_chunk_vsp,
+                    optimization_params,
+                    chunk_index,
+                    "primary_invalid",
+                )
+                if repaired_result is not None:
+                    repaired_validation = self._validate_scale_chunk_result(repaired_result, chunk_trips, base_chunk_cct, base_chunk_vsp)
+                    if repaired_validation["ok"]:
+                        chunk_result = repaired_result
+                        chunk_status = f"{chunk_status}_repaired"
+                        validation = repaired_validation
+            if not validation["ok"] and chunk_status != "fallback_completed":
+                logger.warning(
+                    "[SCALE] chunk[%d] primary result invalid (%s); trying fallback",
+                    chunk_index,
+                    validation["issues"][:5],
+                )
+                fallback_result = run_fallback("primary_invalid")
+                if fallback_result is None:
+                    continue
+                chunk_result = fallback_result
+                chunk_status = "fallback_completed"
+                validation = self._validate_scale_chunk_result(chunk_result, chunk_trips, base_chunk_cct, base_chunk_vsp)
+                if not validation["ok"]:
+                    repaired_result = self._try_scale_chunk_group_repair(
+                        chunk_result,
+                        chunk_trips,
+                        base_chunk_cct,
+                        base_chunk_vsp,
+                        optimization_params,
+                        chunk_index,
+                        "fallback_invalid",
+                    )
+                    if repaired_result is not None:
+                        repaired_validation = self._validate_scale_chunk_result(repaired_result, chunk_trips, base_chunk_cct, base_chunk_vsp)
+                        if repaired_validation["ok"]:
+                            chunk_result = repaired_result
+                            chunk_status = "fallback_completed_repaired"
+                            validation = repaired_validation
+            if not validation["ok"]:
+                failed_chunks.append(
+                    {
+                        "chunk_index": chunk_index,
+                        "trip_count": len(chunk_trips),
+                        "line_ids": chunk.get("line_ids"),
+                        "error_code": validation["error_code"],
+                        "issues": validation["issues"],
+                    }
+                )
+                logger.error("[SCALE] chunk[%d] invalid after solve: %s", chunk_index, validation["issues"][:5])
+                continue
+
+            chunk_records.append(
+                {
+                    "chunk": chunk,
+                    "result": chunk_result,
+                    "status": chunk_status,
+                    "trip_group_audit": validation["trip_group_audit"],
+                    "hard_constraint_report": validation["hard_constraint_report"],
+                }
+            )
+
+        if failed_chunks:
+            code = "MANDATORY_GROUP_SPLIT" if any(item.get("error_code") == "MANDATORY_GROUP_SPLIT" for item in failed_chunks) else "SCALE_CHUNK_FAILED"
+            raise OptimizerError(
+                f"Scale decomposition failed in {len(failed_chunks)} chunk(s).",
+                code=code,
+                details={
+                    "scale_profile": scale_profile,
+                    "chunk_count": len(chunks),
+                    "failed_chunks": failed_chunks[:20],
+                    "strategy": "line_region_temporal_chunking",
+                },
+            )
+
+        result = self._merge_scale_chunk_results(
+            chunk_records,
+            trips,
+            vehicle_types,
+            cct_params,
+            vsp_params,
+            optimization_params,
+            scale_profile,
+            time_budget_s,
+        )
+        coverage_issues = self._validate_scale_coverage(result, trips)
+        if coverage_issues:
+            raise OptimizerError(
+                "Scale decomposition coverage mismatch.",
+                code="SCALE_COVERAGE_MISMATCH",
+                details={
+                    "issues": coverage_issues,
+                    "scale_profile": scale_profile,
+                    "chunk_count": len(chunks),
+                },
+            )
+        return result
+
+    def _scale_chunk_budget(self, total_budget_s: float, chunk_count: int, vsp_params: Dict[str, Any]) -> float:
+        configured = vsp_params.get("scale_chunk_time_budget_s")
+        if configured is not None:
+            return max(5.0, float(configured))
+        floor = float(vsp_params.get("scale_chunk_min_time_budget_s", 30.0) or 30.0)
+        ceiling = float(vsp_params.get("scale_chunk_max_time_budget_s", 120.0) or 120.0)
+        proportional = max(1.0, float(total_budget_s) / max(1, chunk_count))
+        return max(floor, min(ceiling, proportional))
+
+    def _validate_scale_chunk_result(
+        self,
+        result: OptimizationResult,
+        chunk_trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        audit = self._build_trip_group_audit(result, chunk_trips)
+        hard_report = self.validator.audit_result(result, chunk_trips, cct_params, vsp_params)
+        issues = list(hard_report.get("hard_issues") or [])
+        if int(audit.get("split_groups", 0) or 0) > 0:
+            issues.append("MANDATORY_GROUP_SPLIT")
+        return {
+            "ok": not issues,
+            "issues": issues,
+            "error_code": "MANDATORY_GROUP_SPLIT" if any(str(item).startswith("MANDATORY_GROUP_SPLIT") for item in issues) else "SCALE_CHUNK_HARD_VIOLATION",
+            "trip_group_audit": audit,
+            "hard_constraint_report": hard_report,
+        }
+
+    def _try_scale_chunk_group_repair(
+        self,
+        result: OptimizationResult,
+        chunk_trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+        chunk_index: int,
+        reason: str,
+    ) -> Optional[OptimizationResult]:
+        audit = self._build_trip_group_audit(result, chunk_trips)
+        if int(audit.get("split_groups", 0) or 0) <= 0:
+            return None
+        try:
+            repaired = self._repair_split_trip_groups_with_dedicated_blocks(
+                result,
+                chunk_trips,
+                cct_params,
+                vsp_params,
+                optimization_params,
+            )
+        except OptimizerError as exc:
+            logger.warning("[SCALE] chunk[%d] group repair rejected after %s: %s", chunk_index, reason, exc)
+            return None
+        if repaired is None:
+            return None
+        repaired.meta.setdefault("performance", {})
+        repaired.meta["performance"]["scale_chunk_group_repair"] = {
+            "chunk_index": chunk_index,
+            "reason": reason,
+            "before_split_groups": int(audit.get("split_groups", 0) or 0),
+        }
+        logger.info(
+            "[SCALE] chunk[%d] group repair attempted after %s: split_groups=%d",
+            chunk_index,
+            reason,
+            int(audit.get("split_groups", 0) or 0),
+        )
+        return repaired
+
+    def _merge_scale_chunk_results(
+        self,
+        chunk_records: List[Dict[str, Any]],
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Dict[str, Any],
+        scale_profile: Dict[str, Any],
+        time_budget_s: float,
+    ) -> OptimizationResult:
+        raw_blocks: List[Block] = []
+        raw_duties: List[Duty] = []
+        next_block_id = 1
+        next_task_id = 1
+        next_duty_id = 1
+        next_roster_id = 1
+        chunk_meta: List[Dict[str, Any]] = []
+
+        for record in chunk_records:
+            chunk = record["chunk"]
+            chunk_idx = int(chunk["index"])
+            chunk_result: OptimizationResult = record["result"]
+            old_to_global: Dict[int, int] = {}
+
+            for block in chunk_result.vsp.blocks:
+                global_block_id = next_block_id
+                next_block_id += 1
+                old_to_global[int(block.id)] = global_block_id
+                raw_blocks.append(
+                    Block(
+                        id=global_block_id,
+                        trips=list(block.trips),
+                        vehicle_type_id=block.vehicle_type_id,
+                        warnings=list(block.warnings or []),
+                        meta={
+                            **dict(block.meta or {}),
+                            "scale_chunk_index": chunk_idx,
+                            "pre_stitch_block_id": global_block_id,
+                            "chunk_source_block_id": int(block.id),
+                        },
+                    )
+                )
+
+            roster_map: Dict[int, int] = {}
+            operator_map: Dict[int, int] = {}
+            for duty in chunk_result.csp.duties:
+                new_duty = Duty(id=next_duty_id)
+                next_duty_id += 1
+                duty_meta = dict(duty.meta or {})
+                if duty_meta.get("roster_id") is not None:
+                    old_roster = int(duty_meta.get("roster_id"))
+                    roster_map.setdefault(old_roster, next_roster_id + len(roster_map))
+                    duty_meta["roster_id"] = roster_map[old_roster]
+                if duty_meta.get("operator_id") is not None:
+                    old_operator = int(duty_meta.get("operator_id"))
+                    operator_map.setdefault(old_operator, next_roster_id + len(operator_map))
+                    duty_meta["operator_id"] = operator_map[old_operator]
+                duty_meta["scale_chunk_index"] = chunk_idx
+                duty_meta["chunk_source_duty_id"] = int(duty.id)
+
+                for task in duty.tasks:
+                    source_old = int(task.meta.get("source_block_id", task.id))
+                    global_source = old_to_global.get(source_old, old_to_global.get(int(task.id), source_old))
+                    new_task = Block(
+                        id=next_task_id,
+                        trips=list(task.trips),
+                        vehicle_type_id=task.vehicle_type_id,
+                        warnings=list(task.warnings or []),
+                        meta={
+                            **dict(task.meta or {}),
+                            "source_block_id": global_source,
+                            "scale_chunk_index": chunk_idx,
+                            "chunk_source_task_id": int(task.id),
+                        },
+                    )
+                    next_task_id += 1
+                    new_duty.add_task(new_task)
+
+                new_duty.spread_time = duty.spread_time
+                new_duty.work_time = duty.work_time
+                new_duty.rest_violations = duty.rest_violations
+                new_duty.shift_violations = duty.shift_violations
+                new_duty.continuous_driving_violation = duty.continuous_driving_violation
+                new_duty.warnings = list(duty.warnings or [])
+                new_duty.paid_minutes = duty.paid_minutes
+                new_duty.overtime_minutes = duty.overtime_minutes
+                new_duty.nocturnal_minutes = duty.nocturnal_minutes
+                new_duty.meta = duty_meta
+                raw_duties.append(new_duty)
+
+            if roster_map:
+                next_roster_id = max(roster_map.values()) + 1
+            chunk_meta.append(
+                {
+                    "chunk_index": chunk_idx,
+                    "trip_count": int(chunk["trip_count"]),
+                    "line_ids": chunk.get("line_ids"),
+                    "trip_group_count": len(chunk.get("trip_group_ids") or []),
+                    "status": record.get("status"),
+                    "vehicles": len(chunk_result.vsp.blocks or []),
+                    "duties": len(chunk_result.csp.duties or []),
+                    "split_groups": int((record.get("trip_group_audit") or {}).get("split_groups", 0) or 0),
+                    "hard_issues": len((record.get("hard_constraint_report") or {}).get("hard_issues") or []),
+                }
+            )
+
+        stitched_blocks, block_id_remap, stitching_meta = self._stitch_scale_blocks(raw_blocks, cct_params, vsp_params)
+        for duty in raw_duties:
+            source_ids: List[int] = []
+            for task in duty.tasks:
+                old_source = int(task.meta.get("source_block_id", task.id))
+                new_source = int(block_id_remap.get(old_source, old_source))
+                task.meta["source_block_id"] = new_source
+                source_ids.append(new_source)
+            duty.meta["source_block_ids"] = list(dict.fromkeys(source_ids))
+
+        fallback_chunks = [item for item in chunk_meta if item.get("status") == "fallback_completed"]
+        status = "partially_completed" if fallback_chunks else "completed"
+        vsp = VSPSolution(
+            blocks=stitched_blocks,
+            unassigned_trips=[],
+            algorithm="hybrid_pipeline_decomposed",
+            warnings=[f"SCALE_DECOMPOSITION chunks={len(chunk_records)} status={status}"],
+            meta={
+                "scale_decomposition": {
+                    "enabled": True,
+                    "strategy": "line_region_temporal_chunking",
+                    "status": status,
+                    "profile": scale_profile,
+                    "chunks": chunk_meta,
+                    "stitching": stitching_meta,
+                }
+            },
+        )
+        csp = CSPSolution(
+            duties=raw_duties,
+            uncovered_blocks=[],
+            cct_violations=sum(int(record["result"].csp.cct_violations or 0) for record in chunk_records),
+            algorithm="chunked_hybrid_csp_merge",
+            warnings=[f"SCALE_DECOMPOSITION_CSP_MERGE chunks={len(chunk_records)}"],
+            meta={
+                "roster_count": len({int(duty.meta.get("roster_id")) for duty in raw_duties if duty.meta.get("roster_id") is not None}) or len(raw_duties),
+                "scale_decomposition": {
+                    "status": status,
+                    "chunks": chunk_meta,
+                    "fallback_chunks": len(fallback_chunks),
+                },
+            },
+        )
+        result = OptimizationResult(
+            vsp=vsp,
+            csp=csp,
+            algorithm=AlgorithmType.HYBRID_PIPELINE,
+            total_elapsed_ms=0.0,
+            meta={
+                "performance": {
+                    "scale_decomposition": {
+                        "enabled": True,
+                        "status": status,
+                        "chunk_count": len(chunk_records),
+                        "fallback_chunk_count": len(fallback_chunks),
+                        "chunk_time_budget_s": self._scale_chunk_budget(time_budget_s, max(1, len(chunk_records)), vsp_params),
+                        "chunks": chunk_meta,
+                        "stitching": stitching_meta,
+                    }
+                },
+                "scale_execution_status": status,
+            },
+        )
+        result.total_cost = self.evaluator.total_cost(result, vehicle_types)
+        return result
+
+    def _stitch_scale_blocks(
+        self,
+        blocks: List[Block],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> Tuple[List[Block], Dict[int, int], Dict[str, Any]]:
+        if not blocks:
+            return [], {}, {"attempted": 0, "accepted": 0, "rejected": 0}
+
+        max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 60) or 60)
+        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960)
+        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
+        enforce_min_interval = bool(vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False)))
+        connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", cct_params.get("connection_tolerance_minutes", 0)) or 0)
+        strict_zero_gap_validation = bool(vsp_params.get("strict_zero_gap_validation", cct_params.get("strict_zero_gap_validation", False)))
+        strict_operational_mode = bool(vsp_params.get("strict_operational_mode", cct_params.get("strict_operational_mode", False)))
+        strict_hard_constraints = bool(vsp_params.get("strict_hard_constraints", cct_params.get("strict_hard_constraints", False)))
+        soft_span_limit = int(vsp_params.get("scale_stitch_soft_span_minutes", min(max_vehicle_shift, 12 * 60)) or min(max_vehicle_shift, 12 * 60))
+        soft_gap_weight = float(vsp_params.get("scale_stitch_soft_gap_weight", 1.0) or 1.0)
+        soft_span_weight = float(vsp_params.get("scale_stitch_soft_span_weight", 0.25) or 0.25)
+
+        ordered = sorted(blocks, key=lambda block: (block.start_time, block.end_time, block.id))
+        available: Dict[int, Block] = {int(block.id): block for block in ordered}
+        used: set[int] = set()
+        stitched: List[Block] = []
+        old_to_new: Dict[int, int] = {}
+        attempted = 0
+        accepted = 0
+        rejected = 0
+
+        for block in ordered:
+            if int(block.id) in used:
+                continue
+            used.add(int(block.id))
+            source_ids = [int(block.id)]
+            trips_merged = list(block.trips)
+            warnings = list(block.warnings or [])
+            vehicle_type_id = block.vehicle_type_id
+
+            while trips_merged:
+                last_trip = trips_merged[-1]
+                candidates = [
+                    candidate
+                    for candidate in ordered
+                    if int(candidate.id) not in used
+                    and candidate.trips
+                    and int(candidate.start_time) >= int(last_trip.end_time)
+                    and int(candidate.start_time) - int(last_trip.end_time) <= max_gap
+                ]
+                if not candidates:
+                    break
+                attempted += len(candidates)
+                feasible_candidates: List[Tuple[float, Block]] = []
+                for candidate in candidates:
+                    if max_vehicle_shift > 0 and int(candidate.end_time) - int(trips_merged[0].start_time) > max_vehicle_shift:
+                        rejected += 1
+                        continue
+                    if not is_connection_feasible(
+                        last_trip,
+                        candidate.trips[0],
+                        min_layover=min_layover,
+                        min_break=min_break,
+                        enforce_min_interval=enforce_min_interval,
+                        connection_tolerance=connection_tolerance,
+                        strict_zero_gap_validation=strict_zero_gap_validation,
+                        strict_operational_mode=strict_operational_mode,
+                        strict_hard_constraints=strict_hard_constraints,
+                    ):
+                        rejected += 1
+                        continue
+                    merged_span = int(candidate.end_time) - int(trips_merged[0].start_time)
+                    gap = int(candidate.start_time) - int(last_trip.end_time)
+                    soft_penalty = max(0, merged_span - soft_span_limit) * soft_span_weight
+                    score = gap * soft_gap_weight + soft_penalty
+                    feasible_candidates.append((float(score), candidate))
+                selected: Optional[Block] = None
+                if feasible_candidates:
+                    feasible_candidates.sort(
+                        key=lambda item: (
+                            item[0],
+                            int(item[1].start_time) - int(last_trip.end_time),
+                            int(item[1].end_time) - int(trips_merged[0].start_time),
+                            int(item[1].id),
+                        )
+                    )
+                    selected = feasible_candidates[0][1]
+                if selected is None:
+                    break
+                used.add(int(selected.id))
+                source_ids.append(int(selected.id))
+                trips_merged.extend(selected.trips)
+                warnings.extend(selected.warnings or [])
+                accepted += 1
+
+            new_id = len(stitched) + 1
+            for old_id in source_ids:
+                old_to_new[old_id] = new_id
+            stitched.append(
+                Block(
+                    id=new_id,
+                    trips=sorted(trips_merged, key=lambda trip: (trip.start_time, trip.id)),
+                    vehicle_type_id=vehicle_type_id,
+                    warnings=list(dict.fromkeys(warnings)),
+                    meta={
+                        "scale_stitched": len(source_ids) > 1,
+                        "source_block_ids": source_ids,
+                        "pre_stitch_block_id": source_ids[0],
+                    },
+                )
+            )
+
+        return stitched, old_to_new, {
+            "attempted": attempted,
+            "accepted": accepted,
+            "rejected": rejected,
+            "input_blocks": len(blocks),
+            "output_blocks": len(stitched),
+            "max_gap_minutes": max_gap,
+        }
+
+    def _validate_scale_coverage(self, result: OptimizationResult, trips: List[Trip]) -> List[str]:
+        input_ids = {int(trip.id) for trip in trips}
+        covered_ids = [int(trip.id) for block in result.vsp.blocks for trip in block.trips]
+        covered_counter = Counter(covered_ids)
+        missing = sorted(input_ids - set(covered_ids))
+        duplicated = sorted(trip_id for trip_id, count in covered_counter.items() if count > 1)
+        extra = sorted(set(covered_ids) - input_ids)
+        issues: List[str] = []
+        if missing:
+            issues.append(f"SCALE_MISSING_TRIPS count={len(missing)} sample={missing[:10]}")
+        if duplicated:
+            issues.append(f"SCALE_DUPLICATED_TRIPS count={len(duplicated)} sample={duplicated[:10]}")
+        if extra:
+            issues.append(f"SCALE_EXTRA_TRIPS count={len(extra)} sample={extra[:10]}")
+        return issues
 
     def _build_reproducibility_snapshot(
         self,
@@ -827,6 +2690,504 @@ class OptimizerService:
             "refs": refs,
             "message": message,
         }
+
+    def _apply_operational_quality_mode(
+        self,
+        result: OptimizationResult,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Optional[Dict[str, Any]],
+    ) -> OptimizationResult:
+        mode = self._resolve_operational_quality_mode(
+            optimization_params=optimization_params,
+            vsp_params=vsp_params,
+            cct_params=cct_params,
+        )
+        result.meta = dict(result.meta or {})
+
+        baseline_candidate = self._build_operational_quality_candidate(
+            scenario_id="current_plan",
+            title="Plano atual",
+            result=result,
+            trips=trips,
+            vehicle_types=vehicle_types,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+        )
+        candidates = [baseline_candidate]
+
+        plus_one_candidate = self._build_plus_one_duty_candidate(
+            base_result=result,
+            trips=trips,
+            vehicle_types=vehicle_types,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=optimization_params,
+        )
+        if plus_one_candidate is not None:
+            candidates.append(plus_one_candidate)
+
+        decision = self._select_operational_quality_scenario(mode, candidates)
+        chosen_id = str(decision.get("chosen_scenario") or baseline_candidate["scenario_id"])
+        chosen_candidate = next(
+            (candidate for candidate in candidates if candidate["scenario_id"] == chosen_id),
+            baseline_candidate,
+        )
+
+        if chosen_candidate["scenario_id"] != baseline_candidate["scenario_id"]:
+            result.csp = chosen_candidate["result"].csp
+            result.total_cost = float(chosen_candidate["result"].total_cost)
+            self._refresh_result_summary_meta(result, vehicle_types, trips, cct_params, vsp_params)
+
+        result.meta["chosen_scenario"] = chosen_candidate["scenario_id"]
+        result.meta["rejected_scenarios"] = list(decision.get("rejected_scenarios") or [])
+        result.meta["justification"] = list(decision.get("justification") or [])
+        result.meta["trade_offs"] = list(decision.get("trade_offs") or [])
+        result.meta["operational_quality_decision"] = decision
+        logger.info(
+            "[OP-QUALITY] mode=%s chosen_scenario=%s candidates=%d",
+            mode,
+            result.meta["chosen_scenario"],
+            len(candidates),
+        )
+        return result
+
+    def _resolve_operational_quality_mode(
+        self,
+        optimization_params: Optional[Dict[str, Any]] = None,
+        vsp_params: Optional[Dict[str, Any]] = None,
+        cct_params: Optional[Dict[str, Any]] = None,
+        request_metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        for source in (optimization_params, vsp_params, cct_params, request_metadata):
+            if not isinstance(source, dict):
+                continue
+            raw_mode = source.get("operational_quality_mode")
+            if raw_mode is None:
+                continue
+            mode = str(raw_mode).strip().lower()
+            if mode in {"strict", "balanced", "optimized"}:
+                return mode
+        return "balanced"
+
+    def _ensure_operational_quality_decision(
+        self,
+        result: OptimizationResult,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Optional[Dict[str, Any]],
+    ) -> OptimizationResult:
+        meta = dict(result.meta or {})
+        chosen_scenario = meta.get("chosen_scenario")
+        decision = meta.get("operational_quality_decision")
+        decision_chosen = decision.get("chosen_scenario") if isinstance(decision, dict) else None
+        if chosen_scenario and decision_chosen:
+            return result
+
+        logger.warning(
+            "[OP-QUALITY] missing decision after primary apply; rebuilding decision mode=%s",
+            self._resolve_operational_quality_mode(
+                optimization_params=optimization_params,
+                vsp_params=vsp_params,
+                cct_params=cct_params,
+            ),
+        )
+        return self._apply_operational_quality_mode(
+            result=result,
+            trips=trips,
+            vehicle_types=vehicle_types,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=optimization_params,
+        )
+
+    def _refresh_result_summary_meta(
+        self,
+        result: OptimizationResult,
+        vehicle_types: List[VehicleType],
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> None:
+        cost_breakdown = self.evaluator.total_cost_breakdown(result, vehicle_types)
+        result.total_cost = float(cost_breakdown["total"])
+        result.meta["cost_breakdown"] = cost_breakdown
+        result.meta["roster_count"] = result.csp.meta.get("roster_count", 0)
+        result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)
+        result.meta["trip_group_audit"] = self._build_trip_group_audit(result, trips)
+        result.meta["phase_summary"] = self._build_phase_summary(result, cost_breakdown)
+        result.meta["parameter_effect_report"] = self._build_parameter_effect_report(
+            result,
+            trips,
+            cct_params,
+            vsp_params,
+        )
+        result.meta["solver_explanation"] = self._build_solver_explanation(result)
+
+    def _build_operational_quality_candidate(
+        self,
+        scenario_id: str,
+        title: str,
+        result: OptimizationResult,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        candidate_note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        preview = copy.deepcopy(result)
+        self._refresh_result_summary_meta(preview, vehicle_types, trips, cct_params, vsp_params)
+        audit = self.validator.audit_result(preview, trips, cct_params, vsp_params)
+        summary = self._summarize_operational_quality(preview, audit)
+        return {
+            "scenario_id": scenario_id,
+            "title": title,
+            "candidate_note": candidate_note,
+            "result": preview,
+            "summary": summary,
+        }
+
+    def _build_plus_one_duty_candidate(
+        self,
+        base_result: OptimizationResult,
+        trips: List[Trip],
+        vehicle_types: List[VehicleType],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        optimization_params: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        if len(base_result.csp.duties or []) < 1:
+            return None
+
+        duties = list(base_result.csp.duties or [])
+        ranked = sorted(
+            duties,
+            key=lambda duty: self._duty_exception_rank(duty),
+        )
+        if not ranked:
+            return None
+
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
+        candidate_pool: List[Dict[str, Any]] = []
+        next_duty_id = max((int(duty.id) for duty in duties), default=0) + 1
+
+        for source in ranked[:3]:
+            if len(source.tasks) <= 1:
+                continue
+            source_summary = self._classify_duty_severity(source)
+            if source_summary["severity"] == "acceptable":
+                continue
+            for split_idx in range(1, len(source.tasks)):
+                left = self._clone_duty_slice(source, source.tasks[:split_idx], int(source.id))
+                right = self._clone_duty_slice(source, source.tasks[split_idx:], next_duty_id)
+                candidate_duties = [
+                    copy.deepcopy(duty)
+                    for duty in duties
+                    if int(duty.id) != int(source.id)
+                ]
+                candidate_duties.extend([left, right])
+                try:
+                    finalized = _finalize_duties(
+                        csp,
+                        candidate_duties,
+                        original_blocks=copy.deepcopy(base_result.vsp.blocks),
+                    )
+                except Exception as exc:
+                    logger.warning("[OP-QUALITY] plus_one_candidate_failed=%s", exc)
+                    return None
+                if finalized.uncovered_blocks:
+                    continue
+
+                candidate_result = OptimizationResult(
+                    vsp=copy.deepcopy(base_result.vsp),
+                    csp=finalized,
+                    total_cost=base_result.total_cost,
+                    algorithm=base_result.algorithm,
+                    total_elapsed_ms=base_result.total_elapsed_ms,
+                    meta=copy.deepcopy(base_result.meta or {}),
+                )
+                candidate = self._build_operational_quality_candidate(
+                    scenario_id="plus_one_duty",
+                    title="Plano +1 duty",
+                    result=candidate_result,
+                    trips=trips,
+                    vehicle_types=vehicle_types,
+                    cct_params=cct_params,
+                    vsp_params=vsp_params,
+                    candidate_note=f"Split da duty {source.id} em dois blocos compactos no corte {split_idx}.",
+                )
+                summary = candidate["summary"]
+                if summary["hard_violation_count"] > 0 or summary["uncovered_blocks"] > 0 or summary["unassigned_trips"] > 0:
+                    continue
+                candidate_pool.append(candidate)
+
+        if not candidate_pool:
+            return None
+
+        candidate_pool.sort(
+            key=lambda item: (
+                item["summary"]["critical_count"],
+                item["summary"]["duties_below_25_pct"],
+                item["summary"]["duties_above_12h"],
+                item["summary"]["avg_idle_minutes"],
+                item["summary"]["total_cost"],
+            )
+        )
+        return candidate_pool[0]
+
+    def _clone_duty_slice(self, source: Duty, tasks: List[Block], duty_id: int) -> Duty:
+        cloned_tasks = [copy.deepcopy(task) for task in tasks]
+        cloned = Duty(id=duty_id, meta=copy.deepcopy(source.meta or {}))
+        for task in cloned_tasks:
+            cloned.add_task(task)
+        cloned.meta["source_block_ids"] = [int(task.id) for task in cloned.tasks]
+        cloned.meta["covered_original_trip_ids"] = [
+            int(getattr(trip, "public_id", trip.id))
+            for task in cloned.tasks
+            for trip in task.trips
+        ]
+        cloned.meta["covered_trip_group_ids"] = sorted(
+            {
+                int(trip.trip_group_id)
+                for task in cloned.tasks
+                for trip in task.trips
+                if trip.trip_group_id is not None
+            }
+        )
+        cloned.meta["operator_id"] = None
+        cloned.meta["operator_name"] = None
+        return cloned
+
+    def _duty_exception_rank(self, duty: Duty) -> Tuple[int, float, int, int]:
+        classification = self._classify_duty_severity(duty)
+        severity_rank = {"critical": 0, "borderline": 1, "acceptable": 2}[classification["severity"]]
+        return (
+            severity_rank,
+            float(classification["utilization"]),
+            -int(classification["spread_time"]),
+            int(duty.id),
+        )
+
+    def _classify_duty_severity(self, duty: Duty) -> Dict[str, Any]:
+        metrics = duty.meta.get("quality_metrics") or {}
+        utilization = float(metrics.get("utilization", 0.0) or 0.0)
+        spread_time = int(metrics.get("spread_time", duty.spread_time) or duty.spread_time or 0)
+        total_idle = int(metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time)) or 0)
+        severity = "acceptable"
+        if utilization < 0.25 and spread_time > 720 and total_idle > 360:
+            severity = "critical"
+        elif utilization < 0.25:
+            severity = "borderline"
+        return {
+            "severity": severity,
+            "utilization": utilization,
+            "spread_time": spread_time,
+            "total_idle_time": total_idle,
+        }
+
+    def _summarize_operational_quality(self, result: OptimizationResult, audit: Dict[str, Any]) -> Dict[str, Any]:
+        duties = list(result.csp.duties or [])
+        classifications = [self._classify_duty_severity(duty) for duty in duties]
+        utilizations = [float(item["utilization"]) for item in classifications]
+        idle_values = [int(item["total_idle_time"]) for item in classifications]
+        hard_issues = list(audit.get("hard_issues") or [])
+        soft_issues = list(audit.get("soft_issues") or [])
+        labels: List[str] = []
+        return {
+            "total_cost": round(float(result.total_cost or 0.0), 2),
+            "vehicles": int(result.vsp.num_vehicles),
+            "duties": len(duties),
+            "crew": int(result.csp.num_crew),
+            "duties_below_25_pct": sum(1 for item in classifications if float(item["utilization"]) < 0.25),
+            "duties_below_30_pct": sum(1 for item in classifications if float(item["utilization"]) < 0.30),
+            "duties_above_12h": sum(1 for duty in duties if int(duty.spread_time or 0) > 720),
+            "avg_utilization_pct": round((sum(utilizations) / max(1, len(utilizations))) * 100.0, 2),
+            "avg_idle_minutes": round(sum(idle_values) / max(1, len(idle_values)), 2),
+            "overtime_minutes": sum(int(duty.overtime_minutes or 0) for duty in duties),
+            "critical_count": sum(1 for item in classifications if item["severity"] == "critical"),
+            "borderline_count": sum(1 for item in classifications if item["severity"] == "borderline"),
+            "acceptable_count": sum(1 for item in classifications if item["severity"] == "acceptable"),
+            "hard_violation_count": len(hard_issues),
+            "soft_violation_count": len(soft_issues),
+            "uncovered_blocks": len(result.csp.uncovered_blocks or []),
+            "unassigned_trips": len(result.vsp.unassigned_trips or []),
+            "labels": labels,
+        }
+
+    def _select_operational_quality_scenario(
+        self,
+        mode: str,
+        candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        cheapest = min(
+            candidates,
+            key=lambda item: (
+                item["summary"]["hard_violation_count"],
+                item["summary"]["total_cost"],
+                item["summary"]["duties"],
+                item["summary"]["crew"],
+            ),
+        )
+        balanced = min(
+            candidates,
+            key=lambda item: (
+                item["summary"]["hard_violation_count"],
+                item["summary"]["critical_count"],
+                item["summary"]["duties_below_25_pct"],
+                item["summary"]["total_cost"],
+                item["summary"]["duties"],
+            ),
+        )
+        strict_candidates = [
+            item for item in candidates
+            if item["summary"]["hard_violation_count"] == 0
+            and item["summary"]["critical_count"] == 0
+            and item["summary"]["duties_below_25_pct"] == 0
+        ]
+        if strict_candidates:
+            strict = min(strict_candidates, key=lambda item: (item["summary"]["total_cost"], item["summary"]["duties"]))
+        else:
+            strict = min(
+                candidates,
+                key=lambda item: (
+                    item["summary"]["hard_violation_count"],
+                    item["summary"]["critical_count"],
+                    item["summary"]["duties_below_25_pct"],
+                    item["summary"]["total_cost"],
+                    item["summary"]["duties"],
+                ),
+            )
+
+        label_map: Dict[str, List[str]] = {}
+        for scenario, label in (
+            (cheapest["scenario_id"], "Plano mais barato"),
+            (balanced["scenario_id"], "Plano mais equilibrado"),
+        ):
+            label_map.setdefault(str(scenario), []).append(label)
+        if (
+            strict["summary"]["critical_count"] == 0
+            and strict["summary"]["hard_violation_count"] == 0
+        ):
+            label_map.setdefault(str(strict["scenario_id"]), []).append("Plano sem excecoes criticas")
+
+        for candidate in candidates:
+            candidate["summary"]["labels"] = label_map.get(candidate["scenario_id"], [])
+
+        chosen = {
+            "strict": strict,
+            "balanced": balanced,
+            "optimized": cheapest,
+        }.get(mode, balanced)
+
+        rejected: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            if candidate["scenario_id"] == chosen["scenario_id"]:
+                continue
+            rejected.append(
+                {
+                    "scenario_id": candidate["scenario_id"],
+                    "title": candidate["title"],
+                    "reason": self._scenario_rejection_reason(mode, chosen, candidate),
+                    "summary": candidate["summary"],
+                }
+            )
+
+        chosen_summary = chosen["summary"]
+        justification = self._scenario_justification(mode, chosen, strict, balanced, cheapest)
+        trade_offs = self._scenario_tradeoffs(chosen, candidates)
+        return {
+            "mode": mode,
+            "chosen_scenario": chosen["scenario_id"],
+            "chosen_title": chosen["title"],
+            "justification": justification,
+            "trade_offs": trade_offs,
+            "rejected_scenarios": rejected,
+            "criteria": {
+                "strict": "Prioriza eliminar duties criticas e duties abaixo de 25%; pode aceitar +1 duty/crew.",
+                "balanced": "Aceita no maximo uma excecao critica com warning, buscando melhor equilibrio operacional.",
+                "optimized": "Prioriza menor custo total entre cenarios operacionais viaveis.",
+            },
+            "available_scenarios": [
+                {
+                    "scenario_id": candidate["scenario_id"],
+                    "title": candidate["title"],
+                    "labels": candidate["summary"]["labels"],
+                    "summary": candidate["summary"],
+                    "candidate_note": candidate.get("candidate_note"),
+                }
+                for candidate in candidates
+            ],
+            "selected_summary": chosen_summary,
+        }
+
+    def _scenario_rejection_reason(
+        self,
+        mode: str,
+        chosen: Dict[str, Any],
+        rejected: Dict[str, Any],
+    ) -> str:
+        chosen_summary = chosen["summary"]
+        rejected_summary = rejected["summary"]
+        if mode == "optimized" and rejected_summary["total_cost"] > chosen_summary["total_cost"]:
+            return "Custo total maior do que o cenario escolhido."
+        if rejected_summary["critical_count"] > chosen_summary["critical_count"]:
+            return "Mantem mais excecoes criticas do que o cenario escolhido."
+        if rejected_summary["duties_below_25_pct"] > chosen_summary["duties_below_25_pct"]:
+            return "Mantem mais duties abaixo de 25%."
+        if rejected_summary["duties"] > chosen_summary["duties"]:
+            return "Exige mais duties sem compensar em qualidade operacional."
+        return "Perde no criterio principal do modo operacional selecionado."
+
+    def _scenario_justification(
+        self,
+        mode: str,
+        chosen: Dict[str, Any],
+        strict: Dict[str, Any],
+        balanced: Dict[str, Any],
+        cheapest: Dict[str, Any],
+    ) -> List[str]:
+        chosen_summary = chosen["summary"]
+        lines = [
+            f"Modo operacional selecionado: {mode}.",
+            (
+                f"Cenario escolhido: {chosen['title']} ({chosen['scenario_id']}) com custo {chosen_summary['total_cost']:.2f}, "
+                f"{chosen_summary['duties_below_25_pct']} duties abaixo de 25% e "
+                f"{chosen_summary['critical_count']} excecao(oes) critica(s)."
+            ),
+        ]
+        if mode == "strict" and chosen["scenario_id"] != strict["scenario_id"]:
+            lines.append("Nao houve cenario com zero duties abaixo de 25%; foi selecionado o fallback mais proximo sem aumentar hard violations.")
+        if mode == "balanced" and chosen["scenario_id"] == balanced["scenario_id"]:
+            lines.append("O criterio balanced priorizou reduzir a cauda operacional antes de custo marginal ou do numero de duties.")
+        if mode == "optimized" and chosen["scenario_id"] == cheapest["scenario_id"]:
+            lines.append("O criterio optimized escolheu o menor custo total entre os cenarios viaveis.")
+        return lines
+
+    def _scenario_tradeoffs(self, chosen: Dict[str, Any], candidates: List[Dict[str, Any]]) -> List[str]:
+        current = next((item for item in candidates if item["scenario_id"] == "current_plan"), chosen)
+        chosen_summary = chosen["summary"]
+        current_summary = current["summary"]
+        trade_offs: List[str] = []
+        if chosen["scenario_id"] != current["scenario_id"]:
+            duty_delta = chosen_summary["duties"] - current_summary["duties"]
+            crew_delta = chosen_summary["crew"] - current_summary["crew"]
+            if duty_delta > 0 or crew_delta > 0:
+                trade_offs.append(f"Exige {max(duty_delta, 0)} duty(s) extra e {max(crew_delta, 0)} crew adicional(is).")
+            cost_delta = round(chosen_summary["total_cost"] - current_summary["total_cost"], 2)
+            if not math.isclose(cost_delta, 0.0, abs_tol=0.01):
+                direction = "reduz" if cost_delta < 0 else "aumenta"
+                trade_offs.append(f"{direction.capitalize()} o custo total em {abs(cost_delta):.2f}.")
+        if chosen_summary["critical_count"] < current_summary["critical_count"]:
+            trade_offs.append("Reduz o numero de excecoes criticas no plano final.")
+        if chosen_summary["duties_below_25_pct"] < current_summary["duties_below_25_pct"]:
+            trade_offs.append("Encurta a cauda de duties abaixo de 25% de utilizacao.")
+        if not trade_offs:
+            trade_offs.append("Mantem o plano atual por nao haver alternativa melhor dentro dos criterios objetivos.")
+        return trade_offs
 
     def _build_operational_kpis(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> Dict[str, Any]:
         duties = list(result.csp.duties or [])
@@ -1009,84 +3370,109 @@ class OptimizerService:
         trips: List[Trip],
         vehicle_types: List[VehicleType],
         depot_id: Optional[int],
-        time_budget_s: Optional[float],
         cct_params: Dict[str, Any],
         vsp_params: Dict[str, Any],
-        optimization_params: Optional[Dict[str, Any]] = None,
+        optimization_params: Optional[Dict[str, Any]],
+        effective_time_budget_s: float,
     ) -> OptimizationResult:
-        # Mapa de alocação de tempo otimizada
-        TIME_ALLOCATION = {
-            AlgorithmType.GENETIC: 0.4,
-            AlgorithmType.HYBRID_PIPELINE: 0.7,
-            AlgorithmType.VCSP_PULP: 0.9,
-            AlgorithmType.ASSIGNMENT_VSP: 0.3
-        }
-        budget = TIME_ALLOCATION.get(algorithm, 1.0) * time_budget_s
+        
+        # Unifica parâmetros dinâmicos de otimização na base do VSP e CCT
+        if optimization_params:
+            vsp_params.update(optimization_params)
+            cct_params.update(optimization_params)
+
+        # Usar o registro de solvers centralizado
         handler = self._solver_registry.get(algorithm)
         if not handler:
             raise InvalidAlgorithmError(str(algorithm))
-        return handler(trips, vehicle_types, depot_id, time_budget_s, cct_params, vsp_params, optimization_params)
+
+        logger.info(
+            f"[OptimizerService] Dispatching algorithm={algorithm.value if hasattr(algorithm, 'value') else algorithm} "
+            f"trips={len(trips)} budget={effective_time_budget_s}s"
+        )
+
+        return handler(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            depot_id=depot_id,
+            time_budget_s=effective_time_budget_s,
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=optimization_params
+        )
+
+
+
+
+
 
     def _run_greedy(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         csp = self._make_csp(cct_params, vsp_params, optimization_params)
         vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_genetic(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+    def _run_genetic(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         csp = self._make_csp(cct_params, vsp_params, optimization_params)
         ga = GeneticVSP(vsp_params=vsp_params)
-        ga.time_budget_s = budget * 0.8
+        ga.time_budget_s = time_budget_s
         vsp = ga.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_sa(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+
+    def _run_sa(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         csp = self._make_csp(cct_params, vsp_params, optimization_params)
         sa = SimulatedAnnealingVSP(vsp_params=vsp_params)
-        sa.time_budget_s = budget * 0.8
+        sa.time_budget_s = time_budget_s
         vsp = sa.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_ts(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+
+    def _run_ts(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         csp = self._make_csp(cct_params, vsp_params, optimization_params)
         ts = TabuSearchVSP(vsp_params=vsp_params)
-        ts.time_budget_s = budget * 0.8
+        ts.time_budget_s = time_budget_s
         vsp = ts.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
 
-    def _run_sp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+
+    def _run_sp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
         ilp = self._make_set_covering_csp(cct_params, vsp_params, optimization_params)
-        ilp.time_budget_s = budget * 0.9
+        ilp.time_budget_s = time_budget_s
         return OptimizationResult(vsp=vsp, csp=ilp.solve(vsp.blocks, trips))
 
-    def _run_mcnf(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+
+    def _run_mcnf(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         csp = self._make_csp(cct_params, vsp_params, optimization_params)
         mcnf = MCNFVSP(vsp_params=vsp_params)
-        mcnf.time_budget_s = budget * 0.8
+        mcnf.time_budget_s = time_budget_s
         vsp = mcnf.solve(trips, vehicle_types, depot_id)
         return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
+
 
     def _run_joint(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
         return JointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params, optimization_params=optimization_params).solve(trips, vehicle_types, depot_id)
 
-    def _run_hybrid(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
+    def _run_hybrid(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
         budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        return HybridPipeline(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+        full_cct_params = {**cct_params, **(optimization_params or {})}
+        full_vsp_params = {**vsp_params}
+        if optimization_params and optimization_params.get("ilp_timeout_seconds") is not None:
+            full_vsp_params.setdefault("ilp_timeout_seconds", optimization_params["ilp_timeout_seconds"])
+        return HybridPipeline(time_budget_s=budget, cct_params=full_cct_params, vsp_params=full_vsp_params).solve(trips, vehicle_types, depot_id)
 
-    def _run_vcsp_pulp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        return VCSPJointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
+    def _run_vcsp_pulp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
+        return VCSPJointSolver(time_budget_s=time_budget_s, cct_params={**cct_params, **(optimization_params or {})}, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
 
-    def _run_assignment_vsp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params)
-        vsp = AssignmentVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
+
+    def _run_assignment_vsp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
+        csp = self._make_csp(cct_params, vsp_params, optimization_params)
+        vsp = AssignmentVSP(vsp_params=vsp_params)
+        vsp.time_budget_s = time_budget_s
+        vsp_sol = vsp.solve(trips, vehicle_types, depot_id)
+        return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
+
 
     def _as_dict(self, params: Any) -> Dict[str, Any]:
         if params is None:
@@ -1118,16 +3504,17 @@ class OptimizerService:
 
         rules = normalized.get("natural_language_rules") or []
         if rules:
-            ai_parsed = AiService().translate_rules_sync(rules)
-            if ai_parsed:
-                # Merge the LLM results
-                for key, value in ai_parsed.items():
+            regex_parsed: Dict[str, Any] = {}
+            for rule in rules:
+                regex_parsed.update(self._parse_rule(rule))
+
+            if regex_parsed:
+                for key, value in regex_parsed.items():
                     normalized.setdefault(key, value)
             else:
-                # Fallback to Regex if LLM fails or is unavailable
-                for rule in rules:
-                    parsed = self._parse_rule(rule)
-                    for key, value in parsed.items():
+                ai_parsed = AiService().translate_rules_sync(rules)
+                if ai_parsed:
+                    for key, value in ai_parsed.items():
                         normalized.setdefault(key, value)
 
         return normalized
@@ -1138,23 +3525,40 @@ class OptimizerService:
         cct_params: Dict[str, Any],
         vsp_params: Dict[str, Any],
     ) -> None:
-        hard_pairing = bool(cct_params.get("enforce_trip_groups_hard", False)) or bool(
-            cct_params.get("operator_pairing_hard", False)
+        strict_group_mode = self._strict_trip_group_mode(trips, cct_params, vsp_params)
+        hard_pairing = (
+            strict_group_mode
+            or bool(cct_params.get("enforce_trip_groups_hard", False))
+            or bool(cct_params.get("operator_pairing_hard", False))
         )
         if cct_params.get("mandatory_trip_groups_same_duty"):
+            self._materialize_mandatory_trip_groups(
+                trips,
+                cct_params.get("mandatory_trip_groups_same_duty") or [],
+                seed=-9_000_000,
+            )
             return
-        if not bool(vsp_params.get("preserve_preferred_pairs", True)):
+        if not hard_pairing and not bool(vsp_params.get("preserve_preferred_pairs", True)):
             return
 
-        grouped: Dict[tuple[int, int], List[int]] = {}
+        grouped: Dict[Any, List[int]] = {}
         for trip in trips:
             if trip.trip_group_id is None:
                 continue
-            grouped.setdefault((trip.line_id, trip.trip_group_id), []).append(trip.id)
+            group_key: Any
+            if strict_group_mode:
+                group_key = int(trip.trip_group_id)
+            else:
+                group_key = (int(trip.line_id), int(trip.trip_group_id))
+            grouped.setdefault(group_key, []).append(int(trip.id))
 
-        explicit_pairs: List[List[int]] = [sorted(ids) for ids in grouped.values() if len(ids) == 2]
+        explicit_groups: List[List[int]] = [
+            sorted(set(ids))
+            for ids in grouped.values()
+            if len(set(ids)) >= 2
+        ]
 
-        if not explicit_pairs and hard_pairing:
+        if not explicit_groups and hard_pairing:
             inferred = self._infer_round_trip_pairs(trips, vsp_params)
             trip_by_id = {trip.id: trip for trip in trips}
             synthetic_group = -1
@@ -1166,15 +3570,36 @@ class OptimizerService:
                 if a_trip.trip_group_id is None and b_trip.trip_group_id is None:
                     a_trip.trip_group_id = synthetic_group
                     b_trip.trip_group_id = synthetic_group
-                    explicit_pairs.append(sorted([a_id, b_id]))
+                    explicit_groups.append(sorted([a_id, b_id]))
                     synthetic_group -= 1
 
-        if hard_pairing and explicit_pairs:
-            cct_params["mandatory_trip_groups_same_duty"] = explicit_pairs
-            if bool(cct_params.get("operator_single_vehicle_only", False)):
-                fixed_cost = float(vsp_params.get("fixed_vehicle_activation_cost", 800.0) or 800.0)
-                vsp_params.setdefault("hard_pairing_vehicle_level", True)
-                vsp_params.setdefault("hard_pairing_penalty", max(fixed_cost * 25.0, 20000.0))
+        if hard_pairing and explicit_groups:
+            self._materialize_mandatory_trip_groups(trips, explicit_groups, seed=-1)
+            cct_params["mandatory_trip_groups_same_duty"] = explicit_groups
+            fixed_cost = float(vsp_params.get("fixed_vehicle_activation_cost", 800.0) or 800.0)
+            vsp_params.setdefault("hard_pairing_vehicle_level", True)
+            vsp_params.setdefault("hard_pairing_penalty", max(fixed_cost * 25.0, 20000.0))
+
+    def _materialize_mandatory_trip_groups(
+        self,
+        trips: List[Trip],
+        groups: List[List[int]],
+        seed: int,
+    ) -> None:
+        trip_by_id = {int(trip.id): trip for trip in trips}
+        for index, group in enumerate(groups):
+            group_ids = [int(item) for item in group]
+            existing_group_ids = {
+                int(trip_by_id[trip_id].trip_group_id)
+                for trip_id in group_ids
+                if trip_id in trip_by_id and trip_by_id[trip_id].trip_group_id is not None
+            }
+            synthetic_group_id = int(seed) - index
+            materialized_group_id = next(iter(existing_group_ids)) if len(existing_group_ids) == 1 else synthetic_group_id
+            for trip_id in group_ids:
+                trip = trip_by_id.get(trip_id)
+                if trip is not None and trip.trip_group_id is None:
+                    trip.trip_group_id = materialized_group_id
 
     def _infer_round_trip_pairs(self, trips: List[Trip], vsp_params: Dict[str, Any]) -> List[List[int]]:
         pair_window = int(vsp_params.get("preferred_pair_window_minutes", 30) or 30)
@@ -1235,10 +3660,20 @@ class OptimizerService:
             "pullback_minutes",
             "connection_tolerance_minutes",
             "strict_hard_validation",
+            "strict_zero_gap_validation",
+            "strict_operational_mode",
+            "strict_hard_constraints",
         )
         for field in passthrough_fields:
             if field not in vsp_params and cct_params.get(field) is not None:
                 vsp_params[field] = cct_params[field]
+
+        if cct_params.get("min_connection_time") is not None and cct_params.get("min_layover_minutes") is None:
+            cct_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
+        if vsp_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
+            vsp_params["min_layover_minutes"] = int(vsp_params["min_connection_time"])
+        if cct_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
+            vsp_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
 
         if "same_depot_required" not in vsp_params and cct_params.get("enforce_same_depot_start_end") is not None:
             vsp_params["same_depot_required"] = bool(cct_params.get("enforce_same_depot_start_end"))
@@ -1248,8 +3683,62 @@ class OptimizerService:
         # Sem isso o VSP greedy usa default 8 min e ignora o intervalo configurado.
         min_break = cct_params.get("min_break_minutes")
         if min_break is not None:
+            enforce_min_interval = bool(
+                cct_params.get(
+                    "enforce_min_interval",
+                    vsp_params.get("enforce_min_interval", True),
+                )
+            )
+            cct_params.setdefault("enforce_min_interval", enforce_min_interval)
+            vsp_params.setdefault("enforce_min_interval", enforce_min_interval)
             current_layover = int(vsp_params.get("min_layover_minutes") or 0)
-            vsp_params["min_layover_minutes"] = max(current_layover, int(min_break))
+            if enforce_min_interval:
+                vsp_params["min_layover_minutes"] = max(current_layover, int(min_break))
+
+        if "pricing_enabled" not in vsp_params and "enable_column_generation" in vsp_params:
+            vsp_params["pricing_enabled"] = bool(vsp_params.get("enable_column_generation"))
+
+    def _strict_trip_group_mode(
+        self,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> bool:
+        strict_groups = bool(
+            vsp_params.get(
+                "strict_hard_constraints",
+                cct_params.get("strict_hard_constraints", False),
+            )
+        )
+        if not strict_groups:
+            return False
+        return any(getattr(trip, "trip_group_id", None) is not None for trip in trips)
+
+    def _validate_strict_algorithm_support(
+        self,
+        algorithm: AlgorithmType,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+    ) -> None:
+        if not self._strict_trip_group_mode(trips, cct_params, vsp_params):
+            return
+        algorithm_value = algorithm.value if hasattr(algorithm, "value") else str(algorithm)
+        unsupported = {AlgorithmType.ASSIGNMENT_VSP.value}
+        if algorithm_value in unsupported:
+            raise OptimizerError(
+                (
+                    f"Algorithm '{algorithm_value}' is not allowed with strict_hard_constraints=true "
+                    "when trip_group_id is present because it does not guarantee mandatory group preservation."
+                ),
+                code="ALGORITHM_UNSUPPORTED_STRICT_GROUPS",
+                details={
+                    "algorithm": algorithm_value,
+                    "strict_hard_constraints": True,
+                    "grouped_trips": sum(1 for trip in trips if getattr(trip, "trip_group_id", None) is not None),
+                    "recommendation": "Use an algorithm with group repair/audit, or disable strict_hard_constraints for exploratory runs.",
+                },
+            )
 
     def _ensure_deadhead_coverage(
         self,
@@ -1476,7 +3965,6 @@ class OptimizerService:
             parsed.setdefault("extended_daily_driving_limit_minutes", int(m.group(2)) * 60)
 
         if "mesmo depósito" in text or "mesmo deposito" in text:
-            parsed.setdefault("same_depot_required", True)
             parsed.setdefault("enforce_same_depot_start_end", True)
 
         return parsed

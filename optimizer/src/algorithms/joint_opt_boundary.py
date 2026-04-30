@@ -15,6 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ..domain.models import Block, Trip, VSPSolution
+from .utils import is_connection_feasible
 
 logger = logging.getLogger(__name__)
 
@@ -115,9 +116,14 @@ def boundary_two_opt(
             gap = first_b2.start_time - last_b1.end_time
             if gap < 0:
                 continue
-            deadhead = int(last_b1.deadhead_times.get(first_b2.origin_id, 0))
-            needed = max(min_layover, deadhead)
-            if gap < needed:
+            if not is_connection_feasible(
+                last_b1,
+                first_b2,
+                min_layover=min_layover,
+                min_break=int(vsp_params.get("min_break_minutes", 30)),
+                enforce_min_interval=bool(vsp_params.get("enforce_min_interval", False)),
+                connection_tolerance=int(vsp_params.get("connection_tolerance_minutes", 0)),
+            ):
                 continue
             if not allow_multi and last_b1.line_id != first_b2.line_id:
                 continue
@@ -189,8 +195,14 @@ def boundary_tail_relocation(
                 gap = first_tail.start_time - last_recv.end_time
                 if gap < 0:
                     continue
-                deadhead = int(last_recv.deadhead_times.get(first_tail.origin_id, 0))
-                if gap < max(min_layover, deadhead):
+                if not is_connection_feasible(
+                    last_recv,
+                    first_tail,
+                    min_layover=min_layover,
+                    min_break=int(vsp_params.get("min_break_minutes", 30)),
+                    enforce_min_interval=bool(vsp_params.get("enforce_min_interval", False)),
+                    connection_tolerance=int(vsp_params.get("connection_tolerance_minutes", 0)),
+                ):
                     continue
                 combined = tail[-1].end_time - recv.trips[0].start_time
                 if max_shift > 0 and combined > max_shift:

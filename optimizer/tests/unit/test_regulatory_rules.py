@@ -1069,3 +1069,130 @@ def test_soft_issue_reassignment_postopt_moves_boundary_task_to_clear_meal_break
     assert audit["baseline_metrics"]["meal_break_missing"] == 1
     assert audit["final_metrics"]["meal_break_missing"] == 0
     assert any("meal_break_missing" in move["reasons"] for move in audit["accepted_moves"])
+
+
+def test_soft_issue_reassignment_postopt_creates_dedicated_duty_for_extreme_tail():
+    solver = GreedyCSP(
+        max_shift_minutes=900,
+        max_work_minutes=900,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=90, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 500, 60, line=90, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 1088, 60, line=90, origin=1, dest=2)]),
+    ]
+    blocking_target = _task_block(4, [_trip(4, 1100, 60, line=91, origin=2, dest=3)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, blocking_target)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, blocking_target])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["extreme_duties"] == 1
+    assert audit["final_metrics"]["extreme_duties"] == 0
+    assert audit["final_metrics"]["uncovered_blocks"] == 0
+    assert audit["final_metrics"]["violations"] == 0
+    assert any(move["mode"] == "dedicated" for move in audit["accepted_moves"])
+    assert len(new_duties) == 3
+    assert any(len(duty.all_trips) == 1 and duty.all_trips[0].line_id == 90 for duty in new_duties)
+
+
+def test_soft_issue_reassignment_postopt_rejects_extreme_tail_move_that_splits_trip_group():
+    solver = GreedyCSP(
+        max_shift_minutes=900,
+        max_work_minutes=900,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    shared_group = 950
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=92, origin=1, dest=2, trip_group_id=shared_group)]),
+        _task_block(2, [_trip(2, 1088, 60, line=92, origin=2, dest=1, trip_group_id=shared_group)]),
+    ]
+    unrelated_target = _task_block(3, [_trip(3, 1200, 60, line=93, origin=3, dest=4)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, unrelated_target)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, unrelated_target])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] == 0
+    assert audit["improved"] is False
+    assert audit["rejection_reasons"].get("trip_group_split_source", 0) >= 1
+    assert len(new_duties) == 2
+
+
+def test_soft_issue_reassignment_postopt_reconstructs_extreme_duty_across_multiple_targets():
+    solver = GreedyCSP(
+        max_shift_minutes=1800,
+        max_work_minutes=1800,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=94, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 840, 60, line=94, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 1200, 60, line=94, origin=1, dest=2)]),
+        _task_block(4, [_trip(4, 1680, 60, line=94, origin=2, dest=1)]),
+    ]
+    left_target_task = _task_block(5, [_trip(5, 270, 60, line=95, origin=2, dest=1)])
+    right_target_task = _task_block(6, [_trip(6, 1755, 60, line=96, origin=1, dest=2)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+
+    left_target_duty = solver._seed_duty_with_task(2, left_target_task)
+    right_target_duty = solver._seed_duty_with_task(3, right_target_task)
+    original_blocks = [
+        Block(id=index + 1, trips=list(task.trips))
+        for index, task in enumerate([*source_tasks, left_target_task, right_target_task])
+    ]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt(
+        [source_duty, left_target_duty, right_target_duty],
+        original_blocks,
+    )
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["extreme_duties"] == 1
+    assert audit["final_metrics"]["extreme_duties"] == 0
+    assert audit["final_metrics"]["uncovered_blocks"] == 0
+    assert audit["final_metrics"]["violations"] == 0
+    assert any(move["mode"] == "local_reconstruction" for move in audit["accepted_moves"])
+    reconstructed = next(move for move in audit["accepted_moves"] if move["mode"] == "local_reconstruction")
+    moved_task_ids = {
+        task_id
+        for allocation in reconstructed["reconstruction"]["allocated_to_existing"]
+        for task_id in allocation["task_ids"]
+    }
+    moved_task_ids.update(
+        task_id
+        for allocation in reconstructed["reconstruction"]["allocated_to_dedicated"]
+        for task_id in allocation["task_ids"]
+    )
+    assert moved_task_ids == {1, 2, 3, 4}
+    assert len(new_duties) <= 3

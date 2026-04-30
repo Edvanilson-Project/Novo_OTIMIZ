@@ -60,6 +60,7 @@ class BaseOptimizationConfig(BaseModel):
     
     # Regras de Conexão e Operação
     min_layover_minutes: int = Field(8, description="Tempo mínimo de parada técnica em terminais")
+    min_connection_time: Optional[int] = Field(None, description="Alias operacional para min_layover_minutes")
     pullout_minutes: int = Field(10, description="Tempo de soltura (garagem -> primeiro terminal)")
     pullback_minutes: int = Field(10, description="Tempo de recolhimento (último terminal -> garagem)")
     connection_tolerance_minutes: int = Field(0, description="Tolerância para conexões apertadas")
@@ -81,7 +82,18 @@ class BaseOptimizationConfig(BaseModel):
     # Configurações de Algoritmo e Modo Estrito
     apply_cct: bool = Field(True, description="Ativa todas as regras da Convenção Coletiva de Trabalho")
     strict_hard_validation: bool = Field(True, description="Rejeita soluções que violem restrições hard")
+    strict_zero_gap_validation: bool = Field(False, description="Valida continuidade geografica em conexoes com gap zero")
+    strict_operational_mode: bool = Field(False, description="Desativa tolerancia operacional em conexoes VSP")
+    strict_hard_constraints: bool = Field(False, description="Aplica restricoes operacionais sem tolerancia")
     strict_union_rules: bool = Field(True, description="Aplica regras sindicais em modo estrito")
+    group_infeasibility_mode: str = Field(
+        "strict",
+        description="Política para GROUP_INFEASIBLE: strict, production ou assisted",
+    )
+    operational_quality_mode: str = Field(
+        "balanced",
+        description="Política de decisão operacional final: strict, balanced ou optimized",
+    )
     time_budget_s: Optional[int] = Field(None, description="Tempo limite para o solver (segundos)")
     random_seed: Optional[int] = Field(None, description="Seed aleatória para repetibilidade")
     max_vehicles: Optional[int] = Field(None, description="Limite máximo de veículos ativados")
@@ -214,6 +226,7 @@ class CctParamsInput(BaseModel):
     overtime_limit_minutes: Optional[int] = None
     max_driving_minutes: Optional[int] = None
     min_break_minutes: Optional[int] = None
+    enforce_min_interval: Optional[bool] = None
     connection_tolerance_minutes: Optional[int] = None
     mandatory_break_after_minutes: Optional[int] = None
     split_break_first_minutes: Optional[int] = None
@@ -229,6 +242,7 @@ class CctParamsInput(BaseModel):
     weekly_driving_limit_minutes: Optional[int] = None
     fortnight_driving_limit_minutes: Optional[int] = None
     min_layover_minutes: Optional[int] = None
+    min_connection_time: Optional[int] = None
     pullout_minutes: Optional[int] = None
     pullback_minutes: Optional[int] = None
     idle_time_is_paid: Optional[bool] = None
@@ -258,9 +272,13 @@ class CctParamsInput(BaseModel):
     goal_weights: Optional[Dict[str, float]] = None
     mandatory_trip_groups_same_duty: Optional[List[List[int]]] = None
     strict_hard_validation: Optional[bool] = None
+    strict_zero_gap_validation: Optional[bool] = None
+    strict_operational_mode: Optional[bool] = None
+    strict_hard_constraints: Optional[bool] = None
     strict_gps_validation: Optional[bool] = None
     strict_terminal_sync_validation: Optional[bool] = None
     strict_union_rules: Optional[bool] = None
+    group_infeasibility_mode: Optional[str] = None
     terminal_location_ids: Optional[List[int]] = None
     operator_profiles: List[OperatorProfileInput] = Field(default_factory=list)
     natural_language_rules: List[str] = Field(default_factory=list)
@@ -277,6 +295,8 @@ class VspParamsInput(BaseModel):
     max_vehicle_shift_minutes: Optional[int] = None
     max_vehicles: Optional[int] = None
     min_layover_minutes: Optional[int] = None
+    min_connection_time: Optional[int] = None
+    enforce_min_interval: Optional[bool] = None
     fixed_vehicle_activation_cost: Optional[float] = None
     deadhead_cost_per_minute: Optional[float] = None
     idle_cost_per_minute: Optional[float] = None
@@ -301,12 +321,17 @@ class VspParamsInput(BaseModel):
     vehicle_idle_gap_threshold_minutes: Optional[int] = None
     pair_break_penalty: Optional[float] = None
     paired_trip_bonus: Optional[float] = None
+    ilp_timeout_seconds: Optional[int] = None
     max_connection_cost_for_reuse_ratio: Optional[float] = None
     max_candidate_successors_per_task: Optional[int] = None
     max_generated_columns: Optional[int] = None
     max_pricing_iterations: Optional[int] = None
     max_pricing_additions: Optional[int] = None
     strict_hard_validation: Optional[bool] = None
+    strict_zero_gap_validation: Optional[bool] = None
+    strict_operational_mode: Optional[bool] = None
+    strict_hard_constraints: Optional[bool] = None
+    group_infeasibility_mode: Optional[str] = None
     goal_weights: Dict[str, float] = Field(default_factory=dict)
     natural_language_rules: List[str] = Field(default_factory=list)
 
@@ -331,6 +356,7 @@ class OptimizeRequest(BaseModel):
     cct_params: Optional[CctParamsInput] = None
     vsp_params: Optional[VspParamsInput] = None
     optimization_params: Optional[OptimizationParametersDTO] = None
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BlockOutput(BaseModel):
@@ -397,6 +423,12 @@ class OptimizeResponse(BaseModel):
     trip_group_audit: Dict[str, Any] = Field(default_factory=dict)
     reproducibility: Dict[str, Any] = Field(default_factory=dict)
     performance: Dict[str, Any] = Field(default_factory=dict)
+    parameter_effect_report: Dict[str, Any] = Field(default_factory=dict)
+    chosen_scenario: Optional[str] = None
+    rejected_scenarios: List[Dict[str, Any]] = Field(default_factory=list)
+    justification: List[str] = Field(default_factory=list)
+    trade_offs: List[str] = Field(default_factory=list)
+    operational_quality_decision: Dict[str, Any] = Field(default_factory=dict)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -429,6 +461,10 @@ class TaskStatusResponse(BaseModel):
     task_id: str
     result: Optional[OptimizeResponse] = None
     error: Optional[Dict[str, Any]] = None
+    error_type: Optional[str] = None
+    error_code: Optional[str] = None
+    message: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
     # Campos de progresso em tempo real (presentes quando status="processing" e Celery reporta PROGRESS)
     phase: Optional[str] = None            # Ex: "vsp", "csp", "finalizing"
     phase_label: Optional[str] = None     # Ex: "Otimizando alocação de veículos (VSP)..."

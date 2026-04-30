@@ -11,6 +11,7 @@ import {
   Alert,
   Snackbar,
   Paper,
+  Chip,
   Select,
   MenuItem,
   FormControl,
@@ -20,6 +21,7 @@ import {
 import { IconSettings, IconBolt, IconRefresh, IconRobot } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { linesApi, terminalsApi, operationsApi, parametersApi } from "@/lib/api";
+import type { OperationalQualityDecision, OperationalQualityMode } from "../_types";
 import { type TripIntervalPolicy } from "./_helpers/formatters";
 import { getSessionUser } from "@/lib/api";
 
@@ -63,6 +65,12 @@ const ALGORITHMS = [
   { value: "vcsp_pulp", label: "VCSP PuLP — ILP Integrado (Experimental)" },
 ];
 
+const OPERATIONAL_QUALITY_MODES: Array<{ value: OperationalQualityMode; label: string }> = [
+  { value: "strict", label: "Sem excecoes criticas" },
+  { value: "balanced", label: "Equilibrado" },
+  { value: "optimized", label: "Mais barato" },
+];
+
 export default function PlannerPage() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -72,6 +80,7 @@ export default function PlannerPage() {
   const [terminals, setTerminals] = useState<any[]>([]);
   const [parameters, setParameters] = useState<any>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hybrid_pipeline");
+  const [selectedOperationalQualityMode, setSelectedOperationalQualityMode] = useState<OperationalQualityMode>("balanced");
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [notification, setNotification] = useState({
     open: false,
@@ -93,6 +102,14 @@ export default function PlannerPage() {
   const optimizingRef = useRef(false);
 
   const dynamicRules = useMemo(() => parameters?.dynamic_rules || [], [parameters?.dynamic_rules]);
+  const operationalQualityDecision = useMemo<OperationalQualityDecision | null>(() => {
+    const summary = schedule?.resultSummary ?? {};
+    return (
+      summary.operationalQualityDecision ??
+      summary.operational_quality_decision ??
+      null
+    );
+  }, [schedule]);
 
   const intervalPolicy: TripIntervalPolicy = useMemo(
     () => {
@@ -114,6 +131,13 @@ export default function PlannerPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    const storedMode = String(parameters?.operational_quality_mode || "balanced").toLowerCase();
+    if (storedMode === "strict" || storedMode === "balanced" || storedMode === "optimized") {
+      setSelectedOperationalQualityMode(storedMode);
+    }
+  }, [parameters?.operational_quality_mode]);
 
   useEffect(() => {
     optimizingRef.current = optimizing;
@@ -145,8 +169,9 @@ export default function PlannerPage() {
       setTerminals(terminalsRes);
       if (paramsRes) {
         setParameters(paramsRes);
-        if (paramsRes.preferred_algorithm) {
-          setSelectedAlgorithm(paramsRes.preferred_algorithm);
+        const preferredAlgorithm = paramsRes.algorithm_preference || paramsRes.preferred_algorithm;
+        if (preferredAlgorithm) {
+          setSelectedAlgorithm(preferredAlgorithm);
         }
       }
 
@@ -301,7 +326,10 @@ export default function PlannerPage() {
     }, 120000);
 
     try {
-      const optimizeResponse = await operationsApi.optimize({ algorithm: selectedAlgorithm });
+      const optimizeResponse = await operationsApi.optimize({
+        algorithm: selectedAlgorithm,
+        operational_quality_mode: selectedOperationalQualityMode,
+      });
       setOptimizationProgress((prev) => ({
         taskId: optimizeResponse?.taskId ?? optimizeResponse?.task_id ?? prev?.taskId ?? null,
         scheduleId: optimizeResponse?.scheduleId ?? prev?.scheduleId ?? null,
@@ -430,6 +458,24 @@ export default function PlannerPage() {
                   </FormControl>
                 </Tooltip>
 
+                <Tooltip title="Define como o produto escolhe entre o plano atual e o cenario com +1 duty/crew.">
+                  <FormControl size="small" sx={{ minWidth: 240, maxWidth: 300, flex: { xs: 1, md: 'none' } }}>
+                    <InputLabel>Qualidade Operacional</InputLabel>
+                    <Select
+                      value={selectedOperationalQualityMode}
+                      label="Qualidade Operacional"
+                      onChange={(e) => setSelectedOperationalQualityMode(e.target.value as OperationalQualityMode)}
+                      disabled={optimizing}
+                    >
+                      {OPERATIONAL_QUALITY_MODES.map((mode) => (
+                        <MenuItem key={mode.value} value={mode.value}>
+                          {mode.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Tooltip>
+
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <Button
                     variant="outlined"
@@ -463,6 +509,30 @@ export default function PlannerPage() {
                 </Stack>
               </Stack>
             </Paper>
+
+            {schedule?.status === "completed" && operationalQualityDecision && (
+              <Alert severity="info" variant="outlined">
+                <Stack spacing={1}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ alignItems: { md: "center" } }}>
+                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                      Cenario escolhido: {operationalQualityDecision.chosen_title || operationalQualityDecision.chosen_scenario || "N/D"}
+                    </Typography>
+                    <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+                      {(operationalQualityDecision.available_scenarios || [])
+                        .find((item) => item.scenario_id === (operationalQualityDecision.chosen_scenario || ""))
+                        ?.labels?.map((label) => (
+                          <Chip key={label} label={label} color="primary" size="small" variant="outlined" />
+                        ))}
+                    </Stack>
+                  </Stack>
+                  {(operationalQualityDecision.justification || []).map((line) => (
+                    <Typography key={line} variant="caption" color="text.secondary">
+                      {line}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
 
             <Suspense fallback={<CircularProgress />}>
               <TabGantt

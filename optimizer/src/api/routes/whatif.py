@@ -47,6 +47,7 @@ def _recompute_idle_minutes(blocks: List[Block]) -> None:
 def _evaluate_arrangement(
     blocks_data: List[Dict[str, Any]],
     vehicle_types: List[VehicleType],
+    optimization_params: Optional[OptimizationParametersDTO] = None,
     extra_meta: Optional[Dict[str, Any]] = None,
     algorithm_label: str = "arrangement",
 ) -> "WhatIfResponse":
@@ -83,15 +84,21 @@ def _evaluate_arrangement(
     fast_csp: Optional[CSPSolution] = None
     if all_trips and vehicle_types:
         try:
+            params = optimization_params.model_dump(exclude_none=True) if optimization_params else {}
+            # Fallbacks para manter o comportamento se params for vazio
             vsp_params = {
-                "min_work_minutes": 0,
-                "max_work_minutes": 600,
-                "max_shift_minutes": 720,
-                "min_layover_minutes": 8,
-                "allow_relief_points": True,
-                "operator_change_terminals_only": True,
+                "min_work_minutes": params.get("min_work_minutes", 0),
+                "max_work_minutes": params.get("max_work_minutes", 600),
+                "max_shift_minutes": params.get("max_shift_minutes", 720),
+                "min_layover_minutes": params.get("min_layover_minutes", 8),
+                "min_break_minutes": params.get("min_break_minutes", 30),
+                "enforce_min_interval": params.get("enforce_min_interval", False),
+                "connection_tolerance_minutes": params.get("connection_tolerance_minutes", 0),
+                "allow_relief_points": params.get("allow_relief_points", True),
+                "operator_change_terminals_only": params.get("operator_change_terminals_only", True),
             }
-            greedy_csp = GreedyCSP(vsp_params=vsp_params)
+            # Injetar o restante dos parâmetros como kwargs (CCT)
+            greedy_csp = GreedyCSP(vsp_params=vsp_params, **params)
             fast_csp = greedy_csp.solve(block_objects, all_trips)
             logger.debug("GreedyCSP: %d duties (%s)", len(fast_csp.duties), algorithm_label)
         except Exception as csp_error:
@@ -416,6 +423,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            optimization_params=request.optimization_params,
             extra_meta={
                 "what_if_source_block": source_block_id,
                 "what_if_target_block": target_block_id,
@@ -469,6 +477,7 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            optimization_params=request.optimization_params,
             algorithm_label="baseline",
         )
     except Exception as exc:

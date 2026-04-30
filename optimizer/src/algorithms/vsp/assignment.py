@@ -52,6 +52,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from ..utils import is_connection_feasible
 from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
@@ -97,10 +98,17 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
         idle_cost = float(self._p("idle_cost_per_minute", 0.25))
         min_layover = int(self._p("min_layover_minutes", 8))
+        min_break = self._p("min_break_minutes", None)
+        enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
+        if enforce_min_interval and min_break is not None:
+            min_layover = max(min_layover, int(min_break))
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
-        max_successors = int(self._p("assignment_max_successors_per_trip", 64))
+        max_successors = int(self._p(
+            "assignment_max_successors_per_trip",
+            self._p("max_candidate_successors_per_task", 64),
+        ))
         preserve_preferred_pairs = bool(self._p("preserve_preferred_pairs", True))
         preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
         pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
@@ -162,12 +170,26 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 if not allow_multi and ti.line_id != tj.line_id:
                     continue
 
-                dh = max(min_layover, int(ti.deadhead_times.get(tj.origin_id, 0)))
-                if gap + connection_tolerance < dh:
+                if not is_connection_feasible(
+                    ti,
+                    tj,
+                    min_layover=min_layover,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                ):
                     continue
 
+                dh = max(min_layover, int(ti.deadhead_times.get(tj.origin_id, 0)))
                 idle = max(0, gap - dh)
-                cost = (dh * deadhead_cost) + (idle * idle_cost)
+                
+                # Penaliza se precisar de tolerância para ser viável
+                tolerance_penalty = 0.0
+                if gap < dh:
+                    # Penalidade por minuto de tolerância utilizada
+                    tolerance_penalty = (dh - gap) * 100.0
+                
+                cost = (dh * deadhead_cost) + (idle * idle_cost) + tolerance_penalty
                 if ti.destination_id == tj.origin_id:
                     cost -= fixed_cost * 0.05
                 if pair_target is not None:
@@ -241,9 +263,14 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 continue  # viola ordem temporal — vira solo
             # Confirma feasibilidade temporal (defensive)
             ti, tj = trips_sorted[i], trips_sorted[j]
-            gap = int(tj.start_time - ti.end_time)
-            dh = max(min_layover, int(ti.deadhead_times.get(tj.origin_id, 0)))
-            if gap + connection_tolerance < dh:
+            if not is_connection_feasible(
+                ti,
+                tj,
+                min_layover=min_layover,
+                min_break=int(min_break) if min_break is not None else 30,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+            ):
                 continue
             # Conflito: j já tem outro predecessor? (não deve acontecer com perfect matching)
             if j in prev_trip:
@@ -347,12 +374,19 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                         continue
                     if not allow_multi and last_a.line_id != first_b.line_id:
                         continue
-                    dh = max(min_layover, int(last_a.deadhead_times.get(first_b.origin_id, 0)))
-                    if gap + connection_tolerance < dh:
+                    if not is_connection_feasible(
+                        last_a,
+                        first_b,
+                        min_layover=min_layover,
+                        min_break=int(min_break) if min_break is not None else 30,
+                        enforce_min_interval=enforce_min_interval,
+                        connection_tolerance=connection_tolerance,
+                    ):
                         continue
                     combined = bb.trips[-1].end_time - ba.trips[0].start_time
                     if combined > max_shift:
                         continue
+                    dh = max(min_layover, int(last_a.deadhead_times.get(first_b.origin_id, 0)))
                     idle = max(0, gap - dh)
                     cost = (dh * deadhead_cost) + (idle * idle_cost)
                     if pair_target is not None:

@@ -1,0 +1,4813 @@
+{
+  "backend_url": "http://localhost:3001/api/v1",
+  "company_id": 22,
+  "source_company_id": 16,
+  "source_real_trips": 298,
+  "matrix": [
+    [
+      "hybrid_pipeline",
+      298
+    ],
+    [
+      "hybrid_pipeline",
+      596
+    ],
+    [
+      "hybrid_pipeline",
+      1000
+    ]
+  ],
+  "results": [
+    {
+      "algorithm": "hybrid_pipeline",
+      "volume": 298,
+      "direct_python": {
+        "volume": 298,
+        "algorithm": "hybrid_pipeline",
+        "status": "ok",
+        "wall_time_s": 7.461,
+        "cpu_time_s": 6.213,
+        "rss_before_mb": 158.6,
+        "rss_after_mb": 253.9,
+        "rss_delta_mb": 95.3,
+        "total_cost": 45587.29,
+        "vehicles": 17,
+        "duties": 19,
+        "input_trips": 298,
+        "covered_trips": 298,
+        "unique_covered_trips": 298,
+        "missing_trips": 0,
+        "duplicated_trips": 0,
+        "extra_trips": 0,
+        "input_duplicate_trips": 0,
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "hard_violations": 0,
+        "cct_violations": 0,
+        "sample_missing_trip_ids": [],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "phase_timings_ms": {
+          "input_validation_ms": 0.31,
+          "solver_ms": 7450.74,
+          "output_validation_ms": 0.53,
+          "audit_enrichment_ms": 4.71
+        }
+      },
+      "e2e": {
+        "status": "completed",
+        "submit_http_status": 201,
+        "schedule_id": 354,
+        "task_id": "9712ce21-3d27-4c20-acd8-a538425ac5b9",
+        "submit_time_ms": 74.57,
+        "backend_total_time_ms": 6352.96,
+        "schedule_created_to_updated_ms": 5064.73,
+        "frontend_read_time_ms": 43.82,
+        "optimizer_solver_ms": 3611.31,
+        "optimizer_total_elapsed_ms": 3613.59,
+        "redis_before": {
+          "used_memory_bytes": 13020912,
+          "optimizer_queue_len": 0
+        },
+        "redis_after": {
+          "used_memory_bytes": 13349048,
+          "optimizer_queue_len": 0,
+          "memory_usage:celery-task-meta-9712ce21-3d27-4c20-acd8-a538425ac5b9": 327776,
+          "memory_usage:optimizer:task_timestamp:9712ce21-3d27-4c20-acd8-a538425ac5b9": 96
+        },
+        "backend_process_before": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 118.6,
+          "cpu_s": 2.92,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "backend_process_after": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 120.0,
+          "cpu_s": 3.05,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "celery_process_before": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 172.4,
+          "cpu_s": 3.25,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "celery_process_after": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 241.7,
+          "cpu_s": 6.26,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "vehicles": 14,
+        "duties": 21,
+        "total_cost": 47392.01,
+        "input_trips": 298,
+        "covered_trips": 298,
+        "missing_trips": 298,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "soft_violations": 0,
+        "cct_violations": 0,
+        "error_type": null,
+        "error_code": null,
+        "error_message": null,
+        "error_details": null,
+        "latest_schedule_status": "completed",
+        "latest_has_hard_constraint_report": true,
+        "latest_has_performance": true,
+        "metadata_has_hard_constraint_report": true,
+        "metadata_has_performance": true,
+        "resolved_params": {
+          "n_trips": 298,
+          "cct_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "mandatory_trip_groups_same_duty": [
+              [
+                17297,
+                17307
+              ],
+              [
+                17298,
+                17301
+              ],
+              [
+                17299,
+                17300
+              ],
+              [
+                17302,
+                17304
+              ],
+              [
+                17303,
+                17315
+              ],
+              [
+                17305,
+                17308
+              ],
+              [
+                17306,
+                17310
+              ],
+              [
+                17309,
+                17313
+              ],
+              [
+                17311,
+                17321
+              ],
+              [
+                17312,
+                17317
+              ],
+              [
+                17314,
+                17318
+              ],
+              [
+                17316,
+                17331
+              ],
+              [
+                17319,
+                17322
+              ],
+              [
+                17320,
+                17325
+              ],
+              [
+                17323,
+                17341
+              ],
+              [
+                17324,
+                17330
+              ],
+              [
+                17326,
+                17328
+              ],
+              [
+                17327,
+                17334
+              ],
+              [
+                17329,
+                17348
+              ],
+              [
+                17332,
+                17338
+              ],
+              [
+                17333,
+                17336
+              ],
+              [
+                17335,
+                17342
+              ],
+              [
+                17337,
+                17356
+              ],
+              [
+                17339,
+                17345
+              ],
+              [
+                17340,
+                17346
+              ],
+              [
+                17343,
+                17349
+              ],
+              [
+                17344,
+                17363
+              ],
+              [
+                17347,
+                17353
+              ],
+              [
+                17350,
+                17354
+              ],
+              [
+                17351,
+                17368
+              ],
+              [
+                17352,
+                17357
+              ],
+              [
+                17355,
+                17361
+              ],
+              [
+                17358,
+                17362
+              ],
+              [
+                17359,
+                17374
+              ],
+              [
+                17360,
+                17365
+              ],
+              [
+                17364,
+                17370
+              ],
+              [
+                17366,
+                17369
+              ],
+              [
+                17367,
+                17380
+              ],
+              [
+                17371,
+                17376
+              ],
+              [
+                17372,
+                17375
+              ],
+              [
+                17373,
+                17384
+              ],
+              [
+                17377,
+                17381
+              ],
+              [
+                17378,
+                17383
+              ],
+              [
+                17379,
+                17390
+              ],
+              [
+                17382,
+                17387
+              ],
+              [
+                17385,
+                17389
+              ],
+              [
+                17386,
+                17397
+              ],
+              [
+                17388,
+                17392
+              ],
+              [
+                17391,
+                17395
+              ],
+              [
+                17393,
+                17404
+              ],
+              [
+                17394,
+                17396
+              ],
+              [
+                17398,
+                17401
+              ],
+              [
+                17399,
+                17402
+              ],
+              [
+                17400,
+                17411
+              ],
+              [
+                17403,
+                17408
+              ],
+              [
+                17405,
+                17407
+              ],
+              [
+                17406,
+                17417
+              ],
+              [
+                17409,
+                17413
+              ],
+              [
+                17410,
+                17415
+              ],
+              [
+                17412,
+                17422
+              ],
+              [
+                17414,
+                17418
+              ],
+              [
+                17416,
+                17421
+              ],
+              [
+                17419,
+                17428
+              ],
+              [
+                17420,
+                17424
+              ],
+              [
+                17423,
+                17427
+              ],
+              [
+                17425,
+                17429
+              ],
+              [
+                17426,
+                17435
+              ],
+              [
+                17430,
+                17433
+              ],
+              [
+                17431,
+                17436
+              ],
+              [
+                17432,
+                17441
+              ],
+              [
+                17434,
+                17439
+              ],
+              [
+                17437,
+                17442
+              ],
+              [
+                17438,
+                17447
+              ],
+              [
+                17440,
+                17445
+              ],
+              [
+                17443,
+                17448
+              ],
+              [
+                17444,
+                17453
+              ],
+              [
+                17446,
+                17451
+              ],
+              [
+                17449,
+                17454
+              ],
+              [
+                17452,
+                17456
+              ],
+              [
+                17455,
+                17459
+              ],
+              [
+                17458,
+                17462
+              ],
+              [
+                17461,
+                17465
+              ],
+              [
+                17463,
+                17472
+              ],
+              [
+                17464,
+                17468
+              ],
+              [
+                17467,
+                17471
+              ],
+              [
+                17469,
+                17478
+              ],
+              [
+                17470,
+                17474
+              ],
+              [
+                17473,
+                17477
+              ],
+              [
+                17475,
+                17484
+              ],
+              [
+                17476,
+                17479
+              ],
+              [
+                17480,
+                17483
+              ],
+              [
+                17481,
+                17491
+              ],
+              [
+                17482,
+                17485
+              ],
+              [
+                17486,
+                17489
+              ],
+              [
+                17487,
+                17498
+              ],
+              [
+                17488,
+                17490
+              ],
+              [
+                17492,
+                17496
+              ],
+              [
+                17493,
+                17495
+              ],
+              [
+                17494,
+                17504
+              ],
+              [
+                17497,
+                17501
+              ],
+              [
+                17499,
+                17503
+              ],
+              [
+                17500,
+                17514
+              ],
+              [
+                17502,
+                17506
+              ],
+              [
+                17505,
+                17509
+              ],
+              [
+                17507,
+                17510
+              ],
+              [
+                17508,
+                17521
+              ],
+              [
+                17511,
+                17515
+              ],
+              [
+                17512,
+                17517
+              ],
+              [
+                17513,
+                17532
+              ],
+              [
+                17516,
+                17520
+              ],
+              [
+                17518,
+                17524
+              ],
+              [
+                17519,
+                17540
+              ],
+              [
+                17522,
+                17525
+              ],
+              [
+                17523,
+                17529
+              ],
+              [
+                17526,
+                17534
+              ],
+              [
+                17527,
+                17531
+              ],
+              [
+                17528,
+                17546
+              ],
+              [
+                17530,
+                17537
+              ],
+              [
+                17533,
+                17538
+              ],
+              [
+                17535,
+                17552
+              ],
+              [
+                17536,
+                17542
+              ],
+              [
+                17539,
+                17543
+              ],
+              [
+                17541,
+                17547
+              ],
+              [
+                17544,
+                17561
+              ],
+              [
+                17545,
+                17549
+              ],
+              [
+                17548,
+                17553
+              ],
+              [
+                17550,
+                17555
+              ],
+              [
+                17551,
+                17565
+              ],
+              [
+                17554,
+                17557
+              ],
+              [
+                17556,
+                17558
+              ],
+              [
+                17559,
+                17572
+              ],
+              [
+                17560,
+                17564
+              ],
+              [
+                17562,
+                17563
+              ],
+              [
+                17566,
+                17570
+              ],
+              [
+                17567,
+                17569
+              ],
+              [
+                17568,
+                17578
+              ],
+              [
+                17571,
+                17574
+              ],
+              [
+                17573,
+                17576
+              ],
+              [
+                17575,
+                17580
+              ],
+              [
+                17577,
+                17579
+              ],
+              [
+                17581,
+                17584
+              ],
+              [
+                17582,
+                17583
+              ],
+              [
+                17585,
+                17587
+              ],
+              [
+                17586,
+                17588
+              ],
+              [
+                17589,
+                17591
+              ],
+              [
+                17590,
+                17592
+              ],
+              [
+                17593,
+                17594
+              ]
+            ],
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "vsp_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "hard_pairing_penalty": 23750,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "hard_pairing_vehicle_level": true,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "n_vehicle_types": 1,
+          "replay_fingerprint": {
+            "line_ids": [
+              0
+            ],
+            "input_hash": "d3bc9c442423",
+            "trip_count": 298,
+            "params_hash": "11c588c445d1",
+            "time_budget_s": 120
+          }
+        },
+        "sample_missing_trip_ids": [
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "setup": {
+          "company_id": 22,
+          "trip_rows": 298
+        }
+      },
+      "comparison": {
+        "direct_status": "ok",
+        "direct_time_ms": 7509.47,
+        "cost_delta": 1804.72,
+        "vehicle_delta": -3,
+        "duty_delta": 2,
+        "time_delta_ms": -1156.51,
+        "hard_violation_delta": 0
+      },
+      "bugs": [
+        "P0: viagens perdidas no resultado persistido"
+      ]
+    },
+    {
+      "algorithm": "hybrid_pipeline",
+      "volume": 596,
+      "direct_python": {
+        "volume": 596,
+        "algorithm": "hybrid_pipeline",
+        "status": "ok",
+        "wall_time_s": 17.311,
+        "cpu_time_s": 14.497,
+        "rss_before_mb": 254.5,
+        "rss_after_mb": 375.5,
+        "rss_delta_mb": 120.9,
+        "total_cost": 85117.42,
+        "vehicles": 26,
+        "duties": 34,
+        "input_trips": 596,
+        "covered_trips": 596,
+        "unique_covered_trips": 596,
+        "missing_trips": 0,
+        "duplicated_trips": 0,
+        "extra_trips": 0,
+        "input_duplicate_trips": 0,
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "hard_violations": 0,
+        "cct_violations": 0,
+        "sample_missing_trip_ids": [],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "phase_timings_ms": {
+          "vsp_mcnf_ms": 5046.64,
+          "csp_greedy_ms": 126.51,
+          "joint_swap_ms": 11862.2,
+          "input_validation_ms": 0.73,
+          "solver_ms": 17252.21,
+          "output_validation_ms": 1.09,
+          "audit_enrichment_ms": 8.69
+        }
+      },
+      "e2e": {
+        "status": "completed",
+        "submit_http_status": 201,
+        "schedule_id": 355,
+        "task_id": "22d9dd1a-0c42-4eee-9e6c-8e452e10bd31",
+        "submit_time_ms": 78.05,
+        "backend_total_time_ms": 16735.56,
+        "schedule_created_to_updated_ms": 15106.59,
+        "frontend_read_time_ms": 66.71,
+        "optimizer_solver_ms": 12105.09,
+        "optimizer_total_elapsed_ms": 12109.21,
+        "redis_before": {
+          "used_memory_bytes": 13349048,
+          "optimizer_queue_len": 0
+        },
+        "redis_after": {
+          "used_memory_bytes": 14005272,
+          "optimizer_queue_len": 0,
+          "memory_usage:celery-task-meta-22d9dd1a-0c42-4eee-9e6c-8e452e10bd31": 655456,
+          "memory_usage:optimizer:task_timestamp:22d9dd1a-0c42-4eee-9e6c-8e452e10bd31": 96
+        },
+        "backend_process_before": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 120.1,
+          "cpu_s": 3.06,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "backend_process_after": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 124.1,
+          "cpu_s": 3.27,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "celery_process_before": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 241.7,
+          "cpu_s": 6.28,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "celery_process_after": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 267.8,
+          "cpu_s": 17.24,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "vehicles": 22,
+        "duties": 42,
+        "total_cost": 94704.61,
+        "input_trips": 596,
+        "covered_trips": 596,
+        "missing_trips": 596,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "soft_violations": 0,
+        "cct_violations": 0,
+        "error_type": null,
+        "error_code": null,
+        "error_message": null,
+        "error_details": null,
+        "latest_schedule_status": "completed",
+        "latest_has_hard_constraint_report": true,
+        "latest_has_performance": true,
+        "metadata_has_hard_constraint_report": true,
+        "metadata_has_performance": true,
+        "resolved_params": {
+          "n_trips": 596,
+          "cct_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "mandatory_trip_groups_same_duty": [
+              [
+                17595,
+                17605
+              ],
+              [
+                17596,
+                17599
+              ],
+              [
+                17597,
+                17598
+              ],
+              [
+                17600,
+                17602
+              ],
+              [
+                17601,
+                17613
+              ],
+              [
+                17603,
+                17606
+              ],
+              [
+                17604,
+                17608
+              ],
+              [
+                17607,
+                17611
+              ],
+              [
+                17609,
+                17619
+              ],
+              [
+                17610,
+                17615
+              ],
+              [
+                17612,
+                17616
+              ],
+              [
+                17614,
+                17629
+              ],
+              [
+                17617,
+                17620
+              ],
+              [
+                17618,
+                17623
+              ],
+              [
+                17621,
+                17639
+              ],
+              [
+                17622,
+                17628
+              ],
+              [
+                17624,
+                17626
+              ],
+              [
+                17625,
+                17632
+              ],
+              [
+                17627,
+                17646
+              ],
+              [
+                17630,
+                17636
+              ],
+              [
+                17631,
+                17634
+              ],
+              [
+                17633,
+                17640
+              ],
+              [
+                17635,
+                17654
+              ],
+              [
+                17637,
+                17643
+              ],
+              [
+                17638,
+                17644
+              ],
+              [
+                17641,
+                17647
+              ],
+              [
+                17642,
+                17661
+              ],
+              [
+                17645,
+                17651
+              ],
+              [
+                17648,
+                17652
+              ],
+              [
+                17649,
+                17666
+              ],
+              [
+                17650,
+                17655
+              ],
+              [
+                17653,
+                17659
+              ],
+              [
+                17656,
+                17660
+              ],
+              [
+                17657,
+                17672
+              ],
+              [
+                17658,
+                17663
+              ],
+              [
+                17662,
+                17668
+              ],
+              [
+                17664,
+                17667
+              ],
+              [
+                17665,
+                17678
+              ],
+              [
+                17669,
+                17674
+              ],
+              [
+                17670,
+                17673
+              ],
+              [
+                17671,
+                17682
+              ],
+              [
+                17675,
+                17679
+              ],
+              [
+                17676,
+                17681
+              ],
+              [
+                17677,
+                17688
+              ],
+              [
+                17680,
+                17685
+              ],
+              [
+                17683,
+                17687
+              ],
+              [
+                17684,
+                17695
+              ],
+              [
+                17686,
+                17690
+              ],
+              [
+                17689,
+                17693
+              ],
+              [
+                17691,
+                17702
+              ],
+              [
+                17692,
+                17694
+              ],
+              [
+                17696,
+                17699
+              ],
+              [
+                17697,
+                17700
+              ],
+              [
+                17698,
+                17709
+              ],
+              [
+                17701,
+                17706
+              ],
+              [
+                17703,
+                17705
+              ],
+              [
+                17704,
+                17715
+              ],
+              [
+                17707,
+                17711
+              ],
+              [
+                17708,
+                17713
+              ],
+              [
+                17710,
+                17720
+              ],
+              [
+                17712,
+                17716
+              ],
+              [
+                17714,
+                17719
+              ],
+              [
+                17717,
+                17726
+              ],
+              [
+                17718,
+                17722
+              ],
+              [
+                17721,
+                17725
+              ],
+              [
+                17723,
+                17727
+              ],
+              [
+                17724,
+                17733
+              ],
+              [
+                17728,
+                17731
+              ],
+              [
+                17729,
+                17734
+              ],
+              [
+                17730,
+                17739
+              ],
+              [
+                17732,
+                17737
+              ],
+              [
+                17735,
+                17740
+              ],
+              [
+                17736,
+                17745
+              ],
+              [
+                17738,
+                17743
+              ],
+              [
+                17741,
+                17746
+              ],
+              [
+                17742,
+                17751
+              ],
+              [
+                17744,
+                17749
+              ],
+              [
+                17747,
+                17752
+              ],
+              [
+                17750,
+                17754
+              ],
+              [
+                17753,
+                17757
+              ],
+              [
+                17756,
+                17760
+              ],
+              [
+                17759,
+                17763
+              ],
+              [
+                17761,
+                17770
+              ],
+              [
+                17762,
+                17766
+              ],
+              [
+                17765,
+                17769
+              ],
+              [
+                17767,
+                17776
+              ],
+              [
+                17768,
+                17772
+              ],
+              [
+                17771,
+                17775
+              ],
+              [
+                17773,
+                17782
+              ],
+              [
+                17774,
+                17777
+              ],
+              [
+                17778,
+                17781
+              ],
+              [
+                17779,
+                17789
+              ],
+              [
+                17780,
+                17783
+              ],
+              [
+                17784,
+                17787
+              ],
+              [
+                17785,
+                17796
+              ],
+              [
+                17786,
+                17788
+              ],
+              [
+                17790,
+                17794
+              ],
+              [
+                17791,
+                17793
+              ],
+              [
+                17792,
+                17802
+              ],
+              [
+                17795,
+                17799
+              ],
+              [
+                17797,
+                17801
+              ],
+              [
+                17798,
+                17812
+              ],
+              [
+                17800,
+                17804
+              ],
+              [
+                17803,
+                17807
+              ],
+              [
+                17805,
+                17808
+              ],
+              [
+                17806,
+                17819
+              ],
+              [
+                17809,
+                17813
+              ],
+              [
+                17810,
+                17815
+              ],
+              [
+                17811,
+                17830
+              ],
+              [
+                17814,
+                17818
+              ],
+              [
+                17816,
+                17822
+              ],
+              [
+                17817,
+                17838
+              ],
+              [
+                17820,
+                17823
+              ],
+              [
+                17821,
+                17827
+              ],
+              [
+                17824,
+                17832
+              ],
+              [
+                17825,
+                17829
+              ],
+              [
+                17826,
+                17844
+              ],
+              [
+                17828,
+                17835
+              ],
+              [
+                17831,
+                17836
+              ],
+              [
+                17833,
+                17850
+              ],
+              [
+                17834,
+                17840
+              ],
+              [
+                17837,
+                17841
+              ],
+              [
+                17839,
+                17845
+              ],
+              [
+                17842,
+                17859
+              ],
+              [
+                17843,
+                17847
+              ],
+              [
+                17846,
+                17851
+              ],
+              [
+                17848,
+                17853
+              ],
+              [
+                17849,
+                17863
+              ],
+              [
+                17852,
+                17855
+              ],
+              [
+                17854,
+                17856
+              ],
+              [
+                17857,
+                17870
+              ],
+              [
+                17858,
+                17862
+              ],
+              [
+                17860,
+                17861
+              ],
+              [
+                17864,
+                17868
+              ],
+              [
+                17865,
+                17867
+              ],
+              [
+                17866,
+                17876
+              ],
+              [
+                17869,
+                17872
+              ],
+              [
+                17871,
+                17874
+              ],
+              [
+                17873,
+                17878
+              ],
+              [
+                17875,
+                17877
+              ],
+              [
+                17879,
+                17882
+              ],
+              [
+                17880,
+                17881
+              ],
+              [
+                17883,
+                17885
+              ],
+              [
+                17884,
+                17886
+              ],
+              [
+                17887,
+                17889
+              ],
+              [
+                17888,
+                17890
+              ],
+              [
+                17891,
+                17892
+              ],
+              [
+                17893,
+                17903
+              ],
+              [
+                17894,
+                17897
+              ],
+              [
+                17895,
+                17896
+              ],
+              [
+                17898,
+                17900
+              ],
+              [
+                17899,
+                17911
+              ],
+              [
+                17901,
+                17904
+              ],
+              [
+                17902,
+                17906
+              ],
+              [
+                17905,
+                17909
+              ],
+              [
+                17907,
+                17917
+              ],
+              [
+                17908,
+                17913
+              ],
+              [
+                17910,
+                17914
+              ],
+              [
+                17912,
+                17927
+              ],
+              [
+                17915,
+                17918
+              ],
+              [
+                17916,
+                17921
+              ],
+              [
+                17919,
+                17937
+              ],
+              [
+                17920,
+                17926
+              ],
+              [
+                17922,
+                17924
+              ],
+              [
+                17923,
+                17930
+              ],
+              [
+                17925,
+                17944
+              ],
+              [
+                17928,
+                17934
+              ],
+              [
+                17929,
+                17932
+              ],
+              [
+                17931,
+                17938
+              ],
+              [
+                17933,
+                17952
+              ],
+              [
+                17935,
+                17941
+              ],
+              [
+                17936,
+                17942
+              ],
+              [
+                17939,
+                17945
+              ],
+              [
+                17940,
+                17959
+              ],
+              [
+                17943,
+                17949
+              ],
+              [
+                17946,
+                17950
+              ],
+              [
+                17947,
+                17964
+              ],
+              [
+                17948,
+                17953
+              ],
+              [
+                17951,
+                17957
+              ],
+              [
+                17954,
+                17958
+              ],
+              [
+                17955,
+                17970
+              ],
+              [
+                17956,
+                17961
+              ],
+              [
+                17960,
+                17966
+              ],
+              [
+                17962,
+                17965
+              ],
+              [
+                17963,
+                17976
+              ],
+              [
+                17967,
+                17972
+              ],
+              [
+                17968,
+                17971
+              ],
+              [
+                17969,
+                17980
+              ],
+              [
+                17973,
+                17977
+              ],
+              [
+                17974,
+                17979
+              ],
+              [
+                17975,
+                17986
+              ],
+              [
+                17978,
+                17983
+              ],
+              [
+                17981,
+                17985
+              ],
+              [
+                17982,
+                17993
+              ],
+              [
+                17984,
+                17988
+              ],
+              [
+                17987,
+                17991
+              ],
+              [
+                17989,
+                18000
+              ],
+              [
+                17990,
+                17992
+              ],
+              [
+                17994,
+                17997
+              ],
+              [
+                17995,
+                17998
+              ],
+              [
+                17996,
+                18007
+              ],
+              [
+                17999,
+                18004
+              ],
+              [
+                18001,
+                18003
+              ],
+              [
+                18002,
+                18013
+              ],
+              [
+                18005,
+                18009
+              ],
+              [
+                18006,
+                18011
+              ],
+              [
+                18008,
+                18018
+              ],
+              [
+                18010,
+                18014
+              ],
+              [
+                18012,
+                18017
+              ],
+              [
+                18015,
+                18024
+              ],
+              [
+                18016,
+                18020
+              ],
+              [
+                18019,
+                18023
+              ],
+              [
+                18021,
+                18025
+              ],
+              [
+                18022,
+                18031
+              ],
+              [
+                18026,
+                18029
+              ],
+              [
+                18027,
+                18032
+              ],
+              [
+                18028,
+                18037
+              ],
+              [
+                18030,
+                18035
+              ],
+              [
+                18033,
+                18038
+              ],
+              [
+                18034,
+                18043
+              ],
+              [
+                18036,
+                18041
+              ],
+              [
+                18039,
+                18044
+              ],
+              [
+                18040,
+                18049
+              ],
+              [
+                18042,
+                18047
+              ],
+              [
+                18045,
+                18050
+              ],
+              [
+                18048,
+                18052
+              ],
+              [
+                18051,
+                18055
+              ],
+              [
+                18054,
+                18058
+              ],
+              [
+                18057,
+                18061
+              ],
+              [
+                18059,
+                18068
+              ],
+              [
+                18060,
+                18064
+              ],
+              [
+                18063,
+                18067
+              ],
+              [
+                18065,
+                18074
+              ],
+              [
+                18066,
+                18070
+              ],
+              [
+                18069,
+                18073
+              ],
+              [
+                18071,
+                18080
+              ],
+              [
+                18072,
+                18075
+              ],
+              [
+                18076,
+                18079
+              ],
+              [
+                18077,
+                18087
+              ],
+              [
+                18078,
+                18081
+              ],
+              [
+                18082,
+                18085
+              ],
+              [
+                18083,
+                18094
+              ],
+              [
+                18084,
+                18086
+              ],
+              [
+                18088,
+                18092
+              ],
+              [
+                18089,
+                18091
+              ],
+              [
+                18090,
+                18100
+              ],
+              [
+                18093,
+                18097
+              ],
+              [
+                18095,
+                18099
+              ],
+              [
+                18096,
+                18110
+              ],
+              [
+                18098,
+                18102
+              ],
+              [
+                18101,
+                18105
+              ],
+              [
+                18103,
+                18106
+              ],
+              [
+                18104,
+                18117
+              ],
+              [
+                18107,
+                18111
+              ],
+              [
+                18108,
+                18113
+              ],
+              [
+                18109,
+                18128
+              ],
+              [
+                18112,
+                18116
+              ],
+              [
+                18114,
+                18120
+              ],
+              [
+                18115,
+                18136
+              ],
+              [
+                18118,
+                18121
+              ],
+              [
+                18119,
+                18125
+              ],
+              [
+                18122,
+                18130
+              ],
+              [
+                18123,
+                18127
+              ],
+              [
+                18124,
+                18142
+              ],
+              [
+                18126,
+                18133
+              ],
+              [
+                18129,
+                18134
+              ],
+              [
+                18131,
+                18148
+              ],
+              [
+                18132,
+                18138
+              ],
+              [
+                18135,
+                18139
+              ],
+              [
+                18137,
+                18143
+              ],
+              [
+                18140,
+                18157
+              ],
+              [
+                18141,
+                18145
+              ],
+              [
+                18144,
+                18149
+              ],
+              [
+                18146,
+                18151
+              ],
+              [
+                18147,
+                18161
+              ],
+              [
+                18150,
+                18153
+              ],
+              [
+                18152,
+                18154
+              ],
+              [
+                18155,
+                18168
+              ],
+              [
+                18156,
+                18160
+              ],
+              [
+                18158,
+                18159
+              ],
+              [
+                18162,
+                18166
+              ],
+              [
+                18163,
+                18165
+              ],
+              [
+                18164,
+                18174
+              ],
+              [
+                18167,
+                18170
+              ],
+              [
+                18169,
+                18172
+              ],
+              [
+                18171,
+                18176
+              ],
+              [
+                18173,
+                18175
+              ],
+              [
+                18177,
+                18180
+              ],
+              [
+                18178,
+                18179
+              ],
+              [
+                18181,
+                18183
+              ],
+              [
+                18182,
+                18184
+              ],
+              [
+                18185,
+                18187
+              ],
+              [
+                18186,
+                18188
+              ],
+              [
+                18189,
+                18190
+              ]
+            ],
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "vsp_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "hard_pairing_penalty": 23750,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "hard_pairing_vehicle_level": true,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "n_vehicle_types": 1,
+          "replay_fingerprint": {
+            "line_ids": [
+              0
+            ],
+            "input_hash": "a6eb93b66b5f",
+            "trip_count": 596,
+            "params_hash": "11c588c445d1",
+            "time_budget_s": 120
+          }
+        },
+        "sample_missing_trip_ids": [
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "setup": {
+          "company_id": 22,
+          "trip_rows": 596
+        }
+      },
+      "comparison": {
+        "direct_status": "ok",
+        "direct_time_ms": 17411.65,
+        "cost_delta": 9587.19,
+        "vehicle_delta": -4,
+        "duty_delta": 8,
+        "time_delta_ms": -676.09,
+        "hard_violation_delta": 0
+      },
+      "bugs": [
+        "P0: viagens perdidas no resultado persistido"
+      ]
+    },
+    {
+      "algorithm": "hybrid_pipeline",
+      "volume": 1000,
+      "direct_python": {
+        "volume": 1000,
+        "algorithm": "hybrid_pipeline",
+        "status": "ok",
+        "wall_time_s": 53.697,
+        "cpu_time_s": 49.34,
+        "rss_before_mb": 375.5,
+        "rss_after_mb": 964.8,
+        "rss_delta_mb": 589.4,
+        "total_cost": 157115.42,
+        "vehicles": 56,
+        "duties": 58,
+        "input_trips": 1000,
+        "covered_trips": 1000,
+        "unique_covered_trips": 1000,
+        "missing_trips": 0,
+        "duplicated_trips": 0,
+        "extra_trips": 0,
+        "input_duplicate_trips": 0,
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "hard_violations": 0,
+        "cct_violations": 0,
+        "sample_missing_trip_ids": [],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "phase_timings_ms": {
+          "input_validation_ms": 1.33,
+          "solver_ms": 53662.09,
+          "output_validation_ms": 2.43,
+          "audit_enrichment_ms": 14.71
+        }
+      },
+      "e2e": {
+        "status": "completed",
+        "submit_http_status": 201,
+        "schedule_id": 356,
+        "task_id": "d0268869-e46e-49ad-ab44-3d0af49a10c5",
+        "submit_time_ms": 104.27,
+        "backend_total_time_ms": 35205.42,
+        "schedule_created_to_updated_ms": 35145.95,
+        "frontend_read_time_ms": 58.09,
+        "optimizer_solver_ms": 34077.48,
+        "optimizer_total_elapsed_ms": 34083.75,
+        "redis_before": {
+          "used_memory_bytes": 14005272,
+          "optimizer_queue_len": 0
+        },
+        "redis_after": {
+          "used_memory_bytes": 14923048,
+          "optimizer_queue_len": 0,
+          "memory_usage:celery-task-meta-d0268869-e46e-49ad-ab44-3d0af49a10c5": 917600,
+          "memory_usage:optimizer:task_timestamp:d0268869-e46e-49ad-ab44-3d0af49a10c5": 96
+        },
+        "backend_process_before": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 124.1,
+          "cpu_s": 3.28,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "backend_process_after": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 126.9,
+          "cpu_s": 3.55,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "celery_process_before": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 267.8,
+          "cpu_s": 17.29,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "celery_process_after": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 322.1,
+          "cpu_s": 49.53,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "vehicles": 50,
+        "duties": 75,
+        "total_cost": 178761.92,
+        "input_trips": 1000,
+        "covered_trips": 1000,
+        "missing_trips": 1000,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "soft_violations": 0,
+        "cct_violations": 0,
+        "error_type": null,
+        "error_code": null,
+        "error_message": null,
+        "error_details": null,
+        "latest_schedule_status": "completed",
+        "latest_has_hard_constraint_report": true,
+        "latest_has_performance": true,
+        "metadata_has_hard_constraint_report": true,
+        "metadata_has_performance": true,
+        "resolved_params": {
+          "n_trips": 1000,
+          "cct_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "mandatory_trip_groups_same_duty": [
+              [
+                18191,
+                18201
+              ],
+              [
+                18192,
+                18195
+              ],
+              [
+                18193,
+                18194
+              ],
+              [
+                18196,
+                18198
+              ],
+              [
+                18197,
+                18209
+              ],
+              [
+                18199,
+                18202
+              ],
+              [
+                18200,
+                18204
+              ],
+              [
+                18203,
+                18207
+              ],
+              [
+                18205,
+                18215
+              ],
+              [
+                18206,
+                18211
+              ],
+              [
+                18208,
+                18212
+              ],
+              [
+                18210,
+                18225
+              ],
+              [
+                18213,
+                18216
+              ],
+              [
+                18214,
+                18219
+              ],
+              [
+                18217,
+                18235
+              ],
+              [
+                18218,
+                18224
+              ],
+              [
+                18220,
+                18222
+              ],
+              [
+                18221,
+                18228
+              ],
+              [
+                18223,
+                18242
+              ],
+              [
+                18226,
+                18232
+              ],
+              [
+                18227,
+                18230
+              ],
+              [
+                18229,
+                18236
+              ],
+              [
+                18231,
+                18250
+              ],
+              [
+                18233,
+                18239
+              ],
+              [
+                18234,
+                18240
+              ],
+              [
+                18237,
+                18243
+              ],
+              [
+                18238,
+                18257
+              ],
+              [
+                18241,
+                18247
+              ],
+              [
+                18244,
+                18248
+              ],
+              [
+                18245,
+                18262
+              ],
+              [
+                18246,
+                18251
+              ],
+              [
+                18249,
+                18255
+              ],
+              [
+                18252,
+                18256
+              ],
+              [
+                18253,
+                18268
+              ],
+              [
+                18254,
+                18259
+              ],
+              [
+                18258,
+                18264
+              ],
+              [
+                18260,
+                18263
+              ],
+              [
+                18261,
+                18274
+              ],
+              [
+                18265,
+                18270
+              ],
+              [
+                18266,
+                18269
+              ],
+              [
+                18267,
+                18278
+              ],
+              [
+                18271,
+                18275
+              ],
+              [
+                18272,
+                18277
+              ],
+              [
+                18273,
+                18284
+              ],
+              [
+                18276,
+                18281
+              ],
+              [
+                18279,
+                18283
+              ],
+              [
+                18280,
+                18291
+              ],
+              [
+                18282,
+                18286
+              ],
+              [
+                18285,
+                18289
+              ],
+              [
+                18287,
+                18298
+              ],
+              [
+                18288,
+                18290
+              ],
+              [
+                18292,
+                18295
+              ],
+              [
+                18293,
+                18296
+              ],
+              [
+                18294,
+                18305
+              ],
+              [
+                18297,
+                18302
+              ],
+              [
+                18299,
+                18301
+              ],
+              [
+                18300,
+                18311
+              ],
+              [
+                18303,
+                18307
+              ],
+              [
+                18304,
+                18309
+              ],
+              [
+                18306,
+                18316
+              ],
+              [
+                18308,
+                18312
+              ],
+              [
+                18310,
+                18315
+              ],
+              [
+                18313,
+                18322
+              ],
+              [
+                18314,
+                18318
+              ],
+              [
+                18317,
+                18321
+              ],
+              [
+                18319,
+                18323
+              ],
+              [
+                18320,
+                18329
+              ],
+              [
+                18324,
+                18327
+              ],
+              [
+                18325,
+                18330
+              ],
+              [
+                18326,
+                18335
+              ],
+              [
+                18328,
+                18333
+              ],
+              [
+                18331,
+                18336
+              ],
+              [
+                18332,
+                18341
+              ],
+              [
+                18334,
+                18339
+              ],
+              [
+                18337,
+                18342
+              ],
+              [
+                18338,
+                18347
+              ],
+              [
+                18340,
+                18345
+              ],
+              [
+                18343,
+                18348
+              ],
+              [
+                18346,
+                18350
+              ],
+              [
+                18349,
+                18353
+              ],
+              [
+                18352,
+                18356
+              ],
+              [
+                18355,
+                18359
+              ],
+              [
+                18357,
+                18366
+              ],
+              [
+                18358,
+                18362
+              ],
+              [
+                18361,
+                18365
+              ],
+              [
+                18363,
+                18372
+              ],
+              [
+                18364,
+                18368
+              ],
+              [
+                18367,
+                18371
+              ],
+              [
+                18369,
+                18378
+              ],
+              [
+                18370,
+                18373
+              ],
+              [
+                18374,
+                18377
+              ],
+              [
+                18375,
+                18385
+              ],
+              [
+                18376,
+                18379
+              ],
+              [
+                18380,
+                18383
+              ],
+              [
+                18381,
+                18392
+              ],
+              [
+                18382,
+                18384
+              ],
+              [
+                18386,
+                18390
+              ],
+              [
+                18387,
+                18389
+              ],
+              [
+                18388,
+                18398
+              ],
+              [
+                18391,
+                18395
+              ],
+              [
+                18393,
+                18397
+              ],
+              [
+                18394,
+                18408
+              ],
+              [
+                18396,
+                18400
+              ],
+              [
+                18399,
+                18403
+              ],
+              [
+                18401,
+                18404
+              ],
+              [
+                18402,
+                18415
+              ],
+              [
+                18405,
+                18409
+              ],
+              [
+                18406,
+                18411
+              ],
+              [
+                18407,
+                18426
+              ],
+              [
+                18410,
+                18414
+              ],
+              [
+                18412,
+                18418
+              ],
+              [
+                18413,
+                18434
+              ],
+              [
+                18416,
+                18419
+              ],
+              [
+                18417,
+                18423
+              ],
+              [
+                18420,
+                18428
+              ],
+              [
+                18421,
+                18425
+              ],
+              [
+                18422,
+                18440
+              ],
+              [
+                18424,
+                18431
+              ],
+              [
+                18427,
+                18432
+              ],
+              [
+                18429,
+                18446
+              ],
+              [
+                18430,
+                18436
+              ],
+              [
+                18433,
+                18437
+              ],
+              [
+                18435,
+                18441
+              ],
+              [
+                18438,
+                18455
+              ],
+              [
+                18439,
+                18443
+              ],
+              [
+                18442,
+                18447
+              ],
+              [
+                18444,
+                18449
+              ],
+              [
+                18445,
+                18459
+              ],
+              [
+                18448,
+                18451
+              ],
+              [
+                18450,
+                18452
+              ],
+              [
+                18453,
+                18466
+              ],
+              [
+                18454,
+                18458
+              ],
+              [
+                18456,
+                18457
+              ],
+              [
+                18460,
+                18464
+              ],
+              [
+                18461,
+                18463
+              ],
+              [
+                18462,
+                18472
+              ],
+              [
+                18465,
+                18468
+              ],
+              [
+                18467,
+                18470
+              ],
+              [
+                18469,
+                18474
+              ],
+              [
+                18471,
+                18473
+              ],
+              [
+                18475,
+                18478
+              ],
+              [
+                18476,
+                18477
+              ],
+              [
+                18479,
+                18481
+              ],
+              [
+                18480,
+                18482
+              ],
+              [
+                18483,
+                18485
+              ],
+              [
+                18484,
+                18486
+              ],
+              [
+                18487,
+                18488
+              ],
+              [
+                18489,
+                18499
+              ],
+              [
+                18490,
+                18493
+              ],
+              [
+                18491,
+                18492
+              ],
+              [
+                18494,
+                18496
+              ],
+              [
+                18495,
+                18507
+              ],
+              [
+                18497,
+                18500
+              ],
+              [
+                18498,
+                18502
+              ],
+              [
+                18501,
+                18505
+              ],
+              [
+                18503,
+                18513
+              ],
+              [
+                18504,
+                18509
+              ],
+              [
+                18506,
+                18510
+              ],
+              [
+                18508,
+                18523
+              ],
+              [
+                18511,
+                18514
+              ],
+              [
+                18512,
+                18517
+              ],
+              [
+                18515,
+                18533
+              ],
+              [
+                18516,
+                18522
+              ],
+              [
+                18518,
+                18520
+              ],
+              [
+                18519,
+                18526
+              ],
+              [
+                18521,
+                18540
+              ],
+              [
+                18524,
+                18530
+              ],
+              [
+                18525,
+                18528
+              ],
+              [
+                18527,
+                18534
+              ],
+              [
+                18529,
+                18548
+              ],
+              [
+                18531,
+                18537
+              ],
+              [
+                18532,
+                18538
+              ],
+              [
+                18535,
+                18541
+              ],
+              [
+                18536,
+                18555
+              ],
+              [
+                18539,
+                18545
+              ],
+              [
+                18542,
+                18546
+              ],
+              [
+                18543,
+                18560
+              ],
+              [
+                18544,
+                18549
+              ],
+              [
+                18547,
+                18553
+              ],
+              [
+                18550,
+                18554
+              ],
+              [
+                18551,
+                18566
+              ],
+              [
+                18552,
+                18557
+              ],
+              [
+                18556,
+                18562
+              ],
+              [
+                18558,
+                18561
+              ],
+              [
+                18559,
+                18572
+              ],
+              [
+                18563,
+                18568
+              ],
+              [
+                18564,
+                18567
+              ],
+              [
+                18565,
+                18576
+              ],
+              [
+                18569,
+                18573
+              ],
+              [
+                18570,
+                18575
+              ],
+              [
+                18571,
+                18582
+              ],
+              [
+                18574,
+                18579
+              ],
+              [
+                18577,
+                18581
+              ],
+              [
+                18578,
+                18589
+              ],
+              [
+                18580,
+                18584
+              ],
+              [
+                18583,
+                18587
+              ],
+              [
+                18585,
+                18596
+              ],
+              [
+                18586,
+                18588
+              ],
+              [
+                18590,
+                18593
+              ],
+              [
+                18591,
+                18594
+              ],
+              [
+                18592,
+                18603
+              ],
+              [
+                18595,
+                18600
+              ],
+              [
+                18597,
+                18599
+              ],
+              [
+                18598,
+                18609
+              ],
+              [
+                18601,
+                18605
+              ],
+              [
+                18602,
+                18607
+              ],
+              [
+                18604,
+                18614
+              ],
+              [
+                18606,
+                18610
+              ],
+              [
+                18608,
+                18613
+              ],
+              [
+                18611,
+                18620
+              ],
+              [
+                18612,
+                18616
+              ],
+              [
+                18615,
+                18619
+              ],
+              [
+                18617,
+                18621
+              ],
+              [
+                18618,
+                18627
+              ],
+              [
+                18622,
+                18625
+              ],
+              [
+                18623,
+                18628
+              ],
+              [
+                18624,
+                18633
+              ],
+              [
+                18626,
+                18631
+              ],
+              [
+                18629,
+                18634
+              ],
+              [
+                18630,
+                18639
+              ],
+              [
+                18632,
+                18637
+              ],
+              [
+                18635,
+                18640
+              ],
+              [
+                18636,
+                18645
+              ],
+              [
+                18638,
+                18643
+              ],
+              [
+                18641,
+                18646
+              ],
+              [
+                18644,
+                18648
+              ],
+              [
+                18647,
+                18651
+              ],
+              [
+                18650,
+                18654
+              ],
+              [
+                18653,
+                18657
+              ],
+              [
+                18655,
+                18664
+              ],
+              [
+                18656,
+                18660
+              ],
+              [
+                18659,
+                18663
+              ],
+              [
+                18661,
+                18670
+              ],
+              [
+                18662,
+                18666
+              ],
+              [
+                18665,
+                18669
+              ],
+              [
+                18667,
+                18676
+              ],
+              [
+                18668,
+                18671
+              ],
+              [
+                18672,
+                18675
+              ],
+              [
+                18673,
+                18683
+              ],
+              [
+                18674,
+                18677
+              ],
+              [
+                18678,
+                18681
+              ],
+              [
+                18679,
+                18690
+              ],
+              [
+                18680,
+                18682
+              ],
+              [
+                18684,
+                18688
+              ],
+              [
+                18685,
+                18687
+              ],
+              [
+                18686,
+                18696
+              ],
+              [
+                18689,
+                18693
+              ],
+              [
+                18691,
+                18695
+              ],
+              [
+                18692,
+                18706
+              ],
+              [
+                18694,
+                18698
+              ],
+              [
+                18697,
+                18701
+              ],
+              [
+                18699,
+                18702
+              ],
+              [
+                18700,
+                18713
+              ],
+              [
+                18703,
+                18707
+              ],
+              [
+                18704,
+                18709
+              ],
+              [
+                18705,
+                18724
+              ],
+              [
+                18708,
+                18712
+              ],
+              [
+                18710,
+                18716
+              ],
+              [
+                18711,
+                18732
+              ],
+              [
+                18714,
+                18717
+              ],
+              [
+                18715,
+                18721
+              ],
+              [
+                18718,
+                18726
+              ],
+              [
+                18719,
+                18723
+              ],
+              [
+                18720,
+                18738
+              ],
+              [
+                18722,
+                18729
+              ],
+              [
+                18725,
+                18730
+              ],
+              [
+                18727,
+                18744
+              ],
+              [
+                18728,
+                18734
+              ],
+              [
+                18731,
+                18735
+              ],
+              [
+                18733,
+                18739
+              ],
+              [
+                18736,
+                18753
+              ],
+              [
+                18737,
+                18741
+              ],
+              [
+                18740,
+                18745
+              ],
+              [
+                18742,
+                18747
+              ],
+              [
+                18743,
+                18757
+              ],
+              [
+                18746,
+                18749
+              ],
+              [
+                18748,
+                18750
+              ],
+              [
+                18751,
+                18764
+              ],
+              [
+                18752,
+                18756
+              ],
+              [
+                18754,
+                18755
+              ],
+              [
+                18758,
+                18762
+              ],
+              [
+                18759,
+                18761
+              ],
+              [
+                18760,
+                18770
+              ],
+              [
+                18763,
+                18766
+              ],
+              [
+                18765,
+                18768
+              ],
+              [
+                18767,
+                18772
+              ],
+              [
+                18769,
+                18771
+              ],
+              [
+                18773,
+                18776
+              ],
+              [
+                18774,
+                18775
+              ],
+              [
+                18777,
+                18779
+              ],
+              [
+                18778,
+                18780
+              ],
+              [
+                18781,
+                18783
+              ],
+              [
+                18782,
+                18784
+              ],
+              [
+                18785,
+                18786
+              ],
+              [
+                18787,
+                18797
+              ],
+              [
+                18788,
+                18791
+              ],
+              [
+                18789,
+                18790
+              ],
+              [
+                18792,
+                18794
+              ],
+              [
+                18793,
+                18805
+              ],
+              [
+                18795,
+                18798
+              ],
+              [
+                18796,
+                18800
+              ],
+              [
+                18799,
+                18803
+              ],
+              [
+                18801,
+                18811
+              ],
+              [
+                18802,
+                18807
+              ],
+              [
+                18804,
+                18808
+              ],
+              [
+                18806,
+                18821
+              ],
+              [
+                18809,
+                18812
+              ],
+              [
+                18810,
+                18815
+              ],
+              [
+                18813,
+                18831
+              ],
+              [
+                18814,
+                18820
+              ],
+              [
+                18816,
+                18818
+              ],
+              [
+                18817,
+                18824
+              ],
+              [
+                18819,
+                18838
+              ],
+              [
+                18822,
+                18828
+              ],
+              [
+                18823,
+                18826
+              ],
+              [
+                18825,
+                18832
+              ],
+              [
+                18827,
+                18846
+              ],
+              [
+                18829,
+                18835
+              ],
+              [
+                18830,
+                18836
+              ],
+              [
+                18833,
+                18839
+              ],
+              [
+                18834,
+                18853
+              ],
+              [
+                18837,
+                18843
+              ],
+              [
+                18840,
+                18844
+              ],
+              [
+                18841,
+                18858
+              ],
+              [
+                18842,
+                18847
+              ],
+              [
+                18845,
+                18851
+              ],
+              [
+                18848,
+                18852
+              ],
+              [
+                18849,
+                18864
+              ],
+              [
+                18850,
+                18855
+              ],
+              [
+                18854,
+                18860
+              ],
+              [
+                18856,
+                18859
+              ],
+              [
+                18857,
+                18870
+              ],
+              [
+                18861,
+                18866
+              ],
+              [
+                18862,
+                18865
+              ],
+              [
+                18863,
+                18874
+              ],
+              [
+                18867,
+                18871
+              ],
+              [
+                18868,
+                18873
+              ],
+              [
+                18869,
+                18880
+              ],
+              [
+                18872,
+                18877
+              ],
+              [
+                18875,
+                18879
+              ],
+              [
+                18876,
+                18887
+              ],
+              [
+                18878,
+                18882
+              ],
+              [
+                18881,
+                18885
+              ],
+              [
+                18883,
+                18894
+              ],
+              [
+                18884,
+                18886
+              ],
+              [
+                18888,
+                18891
+              ],
+              [
+                18889,
+                18892
+              ],
+              [
+                18890,
+                18901
+              ],
+              [
+                18893,
+                18898
+              ],
+              [
+                18895,
+                18897
+              ],
+              [
+                18896,
+                18907
+              ],
+              [
+                18899,
+                18903
+              ],
+              [
+                18900,
+                18905
+              ],
+              [
+                18902,
+                18912
+              ],
+              [
+                18904,
+                18908
+              ],
+              [
+                18906,
+                18911
+              ],
+              [
+                18909,
+                18918
+              ],
+              [
+                18910,
+                18914
+              ],
+              [
+                18913,
+                18917
+              ],
+              [
+                18915,
+                18919
+              ],
+              [
+                18916,
+                18925
+              ],
+              [
+                18920,
+                18923
+              ],
+              [
+                18921,
+                18926
+              ],
+              [
+                18922,
+                18931
+              ],
+              [
+                18924,
+                18929
+              ],
+              [
+                18927,
+                18932
+              ],
+              [
+                18928,
+                18937
+              ],
+              [
+                18930,
+                18935
+              ],
+              [
+                18933,
+                18938
+              ],
+              [
+                18934,
+                18943
+              ],
+              [
+                18936,
+                18941
+              ],
+              [
+                18939,
+                18944
+              ],
+              [
+                18942,
+                18946
+              ],
+              [
+                18945,
+                18949
+              ],
+              [
+                18948,
+                18952
+              ],
+              [
+                18951,
+                18955
+              ],
+              [
+                18953,
+                18962
+              ],
+              [
+                18954,
+                18958
+              ],
+              [
+                18957,
+                18961
+              ],
+              [
+                18959,
+                18968
+              ],
+              [
+                18960,
+                18964
+              ],
+              [
+                18963,
+                18967
+              ],
+              [
+                18965,
+                18974
+              ],
+              [
+                18966,
+                18969
+              ],
+              [
+                18970,
+                18973
+              ],
+              [
+                18971,
+                18981
+              ],
+              [
+                18972,
+                18975
+              ],
+              [
+                18976,
+                18979
+              ],
+              [
+                18977,
+                18988
+              ],
+              [
+                18978,
+                18980
+              ],
+              [
+                18982,
+                18986
+              ],
+              [
+                18983,
+                18985
+              ],
+              [
+                18984,
+                18994
+              ],
+              [
+                18987,
+                18991
+              ],
+              [
+                18989,
+                18993
+              ],
+              [
+                18990,
+                19004
+              ],
+              [
+                18992,
+                18996
+              ],
+              [
+                18995,
+                18999
+              ],
+              [
+                18997,
+                19000
+              ],
+              [
+                18998,
+                19011
+              ],
+              [
+                19001,
+                19005
+              ],
+              [
+                19002,
+                19007
+              ],
+              [
+                19003,
+                19022
+              ],
+              [
+                19006,
+                19010
+              ],
+              [
+                19008,
+                19014
+              ],
+              [
+                19009,
+                19030
+              ],
+              [
+                19012,
+                19015
+              ],
+              [
+                19013,
+                19019
+              ],
+              [
+                19016,
+                19024
+              ],
+              [
+                19017,
+                19021
+              ],
+              [
+                19018,
+                19036
+              ],
+              [
+                19020,
+                19027
+              ],
+              [
+                19023,
+                19028
+              ],
+              [
+                19025,
+                19042
+              ],
+              [
+                19026,
+                19032
+              ],
+              [
+                19029,
+                19033
+              ],
+              [
+                19031,
+                19037
+              ],
+              [
+                19034,
+                19051
+              ],
+              [
+                19035,
+                19039
+              ],
+              [
+                19038,
+                19043
+              ],
+              [
+                19040,
+                19045
+              ],
+              [
+                19041,
+                19055
+              ],
+              [
+                19044,
+                19047
+              ],
+              [
+                19046,
+                19048
+              ],
+              [
+                19049,
+                19062
+              ],
+              [
+                19050,
+                19054
+              ],
+              [
+                19052,
+                19053
+              ],
+              [
+                19056,
+                19060
+              ],
+              [
+                19057,
+                19059
+              ],
+              [
+                19058,
+                19068
+              ],
+              [
+                19061,
+                19064
+              ],
+              [
+                19063,
+                19066
+              ],
+              [
+                19065,
+                19070
+              ],
+              [
+                19067,
+                19069
+              ],
+              [
+                19071,
+                19074
+              ],
+              [
+                19072,
+                19073
+              ],
+              [
+                19075,
+                19077
+              ],
+              [
+                19076,
+                19078
+              ],
+              [
+                19079,
+                19081
+              ],
+              [
+                19080,
+                19082
+              ],
+              [
+                19083,
+                19084
+              ],
+              [
+                19085,
+                19095
+              ],
+              [
+                19086,
+                19089
+              ],
+              [
+                19087,
+                19088
+              ],
+              [
+                19090,
+                19092
+              ],
+              [
+                19091,
+                19103
+              ],
+              [
+                19093,
+                19096
+              ],
+              [
+                19094,
+                19098
+              ],
+              [
+                19097,
+                19101
+              ],
+              [
+                19099,
+                19109
+              ],
+              [
+                19100,
+                19105
+              ],
+              [
+                19102,
+                19106
+              ],
+              [
+                19104,
+                19119
+              ],
+              [
+                19107,
+                19110
+              ],
+              [
+                19108,
+                19113
+              ],
+              [
+                19111,
+                19129
+              ],
+              [
+                19112,
+                19118
+              ],
+              [
+                19114,
+                19116
+              ],
+              [
+                19115,
+                19122
+              ],
+              [
+                19117,
+                19136
+              ],
+              [
+                19120,
+                19126
+              ],
+              [
+                19121,
+                19124
+              ],
+              [
+                19123,
+                19130
+              ],
+              [
+                19125,
+                19144
+              ],
+              [
+                19127,
+                19133
+              ],
+              [
+                19128,
+                19134
+              ],
+              [
+                19131,
+                19137
+              ],
+              [
+                19132,
+                19151
+              ],
+              [
+                19135,
+                19141
+              ],
+              [
+                19138,
+                19142
+              ],
+              [
+                19139,
+                19156
+              ],
+              [
+                19140,
+                19145
+              ],
+              [
+                19143,
+                19149
+              ],
+              [
+                19146,
+                19150
+              ],
+              [
+                19147,
+                19162
+              ],
+              [
+                19148,
+                19153
+              ],
+              [
+                19152,
+                19158
+              ],
+              [
+                19154,
+                19157
+              ],
+              [
+                19155,
+                19168
+              ],
+              [
+                19159,
+                19164
+              ],
+              [
+                19160,
+                19163
+              ],
+              [
+                19161,
+                19172
+              ],
+              [
+                19165,
+                19169
+              ],
+              [
+                19166,
+                19171
+              ],
+              [
+                19167,
+                19178
+              ],
+              [
+                19170,
+                19175
+              ],
+              [
+                19173,
+                19177
+              ],
+              [
+                19174,
+                19185
+              ],
+              [
+                19176,
+                19180
+              ],
+              [
+                19179,
+                19183
+              ],
+              [
+                19182,
+                19184
+              ],
+              [
+                19186,
+                19189
+              ],
+              [
+                19187,
+                19190
+              ]
+            ],
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "vsp_params": {
+            "cost_km": 1,
+            "apply_cct": true,
+            "cost_duty": 500,
+            "random_seed": 42,
+            "cost_vehicle": 950,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "time_budget_s": 120,
+            "fairness_weight": 0,
+            "pullout_minutes": 10,
+            "force_round_trip": true,
+            "max_work_minutes": 480,
+            "min_work_minutes": 0,
+            "nocturnal_factor": 1,
+            "pullback_minutes": 10,
+            "holiday_extra_pct": 1,
+            "idle_time_is_paid": true,
+            "max_shift_minutes": 560,
+            "min_break_minutes": 15,
+            "min_shift_minutes": 0,
+            "operator_profiles": [],
+            "paired_trip_bonus": 500,
+            "sunday_off_weight": 0,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "nocturnal_end_hour": 5,
+            "pair_break_penalty": 1000,
+            "strict_union_rules": true,
+            "vehicle_fixed_cost": 800,
+            "allow_relief_points": false,
+            "ilp_timeout_seconds": 120,
+            "max_driving_minutes": 270,
+            "min_layover_minutes": 10,
+            "nocturnal_extra_pct": 0.2,
+            "same_depot_required": false,
+            "weekly_rest_minutes": 2700,
+            "enforce_min_interval": false,
+            "hard_pairing_penalty": 23750,
+            "idle_cost_per_minute": 2,
+            "nocturnal_start_hour": 22,
+            "waiting_time_pay_pct": 0.3,
+            "cct_violation_penalty": 500,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "allow_multi_line_block": true,
+            "driver_cost_per_minute": 0.5,
+            "natural_language_rules": [],
+            "overtime_limit_minutes": 120,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 1,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "inter_shift_rest_minutes": 660,
+            "preserve_preferred_pairs": true,
+            "allow_reduced_weekly_rest": false,
+            "collector_cost_per_minute": 0.4,
+            "max_vehicle_shift_minutes": 560,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "fairness_tolerance_minutes": 30,
+            "hard_pairing_vehicle_level": true,
+            "strict_zero_gap_validation": true,
+            "daily_driving_limit_minutes": 540,
+            "reduced_weekly_rest_minutes": 1440,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "fairness_target_work_minutes": 420,
+            "operator_single_vehicle_only": false,
+            "weekly_driving_limit_minutes": 3360,
+            "fixed_vehicle_activation_cost": 950,
+            "mandatory_break_after_minutes": 240,
+            "preferred_pair_window_minutes": 30,
+            "operator_change_terminals_only": true,
+            "fortnight_driving_limit_minutes": 5400,
+            "long_unpaid_break_limit_minutes": 180,
+            "strict_terminal_sync_validation": false,
+            "long_unpaid_break_penalty_weight": 4,
+            "max_candidate_successors_per_task": 64,
+            "max_extended_driving_days_per_week": 2,
+            "extended_daily_driving_limit_minutes": 600
+          },
+          "n_vehicle_types": 1,
+          "replay_fingerprint": {
+            "line_ids": [
+              0
+            ],
+            "input_hash": "d32078daa3ea",
+            "trip_count": 1000,
+            "params_hash": "11c588c445d1",
+            "time_budget_s": 120
+          }
+        },
+        "sample_missing_trip_ids": [
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "setup": {
+          "company_id": 22,
+          "trip_rows": 1000
+        }
+      },
+      "comparison": {
+        "direct_status": "ok",
+        "direct_time_ms": 53838.67,
+        "cost_delta": 21646.5,
+        "vehicle_delta": -6,
+        "duty_delta": 17,
+        "time_delta_ms": -18633.25,
+        "hard_violation_delta": 0
+      },
+      "bugs": [
+        "P0: viagens perdidas no resultado persistido"
+      ]
+    }
+  ],
+  "logs": [
+    "/tmp/otimiz-e2e-celery.log",
+    "backend stdout session",
+    "optimizer uvicorn stdout session"
+  ]
+}

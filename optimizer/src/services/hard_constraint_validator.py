@@ -25,6 +25,7 @@ class HardConstraintValidator:
         strict_gps = bool(cct_params.get("strict_gps_validation", True))
         strict_sync = bool(cct_params.get("strict_terminal_sync_validation", True))
         allow_relief_points = bool(cct_params.get("allow_relief_points", False))
+        apply_cct = bool(cct_params.get("apply_cct", True))
 
         for trip in trips:
             if trip.id in seen_ids:
@@ -53,11 +54,11 @@ class HardConstraintValidator:
         max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         inter_shift = int(cct_params.get("inter_shift_rest_minutes", 660) or 660)
-        if max_shift > 1440:
+        if apply_cct and max_shift > 1440:
             issues.append(f"LEGAL_MAX_SHIFT_EXCEEDED config={max_shift}")
-        if max_driving > 600:
+        if apply_cct and max_driving > 600:
             issues.append(f"LEGAL_CONTINUOUS_DRIVING_EXCEEDED config={max_driving}")
-        if inter_shift < 660:
+        if apply_cct and inter_shift < 660:
             issues.append(f"LEGAL_INTERSHIFT_REST_TOO_LOW config={inter_shift}")
 
         return {
@@ -76,11 +77,29 @@ class HardConstraintValidator:
         vsp_params: Dict[str, Any],
     ) -> Dict[str, Any]:
         issues: List[str] = []
-        max_shift = min(int(cct_params.get("max_shift_minutes", 480) or 480), 720)
+        apply_cct = bool(cct_params.get("apply_cct", True))
+        max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
         meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
+        enforce_min_interval = bool(
+            cct_params.get(
+                "enforce_min_interval",
+                vsp_params.get("enforce_min_interval", False),
+            )
+        )
         min_layover = int(cct_params.get("min_layover_minutes", vsp_params.get("min_layover_minutes", 8)) or 8)
+        if apply_cct and enforce_min_interval:
+            min_layover = max(min_layover, min_break)
+        idle_behavior = str(vsp_params.get("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")
+        idle_threshold = vsp_params.get("vehicle_idle_gap_threshold_minutes")
+        max_idle_gap: Optional[int] = None
+        if idle_behavior != "stay_at_terminal" and idle_threshold is not None:
+            try:
+                parsed_idle_threshold = int(idle_threshold)
+                max_idle_gap = parsed_idle_threshold if parsed_idle_threshold > 0 else None
+            except (TypeError, ValueError):
+                max_idle_gap = None
         connection_tolerance = int(
             vsp_params.get(
                 "connection_tolerance_minutes",
@@ -93,6 +112,11 @@ class HardConstraintValidator:
         enforce_single_line_duty = bool(cct_params.get("enforce_single_line_duty", False))
         operator_change_terminals_only = bool(cct_params.get("operator_change_terminals_only", True))
         allow_relief_points = bool(cct_params.get("allow_relief_points", False))
+        terminal_location_ids = {
+            int(item)
+            for item in (cct_params.get("terminal_location_ids") or [])
+            if item is not None
+        }
 
         allow_multi_line_block = bool(vsp_params.get("allow_multi_line_block", True))
 
@@ -116,6 +140,8 @@ class HardConstraintValidator:
                     connection_tolerance,
                     enforce_same_depot,
                     allow_multi_line_block,
+                    max_idle_gap,
+                    enforce_min_interval,
                 )
             )
 
@@ -132,6 +158,9 @@ class HardConstraintValidator:
                     enforce_single_line_duty,
                     operator_change_terminals_only,
                     allow_relief_points,
+                    terminal_location_ids,
+                    apply_cct,
+                    enforce_min_interval,
                 )
             )
             roster_id = int(duty.meta.get("roster_id", 0) or 0)
@@ -143,8 +172,16 @@ class HardConstraintValidator:
             for index in range(len(ordered) - 1):
                 _, current_end, duty_id = ordered[index]
                 next_start, _, next_duty_id = ordered[index + 1]
-                if next_start - current_end < inter_shift:
+                current_week = current_end // (7 * 1440)
+                next_week = next_start // (7 * 1440)
+                weekly_rest = int(cct_params.get("weekly_rest_minutes", 2700) or 2700)
+                reduced_weekly_rest = int(cct_params.get("reduced_weekly_rest_minutes", 1440) or 1440)
+                allow_reduced_weekly_rest = bool(cct_params.get("allow_reduced_weekly_rest", False))
+                required_weekly_rest = reduced_weekly_rest if allow_reduced_weekly_rest else weekly_rest
+                if apply_cct and next_start - current_end < inter_shift:
                     issues.append(f"INTERSHIFT_REST_VIOLATION R{roster_id} D{duty_id}->{next_duty_id}")
+                if apply_cct and next_week > current_week and next_start - current_end < required_weekly_rest:
+                    issues.append(f"WEEKLY_REST_VIOLATION R{roster_id} D{duty_id}->{next_duty_id}")
 
         mandatory_groups = cct_params.get("mandatory_trip_groups_same_duty") or []
         if mandatory_groups:
@@ -166,6 +203,7 @@ class HardConstraintValidator:
                 result.csp.duties,
                 operator_change_terminals_only,
                 allow_relief_points,
+                terminal_location_ids,
             )
         )
 
@@ -322,8 +360,17 @@ class HardConstraintValidator:
         end_trip: Trip,
         start_trip: Trip,
         allow_relief_points: bool,
+        terminal_location_ids: set[int],
+        apply_cct: bool = True,
     ) -> bool:
-        same_terminal = end_trip.destination_id == start_trip.origin_id
+        terminal_allowed = (
+            not terminal_location_ids
+            or (
+                end_trip.destination_id is not None
+                and int(end_trip.destination_id) in terminal_location_ids
+            )
+        )
+        same_terminal = end_trip.destination_id == start_trip.origin_id and terminal_allowed
         same_depot = (
             end_trip.depot_id is not None
             and start_trip.depot_id is not None
@@ -352,6 +399,8 @@ class HardConstraintValidator:
         connection_tolerance: int,
         enforce_same_depot: bool,
         allow_multi_line: bool = True,
+        max_idle_gap: Optional[int] = None,
+        enforce_min_interval: bool = False,
     ) -> List[str]:
         issues: List[str] = []
         trips = list(getattr(block, "trips", []))
@@ -378,6 +427,10 @@ class HardConstraintValidator:
             need = max(min_layover, deadhead_need)
             if gap < 0:
                 issues.append(f"VEHICLE_OVERLAP B{block.id} T{current.id}->{nxt.id}")
+            elif max_idle_gap is not None and gap > max_idle_gap:
+                issues.append(f"VEHICLE_IDLE_GAP_EXCEEDED B{block.id} T{current.id}->{nxt.id}")
+            elif enforce_min_interval and 0 < gap < min_layover:
+                issues.append(f"VEHICLE_MIN_INTERVAL_VIOLATION B{block.id} T{current.id}->{nxt.id}")
             elif gap + connection_tolerance < need:
                 issues.append(f"DEADHEAD_INFEASIBLE B{block.id} T{current.id}->{nxt.id}")
         if enforce_same_depot and trips:
@@ -385,6 +438,7 @@ class HardConstraintValidator:
             end_depot = trips[-1].depot_id
             if start_depot is not None and end_depot is not None and start_depot != end_depot:
                 issues.append(f"BLOCK_SAME_DEPOT_VIOLATION B{block.id}")
+                issues.append(f"DUTY_SAME_DEPOT_VIOLATION B{block.id}")
         return issues
 
     def _audit_duty(
@@ -398,9 +452,12 @@ class HardConstraintValidator:
         enforce_single_line_duty: bool,
         operator_change_terminals_only: bool,
         allow_relief_points: bool,
+        terminal_location_ids: set[int],
+        apply_cct: bool,
+        enforce_min_interval: bool = False,
     ) -> List[str]:
         issues: List[str] = []
-        if duty.spread_time > max_shift:
+        if apply_cct and duty.spread_time > max_shift:
             issues.append(f"SPREAD_EXCEEDED D{duty.id}")
 
         # Verifica condução contínua via flag da Duty E via meta pre-computado.
@@ -408,7 +465,7 @@ class HardConstraintValidator:
         # o meta "max_continuous_drive_minutes" é setado por solvers que o populam.
         # Ambos são checados para garantir cobertura mesmo quando um não está disponível.
         meta_drive = int(duty.meta.get("max_continuous_drive_minutes", 0))
-        if duty.continuous_driving_violation or meta_drive > max_driving:
+        if apply_cct and (duty.continuous_driving_violation or meta_drive > max_driving):
             issues.append(f"CONTINUOUS_DRIVING_EXCEEDED D{duty.id}")
 
         # Checar ausência de intervalo a partir das viagens reais da duty.
@@ -424,10 +481,17 @@ class HardConstraintValidator:
             trips[k + 1].start_time - trips[k].end_time >= required_meal_break
             for k in range(len(trips) - 1)
         ) if len(trips) > 1 else True  # jornadas de viagem única não precisam de pausa
+        if apply_cct and enforce_min_interval:
+            for k in range(len(trips) - 1):
+                current = trips[k]
+                nxt = trips[k + 1]
+                gap = int(nxt.start_time) - int(current.end_time)
+                if 0 < gap < min_break and not nxt.is_continuation_of(current):
+                    issues.append(f"DUTY_MIN_INTERVAL_VIOLATION D{duty.id} T{current.id}->{nxt.id}")
         work_needs_break = duty.work_time >= 360  # 6h de direção exigem intervalo (CCT/CLT)
-        if work_needs_break and not meal_break_found:
+        if apply_cct and work_needs_break and not meal_break_found:
             issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
-        elif any("Intervalo de refeição insuficiente" in w for w in duty.warnings):
+        elif apply_cct and any("Intervalo de refeição insuficiente" in w for w in duty.warnings):
             issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
         if enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None:
             if duty.meta.get("start_depot_id") != duty.meta.get("end_depot_id"):
@@ -447,7 +511,7 @@ class HardConstraintValidator:
             if operator_change_terminals_only and current.trips and nxt.trips:
                 end_trip = current.trips[-1]
                 start_trip = nxt.trips[0]
-                if not self._operator_change_boundary_ok(end_trip, start_trip, allow_relief_points):
+                if not self._operator_change_boundary_ok(end_trip, start_trip, allow_relief_points, terminal_location_ids):
                     issues.append(f"OPERATOR_CHANGE_NON_TERMINAL D{duty.id} B{current.id}->{nxt.id}")
         return issues
 
@@ -456,6 +520,7 @@ class HardConstraintValidator:
         duties,
         operator_change_terminals_only: bool,
         allow_relief_points: bool,
+        terminal_location_ids: set[int],
     ) -> List[str]:
         if not operator_change_terminals_only:
             return []
@@ -486,6 +551,7 @@ class HardConstraintValidator:
                     current_task.trips[-1],
                     next_task.trips[0],
                     allow_relief_points,
+                    terminal_location_ids,
                 ):
                     issues.append(
                         f"OPERATOR_CHANGE_NON_TERMINAL SB{source_block_id} D{current_duty_id}->{next_duty_id}"

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Delete, Param, ParseIntPipe, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Param, ParseIntPipe, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException, Logger } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
@@ -8,6 +8,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @Controller('operations')
 @UseGuards(JwtAuthGuard)
 export class OperationsController {
+  private readonly logger = new Logger(OperationsController.name);
+
   constructor(
     private readonly operationsService: OperationsService,
     private readonly optimizationService: OptimizationService,
@@ -15,10 +17,38 @@ export class OperationsController {
   ) {}
 
   @Post('optimize')
-  async runOptimization(@Body('algorithm') algorithm?: string) {
+  async runOptimization(
+    @Body() body: Record<string, any>,
+    @Body('algorithm') algorithm?: string,
+    @Body('companyId') requestedCompanyId?: number,
+    @Body('operational_quality_mode') operationalQualityMode?: string,
+  ) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.optimizationService.runOptimization(companyId, algorithm);
+
+    if (
+      requestedCompanyId !== undefined
+      && requestedCompanyId !== null
+      && Number(requestedCompanyId) !== Number(companyId)
+    ) {
+      this.logger.warn(
+        `optimization_tenant_mismatch_blocked requested=${requestedCompanyId} tenant=${companyId}`,
+      );
+      throw new BadRequestException(
+        `CompanyId divergente do tenant autenticado. requested=${requestedCompanyId} tenant=${companyId}`,
+      );
+    }
+
+    const requestedOperationalQualityMode =
+      body?.operational_quality_mode
+      ?? body?.operationalQualityMode
+      ?? operationalQualityMode;
+
+    this.logger.log(
+      `optimization_request_received company_id=${companyId} algorithm=${algorithm ?? 'default'} requested_operational_quality_mode=${requestedOperationalQualityMode ?? 'null'}`,
+    );
+
+    return this.optimizationService.runOptimization(companyId, algorithm, requestedOperationalQualityMode);
   }
 
   @Post('chat')

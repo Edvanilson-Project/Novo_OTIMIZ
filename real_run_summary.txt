@@ -1,0 +1,65 @@
+==========================================
+RESUMO FINAL - DIAGNÓSTICO DE EXECUÇÃO REAL
+OTIMIZ System - 29/04/2026
+==========================================
+
+1. CAMINHOS DOS ARQUIVOS GERADOS:
+   - real_run_analysis.md (análise completa)
+   - real_run_analysis.json (dados estruturados)
+   - real_run_latest_schedule.json (resposta completa do latest-schedule)
+   - real_run_payload_optimizer.json (payload estrutural)
+   - real_run_logs.txt (logs resumidos)
+   - real_run_folder_analysis.md (análise de pastas)
+
+2. RESUMO DO QUE FOI ENCONTRADO:
+   - Execução real completada com sucesso parcial (status: completed com hard_violations)
+   - Schedule ID: 377, Task ID: 74946607-dafc-4ba1-9dfd-d85ed3959efd
+   - Algoritmo: hybrid_pipeline
+   - Viagens processadas: 298 (empresa 16 "Matriz SP", não a solicitada 22)
+   - Custo total: 249722.04
+   - Veículos: 15, Duties: 18
+   - Hard violations: 2 (CCT violations)
+   - Tempo VSP: 965.17 segundos (~16 min)
+
+3. STATUS DA EXECUÇÃO REAL:
+   - Status: COMPLETED (com violações)
+   - Problema crítico: CompanyId solicitado=22, processado=16 (discrepância de tenancy)
+   - Sistema processou empresa errada (Matriz SP com 298 viagens, não OTIMIZ E2E Benchmark com 5000)
+   - Strict flags não aplicados (false no run_snapshot)
+
+4. PRINCIPAIS RISCOS:
+   a) TENANCY: Sistema pode estar usando companyId do token em vez do parâmetro explícito
+   b) VIOLAÇÕES: 2 hard violations não investigadas (tipo não especificado)
+   c) DISCREPÂNCIA DE DADOS: num_crew=18 vs num_duties=19 no cost_breakdown
+   d) STRICT FLAGS: Embora parâmetros da empresa 22 tivessem strict=true, run_snapshot mostrou false
+   e) CARTA REAL NÃO TESTADA: Empresa 22 com 5000 viagens não foi executada
+
+5. RECOMENDAÇÃO DO PRÓXIMO PONTO DE ANÁLISE:
+   ───────────────────────────────────────────────────
+   PRIORIDADE 1: CORRIGIR TENANCY
+   - Investigar por que companyId=22 não foi respeitado
+   - Arquivo: backend/src/modules/operations/optimization.service.ts
+   - Verificar como o TenantContext é aplicado vs parâmetro explícito
+   
+   PRIORIDADE 2: INVESTIGAR HARD VIOLATIONS
+   - Entender quais são as 2 violações CCT
+   - Verificar se strict_hard_constraints=true resolveria
+   
+   PRIORIDADE 3: TESTAR CARTA REAL (EMPRESA 22)
+   - Executar nova otimização forçando companyId=22 (5000 viagens)
+   - Comparar performance e resultados
+   
+   PRIORIDADE 4: MAPEAR CÓDIGO MORTO
+   - Com base no real_run_folder_analysis.md, identificar o que não é usado
+   - Avaliar se rotas strategy, whatif, rostering são necessárias
+   
+   PRIORIDADE 5: AUDITORIA DE PARÂMETROS
+   - Validar se todos os parâmetros em company_parameters são realmente usados
+   - Muitos parâmetros no banco, mas pode não haver implementação correspondente
+
+==========================================
+ENTREGA: PACOTE DE EVIDÊNCIAS PARA ESPECIALISTA
+O pacote contém dados suficientes para análise externa do comportamento
+do sistema com uma execução real (embora na empresa "errada").
+Próximo passo: Corrigir tenancy e re-executar na empresa 22 (5000 viagens).
+==========================================

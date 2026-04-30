@@ -62,6 +62,7 @@ def _to_vt(v) -> VehicleType:
 
 def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
     """Constrói OptimizeResponse a partir do dict retornado pela task Celery."""
+    meta = raw.get("meta") or {}
     return OptimizeResponse(
         status="ok",
         vehicles=raw["vehicles"],
@@ -88,8 +89,14 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
         phase_summary=raw.get("phase_summary") or {},
         trip_group_audit=raw.get("trip_group_audit") or {},
         reproducibility=raw.get("reproducibility") or {},
-        performance=(raw.get("meta") or {}).get("performance") or {},
-        meta=raw.get("meta") or {},
+        performance=meta.get("performance") or {},
+        parameter_effect_report=raw.get("parameter_effect_report") or meta.get("parameter_effect_report") or {},
+        chosen_scenario=raw.get("chosen_scenario") or meta.get("chosen_scenario"),
+        rejected_scenarios=raw.get("rejected_scenarios") or meta.get("rejected_scenarios") or [],
+        justification=raw.get("justification") or meta.get("justification") or [],
+        trade_offs=raw.get("trade_offs") or meta.get("trade_offs") or [],
+        operational_quality_decision=raw.get("operational_quality_decision") or meta.get("operational_quality_decision") or {},
+        meta=meta,
     )
 
 
@@ -131,9 +138,10 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             "line_id": body.line_id,
             "company_id": body.company_id,
             "run_id": body.run_id,
-            "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True) if body.cct_params else {},
-            "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
-            "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
+            "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True, exclude_unset=True) if body.cct_params else {},
+            "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True, exclude_unset=True) if body.vsp_params else {},
+            "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True, exclude_unset=True) if body.optimization_params else {},
+            "request_metadata": body.request_metadata or {},
             "algorithm_preference": body.algorithm_preference,
             "version": CACHE_VERSION,
         }
@@ -301,22 +309,28 @@ async def get_optimization_status(task_id: str) -> TaskStatusResponse:
 
         # AJUSTE 1: A task pode ter retornado um erro estruturado em vez de fazer raise
         if isinstance(task_return, dict) and task_return.get("_is_error"):
-            http_status = int(task_return.get("http_status", 400))
             error_payload = task_return.get("error_payload") or {}
             error_code = task_return.get("error_code", "OPTIMIZER_ERROR")
-            error_message = task_return.get("error_message", "Erro no solver")
+            error_message = task_return.get("message") or task_return.get("error_message") or error_payload.get("message") or "Erro no solver"
+            error_type = task_return.get("error_type", error_payload.get("error_type", "system"))
+            details = task_return.get("details", error_payload.get("details", error_payload))
 
             logger.warning(
-                "optimization_business_error: task_id=%s code=%s",
-                task_id,
-                error_code,
+                "optimization_task_failed: task_id=%s type=%s code=%s",
+                task_id, error_type, error_code,
             )
-            raise HTTPException(
-                status_code=http_status,
-                detail={
-                    "code": error_code,
+            return TaskStatusResponse(
+                status="failed",
+                task_id=task_id,
+                error_type=error_type,
+                error_code=error_code,
+                message=error_message,
+                details=details,
+                error={
+                    "error_type": error_type,
+                    "error_code": error_code,
                     "message": error_message,
-                    "diagnostics": error_payload,
+                    "details": details,
                 },
             )
 

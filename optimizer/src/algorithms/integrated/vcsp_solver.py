@@ -14,7 +14,9 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 import pulp
 
+from ...core.config import get_settings
 from ...core.exceptions import InfeasibleProblemError
+
 from ...core.rule_engine import DynamicRuleEngine
 from ...domain.interfaces import IIntegratedSolver
 from ...domain.models import Block, CSPSolution, Duty, DutySegment, OptimizationResult, Trip, VehicleType, VSPSolution
@@ -28,6 +30,8 @@ except ImportError:
     _RoutingClient = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+
 
 # Peso Big-M será calculado dinamicamente para cada instância
 
@@ -61,6 +65,10 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             )
             or 8
         )
+        min_break_val = self.cct_params.get("min_break_minutes", None)
+        self.enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", self.vsp_params.get("strict_min_interval", False)))
+        if self.enforce_min_interval and min_break_val is not None:
+            self.min_layover_minutes = max(self.min_layover_minutes, int(min_break_val))
         self.connection_tolerance_minutes = int(
             self.vsp_params.get(
                 "connection_tolerance_minutes",
@@ -88,18 +96,37 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> OptimizationResult:
-        """Resolve o problema VCSP integrado com tratamento robusto de erros.
-        
-        Melhorias implementadas:
-        - Big-M calculado dinamicamente
-        - Validação rigorosa de invariantes
-        - Tratamento de erros degradável
-        """ 
+        """Resolve o problema VCSP integrado com tratamento robusto de erros."""
         self._start_timer()
         
-        # Validar entrada
+        # [SAFETY GUARD] VCSP_PULP é inviável para instâncias massivas
+        max_trips = int(self.vsp_params.get("max_vcsp_pulp_trips", 150))
+        if len(trips) > max_trips:
+            logger.warning(f"[VCSP] Instância de {len(trips)} trips excede o limite seguro de {max_trips}. Acionando fallback Greedy.")
+            from ..vsp.greedy import GreedyVSP
+            from ..csp.greedy import GreedyCSP
+            
+            # Executa fallback (Heurístico) por segurança de escala
+            vsp_greedy = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+            csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **self.cct_params).solve(vsp_greedy.blocks, trips)
+            
+            res = OptimizationResult(
+                vsp=vsp_greedy, 
+                csp=csp_greedy, 
+                algorithm=self.name, 
+                total_elapsed_ms=self._elapsed_ms()
+            )
+            res.meta.update({
+                "fallback_used": True,
+                "fallback_reason": f"trips_count_limit_exceeded ({len(trips)} > {max_trips})",
+                "original_solver": "vcsp_pulp",
+                "fallback_solver": "greedy_vsp_greedy_csp"
+            })
+            return res
+        
         if not trips:
             raise InfeasibleProblemError("Nenhuma viagem fornecida")
+
         
         # Configurar Big-M dinâmico
         self._illegal_relief_penalty, self._punishment_cost = self._calculate_safe_big_m(trips)
@@ -136,12 +163,35 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         # 3. Solver Engine (CBC)
         msg_flag = 0  # Silenciar saída do solver
-        prob.solve(pulp.PULP_CBC_CMD(msg=msg_flag, timeLimit=int(self.time_budget_s)))
+        solver = pulp.PULP_CBC_CMD(
+            msg=msg_flag, 
+            timeLimit=int(self.time_budget_s), 
+            threads=settings.ilp_threads
+        )
+        prob.solve(solver)
 
         # 4. Prova de Otimalidade Exigida
         status_str = pulp.LpStatus[prob.status]
         if status_str != 'Optimal':
-            raise InfeasibleProblemError(f"Formulação inatingível. Status matemático: {status_str}")
+            logger.warning(f"[VCSP] Solver não atingiu otimalidade (Status: {status_str}). Acionando fallback Greedy.")
+            from ..vsp.greedy import GreedyVSP
+            from ..csp.greedy import GreedyCSP
+            
+            # Executa fallback (Heurístico)
+            vsp_greedy = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+            csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **self.cct_params).solve(vsp_greedy.blocks, trips)
+            
+            res = OptimizationResult(
+                vsp=vsp_greedy, 
+                csp=csp_greedy, 
+                algorithm=self.name, 
+                total_elapsed_ms=self._elapsed_ms()
+            )
+            res.meta["fallback_used"] = True
+            res.meta["fallback_reason"] = status_str
+            res.meta["original_solver"] = "vcsp_pulp"
+            res.meta["fallback_solver"] = "greedy_vsp_greedy_csp"
+            return res
 
         # 5. Decodificação da Solução
         blocks = []
@@ -441,46 +491,47 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
                 # Verificar se a viagem t pode ser adicionada temporalmente
                 if last_trip is None or gap + self.connection_tolerance_minutes >= required_gap:
+                    if self.enforce_min_interval and last_trip is not None and 0 < gap < self.min_layover_minutes:
+                        continue
+                    
                     # Regra de Poda: Viagem Casada (Arquiteto)
                     force_round_trip = self.cct_params.get('force_round_trip', False)
                     if force_round_trip and last_trip is not None:
                         if t.origin_id != last_trip.destination_id:
                             continue
-
-                    if last_trip is None or gap + self.connection_tolerance_minutes >= required_gap:
                         
-                        # 1. Poda por Tempo de Direção (Work Time + Deadhead)
-                        # Deadhead conta como tempo de trabalho na CCT brasileira
-                        new_work = current_work + deadhead_dur + t.duration
-                        if new_work > self.max_work_minutes:
+                    # 1. Poda por Tempo de Direção (Work Time + Deadhead)
+                    # Deadhead conta como tempo de trabalho na CCT brasileira
+                    new_work = current_work + deadhead_dur + t.duration
+                    if new_work > self.max_work_minutes:
+                        continue
+                        
+                    # 1.2 Poda por Jornada Total (Spread Time)
+                    spread_time = t.end_time - current_path[0].start_time if current_path else t.duration
+                    if spread_time > self.max_shift_minutes:
+                        continue
+                        
+                    # 2. Poda por Distância Temporal (Max Idle Time)
+                    if last_trip is not None:
+                        gap = t.start_time - last_trip.end_time
+                        if gap > max_idle_gap:
                             continue
-                            
-                        # 1.2 Poda por Jornada Total (Spread Time)
-                        spread_time = t.end_time - current_path[0].start_time if current_path else t.duration
-                        if spread_time > self.max_shift_minutes:
+
+                    # 3. Poda por Interjornada (se for a primeira viagem do duty e tivermos last_end_time)
+                    if last_end_time is not None and not current_path:
+                        # Estamos começando um novo duty. A primeira viagem deve respeitar a interjornada.
+                        if t.start_time < last_end_time + self.min_inter_shift_rest:
                             continue
-                            
-                        # 2. Poda por Distância Temporal (Max Idle Time)
-                        if last_trip is not None:
-                            gap = t.start_time - last_trip.end_time
-                            if gap > max_idle_gap:
-                                continue
 
-                        # 3. Poda por Interjornada (se for a primeira viagem do duty e tivermos last_end_time)
-                        if last_end_time is not None and not current_path:
-                            # Estamos começando um novo duty. A primeira viagem deve respeitar a interjornada.
-                            if t.start_time < last_end_time + self.min_inter_shift_rest:
-                                continue
-
-                        # CHAMADA RECURSIVA CORRIGIDA: passando todos os parâmetros necessários
-                        dfs(
-                            current_path + [t], 
-                            t.end_time, 
-                            t, 
-                            new_work, 
-                            last_end_time,  # Mantém o mesmo last_end_time durante a construção do duty
-                            depth + 1       # Incrementa a profundidade
-                        )
+                    # CHAMADA RECURSIVA CORRIGIDA: passando todos os parâmetros necessários
+                    dfs(
+                        current_path + [t], 
+                        t.end_time, 
+                        t, 
+                        new_work, 
+                        last_end_time,  # Mantém o mesmo last_end_time durante a construção do duty
+                        depth + 1       # Incrementa a profundidade
+                    )
 
         # Garantia de cobertura: cada viagem precisa ter pelo menos 1 caminho viável.
         # Usa t.id (ID de negócio) — id() seria identidade de objeto Python, quebraria

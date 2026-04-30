@@ -1,0 +1,41 @@
+{
+  "company_id": 16,
+  "scenario_id": null,
+  "schedule_id": 377,
+  "run_id": 377,
+  "input_summary": {
+    "n_trips": null,
+    "trip_count": null,
+    "trips_hash": null,
+    "algorithm": null,
+    "time_budget_s": null
+  },
+  "submitted_params": {},
+  "resolved_params": null,
+  "request_metadata": null,
+  "trip_group_inference_report": null,
+  "hard_constraint_report": null,
+  "parameter_effect_report": null,
+  "performance": null,
+  "result_summary": {
+    "status": "completed",
+    "solverStatus": "hard_violation",
+    "total_cost": 249722.04,
+    "num_vehicles": 15,
+    "num_crew": 18,
+    "cct_violations": 2,
+    "unassigned_trips": 0,
+    "hardIssueCount": 2
+  },
+  "error_summary": {
+    "hasHardViolations": true,
+    "cctViolations": 2,
+    "solverStatus": "hard_violation"
+  },
+  "file_function_flow_map": {
+    "backend": "backend/src/modules/operations/optimization.service.ts:runOptimization()",
+    "optimizer_api": "optimizer/main.py:optimize endpoint",
+    "celery_worker": "optimizer/src/services/optimizer_tasks.py",
+    "solver": "optimizer/src/services/optimizer_service.py"
+  }
+}
