@@ -356,7 +356,9 @@ class OptimizationResult:
         )
         block_ids = list(dict.fromkeys(int(b.meta.get("source_block_id", b.id)) for b in duty.tasks))
         costs = duty_costs.get(int(duty.id), {})
-        return {
+        operational_segments = list(duty.meta.get("duty_time_segments") or [])
+        operational_report = dict(duty.meta.get("operational_time_report") or {})
+        payload = {
             "duty_id": duty.id,
             "blocks": block_ids,
             "trip_ids": trip_ids,
@@ -367,6 +369,7 @@ class OptimizationResult:
             "spread_time": duty.spread_time,
             "rest_violations": duty.rest_violations,
             "shift_violations": duty.shift_violations,
+            "warnings": list(duty.warnings or []),
             "paid_minutes": duty.paid_minutes,
             "overtime_minutes": duty.overtime_minutes,
             "nocturnal_minutes": duty.nocturnal_minutes,
@@ -379,8 +382,16 @@ class OptimizationResult:
             "holiday_extra_cost": round(float(costs.get("holiday_extra", 0.0) or 0.0), 2),
             "cct_penalties_cost": round(float(costs.get("cct_penalties", 0.0) or 0.0), 2),
             "total_cost": round(float(costs.get("total", 0.0) or 0.0), 2),
-            "quality_metrics": dict(duty.meta.get("quality_metrics") or {}),
+            "meta": {
+                "quality_metrics": dict(duty.meta.get("quality_metrics") or {}),
+                "operational_time_report": operational_report,
+                "user_explanation": operational_report.get("user_explanation"),
+                "suggestion": operational_report.get("suggestion"),
+            },
         }
+        if operational_segments:
+            payload["segments"] = operational_segments
+        return payload
 
     @staticmethod
     def _compact_cost_breakdown(cost_breakdown: Dict[str, Any]) -> Dict[str, Any]:
@@ -477,6 +488,7 @@ class OptimizationResult:
             "solver_version": merged_meta.get("solver_version"),
             "hard_constraint_report": merged_meta.get("hard_constraint_report"),
             "parameter_effect_report": merged_meta.get("parameter_effect_report"),
+            "operational_time_reports": merged_meta.get("operational_time_reports"),
             "operational_kpis": merged_meta.get("operational_kpis"),
             "performance": merged_meta.get("performance"),
             "chosen_scenario": merged_meta.get("chosen_scenario"),
@@ -512,6 +524,7 @@ class OptimizationResult:
             "solver_explanation": self._compact_solver_explanation(merged_meta.get("solver_explanation")),
             "phase_summary": merged_meta.get("phase_summary"),
             "trip_group_audit": self._compact_trip_group_audit(merged_meta.get("trip_group_audit")),
+            "operational_time_reports": merged_meta.get("operational_time_reports") or {},
             "parameter_effect_report": merged_meta.get("parameter_effect_report"),
             "reproducibility": merged_meta.get("reproducibility"),
             "performance": merged_meta.get("performance") or {},
@@ -567,6 +580,7 @@ class OptimizationResult:
             "solver_explanation": merged_meta.get("solver_explanation"),
             "phase_summary": merged_meta.get("phase_summary"),
             "trip_group_audit": merged_meta.get("trip_group_audit"),
+            "operational_time_reports": merged_meta.get("operational_time_reports"),
             "parameter_effect_report": merged_meta.get("parameter_effect_report"),
             "reproducibility": merged_meta.get("reproducibility"),
             "chosen_scenario": merged_meta.get("chosen_scenario"),

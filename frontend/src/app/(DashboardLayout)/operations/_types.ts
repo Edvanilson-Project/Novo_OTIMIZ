@@ -99,11 +99,9 @@ export interface User {
 }
 
 export type OptimizationStatus =
-  | 'pending'
-  | 'running'
+  | 'processing'
   | 'completed'
-  | 'failed'
-  | 'cancelled';
+  | 'failed';
 
 export type OptimizationAlgorithm =
   | 'full_pipeline'
@@ -429,12 +427,75 @@ export interface OptimizationBlock {
   meta?: Record<string, any>;
 }
 
+
+
+export interface OptimizationDutyTimeSegment {
+  type?: string;
+  event_type?: string;
+  event_scope?: string;
+  bundle_event_type?: string;
+  start?: number;
+  end?: number;
+  duration?: number;
+  duration_minutes?: number;
+  event_label?: string;
+  is_work_time?: boolean;
+  is_driving_time?: boolean;
+  is_idle_time?: boolean;
+  is_normal_break?: boolean;
+  is_mandatory_rest?: boolean;
+  is_pullout?: boolean;
+  is_pullback?: boolean;
+  rest_valid?: boolean;
+  rule_code?: string;
+  violation_code?: string;
+  explanation?: string;
+  trip_ids?: number[];
+  trip_count?: number;
+  trip_group_ids?: number[];
+  trip_directions?: string[];
+  block_id?: number | string;
+  from_block_id?: number | string;
+  to_block_id?: number | string;
+  from_vehicle_id?: number | string;
+  to_vehicle_id?: number | string;
+  vehicle_id?: number | string;
+  location?: number | string;
+  location_start?: number | string;
+  location_end?: number | string;
+}
+
+export interface OptimizationOperationalTimeReport {
+  duty_start?: number;
+  duty_end?: number;
+  spread_time?: number;
+  window_time?: number;
+  work_time?: number;
+  driving_time?: number;
+  idle_time?: number;
+  normal_break_time?: number;
+  mandatory_rest_time?: number;
+  pullout_time?: number;
+  pullback_time?: number;
+  mandatory_rest?: {
+    mandatory_rest_required?: boolean;
+    has_valid_mandatory_rest?: boolean;
+    violations?: string[];
+  };
+  operator?: {
+    operator_not_assigned?: boolean;
+  };
+}
+
 export interface OptimizationDuty {
   duty_id: number;
   blocks?: number[];
   trip_ids?: number[];
   trips?: TripDetail[];
   segments?: OptimizationDutySegment[];
+  duty_time_segments?: OptimizationDutyTimeSegment[];
+  detailed_trip_assignments?: TripDetail[];
+  operational_time_report?: OptimizationOperationalTimeReport;
   work_time: number;
   spread_time: number;
   start_time: number;
@@ -462,12 +523,23 @@ export interface OptimizationDutySegment {
 
 export interface TripDetail {
   id: number;
+  source_trip_id?: number;
+  public_trip_id?: number;
   trip_id?: number;
   block_id?: number;
+  vehicle_id?: number;
   duty_id?: number;
+  driver_id?: number;
   roster_id?: number;
   operator_id?: number | null;
   operator_name?: string | null;
+  sequence_in_duty?: number;
+  sequence_in_block?: number;
+  segment_sequence?: number | null;
+  sequence_in_bundle?: number;
+  bundle_trip_count?: number;
+  bundle_event_type?: string;
+  pair_id?: string | null;
   segment_index?: number;
   segment_count?: number;
   start_time: number;

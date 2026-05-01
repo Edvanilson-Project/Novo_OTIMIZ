@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..domain.models import OptimizationResult, Trip
+from .operational_time_service import build_duty_operational_time_report
 
 
 class HardConstraintValidator:
@@ -82,6 +83,7 @@ class HardConstraintValidator:
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
         meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
+        mandatory_break_after = int(cct_params.get("mandatory_break_after_minutes", max_driving) or max_driving)
         enforce_min_interval = bool(
             cct_params.get(
                 "enforce_min_interval",
@@ -154,6 +156,7 @@ class HardConstraintValidator:
                     max_driving,
                     min_break,
                     meal_break,
+                    mandatory_break_after,
                     enforce_same_depot,
                     enforce_single_line_duty,
                     operator_change_terminals_only,
@@ -208,7 +211,7 @@ class HardConstraintValidator:
         )
 
         # Separar violações hard (bloqueantes) de soft (avisos)
-        soft_prefixes = ["MEAL_BREAK_MISSING"]
+        soft_prefixes = ["MANDATORY_REST_MISSING", "INVALID_REST_POSITION"]
         hard_pairing = bool(cct_params.get("enforce_trip_groups_hard", False)) or bool(
             cct_params.get("operator_pairing_hard", False)
         )
@@ -448,6 +451,7 @@ class HardConstraintValidator:
         max_driving: int,
         min_break: int,
         meal_break: int,
+        mandatory_break_after: int,
         enforce_same_depot: bool,
         enforce_single_line_duty: bool,
         operator_change_terminals_only: bool,
@@ -460,27 +464,23 @@ class HardConstraintValidator:
         if apply_cct and duty.spread_time > max_shift:
             issues.append(f"SPREAD_EXCEEDED D{duty.id}")
 
-        # Verifica condução contínua via flag da Duty E via meta pre-computado.
-        # O flag duty.continuous_driving_violation é setado pelo GreedyCSP;
-        # o meta "max_continuous_drive_minutes" é setado por solvers que o populam.
-        # Ambos são checados para garantir cobertura mesmo quando um não está disponível.
-        meta_drive = int(duty.meta.get("max_continuous_drive_minutes", 0))
-        if apply_cct and (duty.continuous_driving_violation or meta_drive > max_driving):
-            issues.append(f"CONTINUOUS_DRIVING_EXCEEDED D{duty.id}")
+        meta_drive = int(duty.meta.get("max_continuous_drive_minutes", 0) or 0)
+        if apply_cct and meta_drive > max_driving:
+            issues.append(f"MAX_DRIVING_EXCEEDED D{duty.id}")
 
-        # Checar ausência de intervalo a partir das viagens reais da duty.
-        # Folgas menores que meal_break não contam como refeição, mesmo que
-        # ultrapassem o min_break usado apenas para reset operacional.
         tasks = list(getattr(duty, "tasks", []))
-        required_meal_break = max(int(min_break), int(meal_break))
+        operational_time_report = duty.meta.get("operational_time_report") or build_duty_operational_time_report(
+            duty,
+            min_break_minutes=min_break,
+            meal_break_minutes=meal_break,
+            mandatory_break_after_minutes=mandatory_break_after,
+        )
+        duty.meta.setdefault("operational_time_report", operational_time_report)
+        duty.meta.setdefault("duty_time_segments", operational_time_report.get("duty_time_segments", []))
         trips = sorted(
             [trip for task in tasks for trip in getattr(task, "trips", [])],
             key=lambda item: (item.start_time, item.id),
         )
-        meal_break_found = any(
-            trips[k + 1].start_time - trips[k].end_time >= required_meal_break
-            for k in range(len(trips) - 1)
-        ) if len(trips) > 1 else True  # jornadas de viagem única não precisam de pausa
         if apply_cct and enforce_min_interval:
             for k in range(len(trips) - 1):
                 current = trips[k]
@@ -488,11 +488,10 @@ class HardConstraintValidator:
                 gap = int(nxt.start_time) - int(current.end_time)
                 if 0 < gap < min_break and not nxt.is_continuation_of(current):
                     issues.append(f"DUTY_MIN_INTERVAL_VIOLATION D{duty.id} T{current.id}->{nxt.id}")
-        work_needs_break = duty.work_time >= 360  # 6h de direção exigem intervalo (CCT/CLT)
-        if apply_cct and work_needs_break and not meal_break_found:
-            issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
-        elif apply_cct and any("Intervalo de refeição insuficiente" in w for w in duty.warnings):
-            issues.append(f"MEAL_BREAK_MISSING D{duty.id}")
+        if apply_cct and operational_time_report.get("invalid_rest_position"):
+            issues.append(f"INVALID_REST_POSITION D{duty.id}")
+        if apply_cct and operational_time_report.get("mandatory_rest_required") and not operational_time_report.get("has_valid_mandatory_rest"):
+            issues.append(f"MANDATORY_REST_MISSING D{duty.id}")
         if enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None:
             if duty.meta.get("start_depot_id") != duty.meta.get("end_depot_id"):
                 issues.append(f"DUTY_SAME_DEPOT_VIOLATION D{duty.id}")

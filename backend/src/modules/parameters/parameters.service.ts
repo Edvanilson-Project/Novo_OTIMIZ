@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { TenantContext } from '../../common/context/tenant-context';
 import { CompanyParameters } from '../database/entities/company-parameters.entity';
 import { CompanyParametersRepository } from '../database/repositories/company-parameters.repository';
+import { normalizeLegacyCompanyParameters } from './parameter-normalization';
 
 @Injectable()
 export class ParametersService {
@@ -19,6 +20,11 @@ export class ParametersService {
       // Se não houver, criamos o padrão para o tenant
       return this.createDefaultParameters();
     }
+
+    if (this.applyLegacyPercentageNormalization(params)) {
+      return this.parametersRepository.save(params);
+    }
+
     return params;
   }
 
@@ -31,6 +37,8 @@ export class ParametersService {
     if (!params) {
       params = await this.createDefaultParameters();
     }
+
+    this.applyLegacyPercentageNormalization(params);
 
     const {
       id,
@@ -45,6 +53,14 @@ export class ParametersService {
     Object.assign(params, sanitizedData);
     this.validateCrossFieldRelations(params);
     return this.parametersRepository.save(params);
+  }
+
+  private applyLegacyPercentageNormalization(params: CompanyParameters): boolean {
+    const { normalized, changed } = normalizeLegacyCompanyParameters(params);
+    if (changed) {
+      Object.assign(params, normalized);
+    }
+    return changed;
   }
 
   private validateCrossFieldRelations(params: CompanyParameters) {
@@ -153,9 +169,15 @@ export class ParametersService {
       'hybrid_pipeline',
       'assignment_vsp',
       'greedy',
-      'ilp',
-      'column_generation',
+      'genetic',
+      'tabu_search',
+      'simulated_annealing',
+      'set_partitioning',
+      'mcnf',
+      'joint_solver',
+      'vcsp_pulp',
     ];
+
 
     const allowedIdleGapBehaviors = [
       'solver_decides',

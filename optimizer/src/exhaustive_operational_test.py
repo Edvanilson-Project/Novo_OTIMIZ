@@ -53,22 +53,21 @@ def test_single_line_duty():
 
 def test_operator_change_terminals_only():
     logger.info("Testing: operator_change_terminals_only")
-    # T1 ends at 2 (Terminal), T2 starts at 2 (Terminal) -> OK
-    # Vamos criar T4 que termina em 99 (RP) e T5 que começa em 99 (RP)
     t4 = Trip(id=4, line_id=101, start_time=1000, end_time=1100, origin_id=1, destination_id=99, distance_km=5.0)
     t5 = Trip(id=5, line_id=101, start_time=1120, end_time=1220, origin_id=99, destination_id=2, distance_km=5.0)
-    
-    service = OptimizerService()
-    vt = [VehicleType(id=1, name="V1", passenger_capacity=80, cost_per_km=1.0, fixed_cost=1000.0)]
-    
-    # Config: operator_change_terminals_only = True
-    # 99 não é terminal (não está no map de terminais padrão ou meta)
-    params = {"operator_change_terminals_only": True, "apply_cct": True}
-    
-    # O solver deve falhar em acoplar T4 e T5 em uma única jornada se 99 não for terminal
-    res = service.run(trips=[t4, t5], vehicle_types=vt, algorithm=AlgorithmType.GREEDY, optimization_params=params)
-    
-    duties = len(res.csp.duties)
+    t4.deadhead_times = {1: 0, 2: 0, 99: 0}
+    t5.deadhead_times = {1: 0, 2: 0, 99: 0}
+
+    csp = GreedyCSP(
+        operator_change_terminals_only=True,
+        terminal_location_ids=[2],
+    )
+    res = csp.solve([
+        Block(id=1, trips=[t4]),
+        Block(id=2, trips=[t5]),
+    ])
+
+    duties = len(res.duties)
     logger.info(f"Duties for non-terminal change: {duties}")
     assert duties == 2, "Operator change terminals only failed to block change at non-terminal"
     logger.info("SUCCESS: operator_change_terminals_only")

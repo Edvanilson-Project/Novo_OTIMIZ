@@ -204,7 +204,11 @@ class CostEvaluator(ICostEvaluator):
         self.sunday_off_weight = self._to_decimal(params.get("sunday_off_weight", self.sunday_off_weight))
         
         # Limites de Intervalo
-        self.long_unpaid_break_limit_minutes = int(params.get("long_unpaid_break_limit_minutes", self.long_unpaid_break_limit_minutes))
+        configured_long_break_limit = params.get("long_unpaid_break_limit_minutes")
+        if configured_long_break_limit is None and params.get("max_unpaid_break_minutes") is not None:
+            configured_long_break_limit = params.get("max_unpaid_break_minutes")
+        if configured_long_break_limit is not None:
+            self.long_unpaid_break_limit_minutes = int(configured_long_break_limit)
         self.long_unpaid_break_penalty_weight = self._to_decimal(params.get("long_unpaid_break_penalty_weight", self.long_unpaid_break_penalty_weight))
 
     def _to_decimal(self, value: Any) -> Decimal:

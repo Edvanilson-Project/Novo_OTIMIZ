@@ -111,6 +111,14 @@ export default function PlannerPage() {
     );
   }, [schedule]);
 
+  const hardConstraintReport = useMemo<Record<string, any> | null>(() => {
+    return (
+      (schedule as any)?.hard_constraint_report ??
+      schedule?.resultSummary?.hardConstraintReport ??
+      null
+    );
+  }, [schedule]);
+
   const intervalPolicy: TripIntervalPolicy = useMemo(
     () => {
       const summary = schedule?.resultSummary ?? {};
@@ -515,11 +523,20 @@ export default function PlannerPage() {
                 <Stack spacing={1}>
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ alignItems: { md: "center" } }}>
                     <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                      Cenario escolhido: {operationalQualityDecision.chosen_title || operationalQualityDecision.chosen_scenario || "N/D"}
+                      Cenário escolhido: {operationalQualityDecision.chosen_title || operationalQualityDecision.chosen_scenario || "N/D"}
                     </Typography>
+                    {operationalQualityDecision.mode && (
+                      <Chip
+                        label={`Modo: ${operationalQualityDecision.mode}`}
+                        color="info"
+                        size="small"
+                        variant="outlined"
+                        sx={{ fontWeight: 600 }}
+                      />
+                    )}
                     <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
                       {(operationalQualityDecision.available_scenarios || [])
-                        .find((item) => item.scenario_id === (operationalQualityDecision.chosen_scenario || ""))
+                        .find((item) => item.scenario_id === operationalQualityDecision.chosen_scenario)
                         ?.labels?.map((label) => (
                           <Chip key={label} label={label} color="primary" size="small" variant="outlined" />
                         ))}
@@ -530,8 +547,48 @@ export default function PlannerPage() {
                       {line}
                     </Typography>
                   ))}
+                  {(operationalQualityDecision.trade_offs ?? []).length > 0 && (
+                    <Stack spacing={0.5}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, color: "warning.main" }}>
+                        Trade-offs do cenário escolhido:
+                      </Typography>
+                      {(operationalQualityDecision.trade_offs ?? []).map((line) => (
+                        <Typography key={line} variant="caption" color="text.secondary">
+                          • {line}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  )}
                 </Stack>
               </Alert>
+            )}
+
+            {schedule?.status === "completed" && hardConstraintReport && (
+              (() => {
+                const output = hardConstraintReport.output ?? {};
+                const softIssues: string[] = output.soft_issues ?? [];
+                const hardIssues: string[] = output.hard_issues ?? [];
+                if (hardIssues.length === 0 && softIssues.length === 0) return null;
+                return (
+                  <Alert severity={hardIssues.length > 0 ? "error" : "warning"} variant="outlined">
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Relatório de Restrições Críticas
+                      </Typography>
+                      {hardIssues.map((issue) => (
+                        <Typography key={issue} variant="caption" color="error.main">
+                          ✗ {issue}
+                        </Typography>
+                      ))}
+                      {softIssues.map((issue) => (
+                        <Typography key={issue} variant="caption" color="warning.main">
+                          ⚠ {issue}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </Alert>
+                );
+              })()
             )}
 
             <Suspense fallback={<CircularProgress />}>

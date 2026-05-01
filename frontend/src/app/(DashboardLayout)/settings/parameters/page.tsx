@@ -143,6 +143,7 @@ interface CompanyParameters {
   strict_gps_validation: boolean | null;
   strict_terminal_sync_validation: boolean | null;
   strict_union_rules: boolean | null;
+  group_infeasibility_mode: string | null;
   operational_quality_mode: string | null;
   terminal_location_ids: number[];
   goal_weights: Record<string, number> | null;
@@ -250,6 +251,7 @@ const DEFAULTS: CompanyParameters = {
   strict_gps_validation: true,
   strict_terminal_sync_validation: true,
   strict_union_rules: true,
+  group_infeasibility_mode: 'strict',
   operational_quality_mode: 'balanced',
   terminal_location_ids: [],
   goal_weights: null,
@@ -510,7 +512,13 @@ export default function ParametersPage() {
 
     setSaving(true);
     try {
-      await parametersApi.update(params);
+      const toSave = {
+        ...params,
+        waiting_time_pay_pct: params.waiting_time_pay_pct != null ? params.waiting_time_pay_pct / 100 : params.waiting_time_pay_pct,
+        holiday_extra_pct: params.holiday_extra_pct != null ? params.holiday_extra_pct / 100 : params.holiday_extra_pct,
+        nocturnal_extra_pct: params.nocturnal_extra_pct != null ? params.nocturnal_extra_pct / 100 : params.nocturnal_extra_pct,
+      };
+      await parametersApi.update(toSave);
       setInitialParams(params);
       setNotification({ open: true, message: "Configuracoes salvas com sucesso!", severity: "success" });
     } catch (error) {
@@ -838,6 +846,27 @@ export default function ParametersPage() {
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
                   {boolField(params, setParams, "strict_union_rules", "Regras Sindicais Estritas", "Aplica regras sindicais em modo estrito")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Modo de Inviabilidade de Grupos
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    size="small"
+                    value={params.group_infeasibility_mode ?? 'strict'}
+                    onChange={(_, value) => {
+                      if (value) setParams((prev) => ({ ...prev, group_infeasibility_mode: value }));
+                    }}
+                  >
+                    <ToggleButton value="strict">Strict</ToggleButton>
+                    <ToggleButton value="production">Production</ToggleButton>
+                    <ToggleButton value="assisted">Assisted</ToggleButton>
+                  </ToggleButtonGroup>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                    strict: rejeita grupos separados; production: aceita com pesar; assisted: permite separação com assistência.
+                  </Typography>
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>

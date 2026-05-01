@@ -33,6 +33,7 @@ from ..core.config import get_settings
 from ..core.exceptions import HardConstraintViolationError, InfeasibleProblemError, InvalidAlgorithmError, NoProblemDataError, OptimizerError
 from ..domain.models import AlgorithmType, Block, CSPSolution, Duty, OptimizationResult, Trip, VehicleType, VSPSolution
 from .hard_constraint_validator import HardConstraintValidator
+from .operational_time_service import summarize_operational_time_reports
 from ..algorithms.utils import is_connection_feasible
 
 settings = get_settings()
@@ -245,7 +246,7 @@ class OptimizerService:
         t_input = time.perf_counter()
         input_report = self.validator.audit_input(trips, cct_params, vsp_params)
         input_validation_ms = (time.perf_counter() - t_input) * 1000
-        if strict_hard_validation and not input_report["ok"]:
+        if not input_report["ok"]:
             raise HardConstraintViolationError(
                 input_report["issues"],
                 details=self.build_failure_payload(
@@ -475,6 +476,12 @@ class OptimizerService:
         output_report = self.validator.audit_result(result, trips, cct_params, vsp_params)
         output_validation_ms = (time.perf_counter() - t_output) * 1000
         result.meta["hard_constraint_report"]["output"] = output_report
+        non_strict_blocking_output_issues = []
+        if not strict_hard_validation:
+            non_strict_blocking_output_issues = self._blocking_output_issues_without_strict(
+                output_report,
+                cct_params,
+            )
         if strict_hard_validation and not output_report["ok"]:
             if self._is_controlled_group_relaxation(result, output_report, group_infeasibility_mode):
                 result.meta["hard_constraint_report"]["strict_relaxation_override"] = {
@@ -501,6 +508,23 @@ class OptimizerService:
                         run_snapshot=run_snapshot,
                     ),
                 )
+        elif non_strict_blocking_output_issues:
+            raise HardConstraintViolationError(
+                non_strict_blocking_output_issues,
+                details=self.build_failure_payload(
+                    HardConstraintViolationError(non_strict_blocking_output_issues),
+                    trips,
+                    vehicle_types,
+                    algorithm,
+                    cct_params,
+                    vsp_params,
+                    effective_optimization_params,
+                    request_metadata=request_metadata,
+                    stage="output_validation",
+                    replay_fingerprint=replay_fingerprint,
+                    run_snapshot=run_snapshot,
+                ),
+            )
 
         t_audit = time.perf_counter()
         # Injetar regras dinâmicas e pesos de custo no avaliador
@@ -515,6 +539,7 @@ class OptimizerService:
         result.total_cost = float(cost_breakdown["total"])
         result.meta["cost_breakdown"] = cost_breakdown
         result.meta["roster_count"] = result.csp.meta.get("roster_count", 0)
+        result.meta["operational_time_reports"] = summarize_operational_time_reports(result.csp.duties or [])
         result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)
         result.meta["trip_group_audit"] = self._build_trip_group_audit(result, trips)
         result.meta["phase_summary"] = self._build_phase_summary(result, cost_breakdown)
@@ -628,6 +653,27 @@ class OptimizerService:
                 result.meta["ai_copilot_insight"] = None
 
         return result
+
+    def _blocking_output_issues_without_strict(
+        self,
+        output_report: Dict[str, Any],
+        cct_params: Dict[str, Any],
+    ) -> List[str]:
+        hard_issues = list(output_report.get("hard_issues") or [])
+        if not hard_issues:
+            return []
+
+        operator_profiles = list(cct_params.get("operator_profiles") or [])
+        if not operator_profiles or not bool(cct_params.get("strict_union_rules", True)):
+            return []
+
+        blocking_prefixes = (
+            "UNASSIGNED_OPERATOR_PROFILE",
+            "UNKNOWN_OPERATOR_PROFILE",
+            "MANDATORY_SHIFT_PREFERENCE_VIOLATION",
+            "MANDATORY_LINE_PREFERENCE_VIOLATION",
+        )
+        return [issue for issue in hard_issues if issue.startswith(blocking_prefixes)]
 
     def build_failure_payload(
         self,
@@ -910,10 +956,15 @@ class OptimizerService:
         min_connection = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
         max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
+        mandatory_break_after = int(cct_params.get("mandatory_break_after_minutes", max_driving) or max_driving)
+        meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
+        pullout = int(cct_params.get("pullout_minutes", vsp_params.get("pullout_minutes", 0)) or 0)
+        pullback = int(cct_params.get("pullback_minutes", vsp_params.get("pullback_minutes", 0)) or 0)
         enforce_min_interval = bool(vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False)))
         strict_zero_gap = bool(vsp_params.get("strict_zero_gap_validation", cct_params.get("strict_zero_gap_validation", False)))
         allow_vehicle_swap = bool(vsp_params.get("allow_vehicle_swap", not cct_params.get("operator_single_vehicle_only", False)))
         output_report = ((result.meta or {}).get("hard_constraint_report") or {}).get("output") or {}
+        operational_time_reports = ((result.meta or {}).get("operational_time_reports") or {}).get("duties") or []
         issue_counts = Counter(str(issue).split(" ", 1)[0] for issue in output_report.get("issues") or [])
 
         blocked_by_constraint: Counter[str] = Counter()
@@ -949,6 +1000,11 @@ class OptimizerService:
             meta_drive = int((duty.meta or {}).get("max_continuous_drive_minutes", 0) or 0)
             if getattr(duty, "continuous_driving_violation", False) or meta_drive > max_driving:
                 blocked_by_constraint["max_driving_minutes"] += 1
+            operational_report = duty.meta.get("operational_time_report") or {}
+            if operational_report.get("mandatory_rest_required") and not operational_report.get("has_valid_mandatory_rest"):
+                blocked_by_constraint["mandatory_rest"] += 1
+            if operational_report.get("invalid_rest_position"):
+                blocked_by_constraint["idle_classification"] += 1
             if not allow_vehicle_swap and issue_counts.get("OPERATOR_MULTIPLE_VEHICLES", 0):
                 blocked_by_constraint["allow_vehicle_swap"] += issue_counts["OPERATOR_MULTIPLE_VEHICLES"]
 
@@ -967,6 +1023,19 @@ class OptimizerService:
                 "min_connection_time": {"active": min_connection > 0, "value_minutes": min_connection},
                 "max_shift_minutes": {"active": max_shift > 0, "value_minutes": max_shift},
                 "max_driving_minutes": {"active": max_driving > 0, "value_minutes": max_driving},
+                "mandatory_rest": {
+                    "active": mandatory_break_after > 0,
+                    "trigger_after_minutes": mandatory_break_after,
+                    "minimum_rest_minutes": max(min_break, meal_break),
+                },
+                "pullout": {"active": pullout > 0, "value_minutes": pullout},
+                "pullback": {"active": pullback > 0, "value_minutes": pullback},
+                "idle_classification": {
+                    "active": True,
+                    "short_gap_lt_minutes": min_break,
+                    "normal_break_ge_minutes": min_break,
+                    "mandatory_rest_ge_minutes": max(min_break, meal_break),
+                },
                 "zero_gap": {"active": strict_zero_gap, "strict_geography": strict_zero_gap},
                 "allow_vehicle_swap": {
                     "active": not allow_vehicle_swap,
@@ -989,6 +1058,14 @@ class OptimizerService:
                     "duties": len(result.csp.duties or []),
                     "cct_violations": int(result.csp.cct_violations or 0),
                     "issue_counts": dict(issue_counts),
+                },
+                "operational_time": {
+                    "duties_with_reports": len(operational_time_reports),
+                    "total_idle_time": sum(int(report.get("idle_time", 0) or 0) for report in operational_time_reports),
+                    "total_normal_break_time": sum(int(report.get("normal_break_time", 0) or 0) for report in operational_time_reports),
+                    "total_mandatory_rest_time": sum(int(report.get("mandatory_rest_time", 0) or 0) for report in operational_time_reports),
+                    "total_pullout_time": sum(int(report.get("pullout_time", 0) or 0) for report in operational_time_reports),
+                    "total_pullback_time": sum(int(report.get("pullback_time", 0) or 0) for report in operational_time_reports),
                 },
                 "fallback": fallback_meta,
                 "stitching": {
@@ -1182,9 +1259,12 @@ class OptimizerService:
         elif any(code == "SPREAD_EXCEEDED" for code in issue_codes):
             reason = "spread_limit"
             message = "O spread das jornadas ultrapassa o limite máximo configurado."
-        elif any(code == "CONTINUOUS_DRIVING_EXCEEDED" for code in issue_codes):
+        elif any(code == "MAX_DRIVING_EXCEEDED" for code in issue_codes):
             reason = "continuous_driving_limit"
             message = "A direção contínua exigida pela grade excede o limite regulatório."
+        elif any(code == "MANDATORY_REST_MISSING" for code in issue_codes):
+            reason = "mandatory_rest_missing"
+            message = "A jornada não encontrou descanso obrigatório válido dentro da janela operacional."
         elif any(code == "MANDATORY_GROUP_SPLIT" for code in issue_codes):
             reason = "trip_group_split"
             message = "Os grupos ida/volta obrigatórios não conseguem permanecer juntos no cenário atual."
@@ -2637,8 +2717,12 @@ class OptimizerService:
         issue_pool = hard_issues + soft_issues
         if any(issue.startswith("MANDATORY_GROUP_SPLIT") for issue in issue_pool) or trip_group_audit.get("split_groups", 0) > 0:
             recommendations.append("Revise os grupos ida/volta preservados no CSP e confirme se o pairing deve ser rígido ou apenas preferencial.")
-        if any(issue.startswith("CONTINUOUS_DRIVING_EXCEEDED") for issue in issue_pool):
+        if any(issue.startswith("MAX_DRIVING_EXCEEDED") for issue in issue_pool):
             recommendations.append("Aumente as janelas de pausa ou antecipe o run-cutting para evitar estouro de direção contínua.")
+        if any(issue.startswith("MANDATORY_REST_MISSING") for issue in issue_pool):
+            recommendations.append("Revise a regra configurável de descanso obrigatório da CCT e garanta uma pausa válida no meio da jornada.")
+        if any(issue.startswith("INVALID_REST_POSITION") for issue in issue_pool):
+            recommendations.append("Não conte soltura ou recolhimento como descanso legal; a pausa precisa ocorrer dentro da jornada.")
         if any(issue.startswith("SPREAD_EXCEEDED") for issue in issue_pool):
             recommendations.append("Reduza spread por jornada ou permita mais fragmentação de duties no CSP.")
         if any(issue.startswith("UNCOVERED_TRIP") for issue in issue_pool):
@@ -2658,7 +2742,7 @@ class OptimizerService:
 
         if code.startswith(("UNCOVERED_TRIP", "VEHICLE_OVERLAP", "DEADHEAD_INFEASIBLE", "BLOCK_")):
             phase = "vsp"
-        elif code.startswith(("UNCOVERED_BLOCK", "SPREAD_EXCEEDED", "CONTINUOUS_DRIVING_EXCEEDED", "MEAL_BREAK_MISSING", "DUTY_", "INTERSHIFT_", "OPERATOR_")):
+        elif code.startswith(("UNCOVERED_BLOCK", "SPREAD_EXCEEDED", "MAX_DRIVING_EXCEEDED", "MANDATORY_REST_MISSING", "INVALID_REST_POSITION", "DUTY_", "INTERSHIFT_", "OPERATOR_")):
             phase = "csp"
 
         if code.startswith("UNCOVERED_TRIP"):
@@ -2671,10 +2755,12 @@ class OptimizerService:
             message = "A conexão entre viagens do mesmo bloco não tem tempo suficiente de deadhead/layover."
         elif code.startswith("SPREAD_EXCEEDED"):
             message = "A jornada total ultrapassou o spread permitido."
-        elif code.startswith("CONTINUOUS_DRIVING_EXCEEDED"):
-            message = "A direção contínua ultrapassou o limite permitido."
-        elif code.startswith("MEAL_BREAK_MISSING"):
-            message = "A jornada não encaixou intervalo de refeição válido."
+        elif code.startswith("MAX_DRIVING_EXCEEDED"):
+            message = "A direção contínua ultrapassou o limite configurado para a jornada."
+        elif code.startswith("MANDATORY_REST_MISSING"):
+            message = "A jornada não encaixou descanso obrigatório válido no meio da operação."
+        elif code.startswith("INVALID_REST_POSITION"):
+            message = "Uma pausa longa apareceu apenas no início/fim da jornada e não vale como descanso obrigatório."
         elif code.startswith("MANDATORY_GROUP_SPLIT"):
             message = "Um grupo ida/volta obrigatório foi separado entre rosters ou duties."
         elif code.startswith("OPERATOR_CHANGE_NON_TERMINAL"):
@@ -2921,7 +3007,7 @@ class OptimizerService:
                     candidate_note=f"Split da duty {source.id} em dois blocos compactos no corte {split_idx}.",
                 )
                 summary = candidate["summary"]
-                if summary["hard_violation_count"] > 0 or summary["uncovered_blocks"] > 0 or summary["unassigned_trips"] > 0:
+                if summary["uncovered_blocks"] > 0 or summary["unassigned_trips"] > 0:
                     continue
                 candidate_pool.append(candidate)
 
@@ -2974,9 +3060,13 @@ class OptimizerService:
 
     def _classify_duty_severity(self, duty: Duty) -> Dict[str, Any]:
         metrics = duty.meta.get("quality_metrics") or {}
-        utilization = float(metrics.get("utilization", 0.0) or 0.0)
-        spread_time = int(metrics.get("spread_time", duty.spread_time) or duty.spread_time or 0)
-        total_idle = int(metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time)) or 0)
+        semantic_metrics = metrics.get("operational_semantic") or {}
+        utilization = float(semantic_metrics.get("utilization", metrics.get("utilization", 0.0)) or 0.0)
+        spread_time = int(semantic_metrics.get("spread_time", duty.spread_time) or duty.spread_time or 0)
+        total_idle = int(
+            semantic_metrics.get("total_idle_time", metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time)))
+            or 0
+        )
         severity = "acceptable"
         if utilization < 0.25 and spread_time > 720 and total_idle > 360:
             severity = "critical"
@@ -2996,6 +3086,7 @@ class OptimizerService:
         idle_values = [int(item["total_idle_time"]) for item in classifications]
         hard_issues = list(audit.get("hard_issues") or [])
         soft_issues = list(audit.get("soft_issues") or [])
+        mandatory_rest_missing = sum(1 for issue in soft_issues if str(issue).startswith("MANDATORY_REST_MISSING"))
         labels: List[str] = []
         return {
             "total_cost": round(float(result.total_cost or 0.0), 2),
@@ -3008,6 +3099,7 @@ class OptimizerService:
             "avg_utilization_pct": round((sum(utilizations) / max(1, len(utilizations))) * 100.0, 2),
             "avg_idle_minutes": round(sum(idle_values) / max(1, len(idle_values)), 2),
             "overtime_minutes": sum(int(duty.overtime_minutes or 0) for duty in duties),
+            "mandatory_rest_missing": mandatory_rest_missing,
             "critical_count": sum(1 for item in classifications if item["severity"] == "critical"),
             "borderline_count": sum(1 for item in classifications if item["severity"] == "borderline"),
             "acceptable_count": sum(1 for item in classifications if item["severity"] == "acceptable"),
@@ -3018,11 +3110,85 @@ class OptimizerService:
             "labels": labels,
         }
 
+    def compare_scenarios(
+        self,
+        current_plan: Dict[str, Any],
+        candidate: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        current = current_plan["summary"]
+        proposed = candidate["summary"]
+        blocking_reasons: List[str] = []
+        if int(proposed.get("unassigned_trips", 0)) > int(current.get("unassigned_trips", 0)):
+            blocking_reasons.append("coverage_regressed_unassigned_trips")
+        if int(proposed.get("uncovered_blocks", 0)) > int(current.get("uncovered_blocks", 0)):
+            blocking_reasons.append("coverage_regressed_uncovered_blocks")
+        if int(proposed.get("hard_violation_count", 0)) > int(current.get("hard_violation_count", 0)):
+            blocking_reasons.append("hard_violations_increased")
+
+        criteria = [
+            ("duties_below_25_pct", "duties_lt_25"),
+            ("duties_above_12h", "duties_gt_12h"),
+            ("avg_idle_minutes", "avg_idle_minutes"),
+            ("mandatory_rest_missing", "mandatory_rest_missing"),
+            ("overtime_minutes", "overtime_minutes"),
+        ]
+        improvements: List[str] = []
+        regressions: List[str] = []
+        unchanged: List[str] = []
+        deltas: Dict[str, Dict[str, float]] = {}
+        for key, label in criteria:
+            before = float(current.get(key, 0) or 0)
+            after = float(proposed.get(key, 0) or 0)
+            delta = round(after - before, 2)
+            deltas[label] = {"before": before, "after": after, "delta": delta}
+            if after < before:
+                improvements.append(label)
+            elif after > before:
+                regressions.append(label)
+            else:
+                unchanged.append(label)
+
+        cost_before = float(current.get("total_cost", 0.0) or 0.0)
+        cost_after = float(proposed.get("total_cost", 0.0) or 0.0)
+        cost_delta = round(cost_after - cost_before, 2)
+        improved_count = len(improvements)
+        materially_better = not blocking_reasons and improved_count >= 2
+
+        logger.info(
+            "\n[OP-DECISION]\n"
+            "- current_plan metrics: total_cost=%.2f, duties_lt_25=%d, duties_gt_12h=%d, idle=%.2f, rest_missing=%d, overtime=%d\n"
+            "- candidate metrics: total_cost=%.2f, duties_lt_25=%d, duties_gt_12h=%d, idle=%.2f, rest_missing=%d, overtime=%d\n"
+            "- motivos da escolha: blocking=%s, improvements=%s, materially_better=%s",
+            cost_before, current.get("duties_below_25_pct", 0), current.get("duties_above_12h", 0), current.get("avg_idle_minutes", 0), current.get("mandatory_rest_missing", 0), current.get("overtime_minutes", 0),
+            cost_after, proposed.get("duties_below_25_pct", 0), proposed.get("duties_above_12h", 0), proposed.get("avg_idle_minutes", 0), proposed.get("mandatory_rest_missing", 0), proposed.get("overtime_minutes", 0),
+            blocking_reasons, improvements, materially_better
+        )
+
+        return {
+            "current_scenario": current_plan["scenario_id"],
+            "candidate_scenario": candidate["scenario_id"],
+            "coverage_ok": not any(reason.startswith("coverage_regressed") for reason in blocking_reasons),
+            "hard_violation_ok": "hard_violations_increased" not in blocking_reasons,
+            "blocking_reasons": blocking_reasons,
+            "improvements": improvements,
+            "regressions": regressions,
+            "unchanged": unchanged,
+            "improved_count": improved_count,
+            "cost_delta": cost_delta,
+            "cost_increased": cost_delta > 0.01,
+            "materially_better": materially_better,
+            "metrics": deltas,
+        }
+
     def _select_operational_quality_scenario(
         self,
         mode: str,
         candidates: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
+        baseline_candidate = next(
+            (candidate for candidate in candidates if candidate["scenario_id"] == "current_plan"),
+            candidates[0],
+        )
         cheapest = min(
             candidates,
             key=lambda item: (
@@ -3077,28 +3243,75 @@ class OptimizerService:
         for candidate in candidates:
             candidate["summary"]["labels"] = label_map.get(candidate["scenario_id"], [])
 
-        chosen = {
+        operational_comparisons: List[Dict[str, Any]] = []
+        operational_winners: List[Tuple[int, int, float, float, Dict[str, Any], Dict[str, Any]]] = []
+        for candidate in candidates:
+            if candidate["scenario_id"] == baseline_candidate["scenario_id"]:
+                continue
+            comparison = self.compare_scenarios(baseline_candidate, candidate)
+            operational_comparisons.append(comparison)
+            if comparison["materially_better"]:
+                operational_winners.append(
+                    (
+                        -int(comparison["improved_count"]),
+                        int(candidate["summary"].get("hard_violation_count", 0)),
+                        float(candidate["summary"].get("avg_idle_minutes", 0)),
+                        float(candidate["summary"].get("total_cost", 0)),
+                        candidate,
+                        comparison,
+                    )
+                )
+
+        default_mode_choice = {
             "strict": strict,
             "balanced": balanced,
             "optimized": cheapest,
         }.get(mode, balanced)
+        chosen = default_mode_choice
+        chosen_comparison: Optional[Dict[str, Any]] = None
+
+        if operational_winners:
+            operational_winners.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4]["scenario_id"]))
+            chosen = operational_winners[0][4]
+            chosen_comparison = operational_winners[0][5]
+            chosen["summary"]["labels"] = list(dict.fromkeys([*chosen["summary"].get("labels", []), "Melhor operacionalmente"]))
+        elif default_mode_choice["scenario_id"] != baseline_candidate["scenario_id"]:
+            chosen_comparison = self.compare_scenarios(baseline_candidate, default_mode_choice)
 
         rejected: List[Dict[str, Any]] = []
         for candidate in candidates:
             if candidate["scenario_id"] == chosen["scenario_id"]:
                 continue
+            comparison = self.compare_scenarios(baseline_candidate, candidate)
             rejected.append(
                 {
                     "scenario_id": candidate["scenario_id"],
                     "title": candidate["title"],
-                    "reason": self._scenario_rejection_reason(mode, chosen, candidate),
+                    "reason": self._scenario_rejection_reason(mode, chosen, candidate, comparison),
+                    "comparison_vs_current_plan": comparison,
                     "summary": candidate["summary"],
                 }
             )
 
         chosen_summary = chosen["summary"]
-        justification = self._scenario_justification(mode, chosen, strict, balanced, cheapest)
-        trade_offs = self._scenario_tradeoffs(chosen, candidates)
+        justification = self._scenario_justification(
+            mode,
+            chosen,
+            strict,
+            balanced,
+            cheapest,
+            baseline_candidate,
+            chosen_comparison,
+        )
+        trade_offs = self._scenario_tradeoffs(chosen, candidates, chosen_comparison)
+        logger.info(
+            "[OP-DECISION] mode=%s chosen=%s default_choice=%s operational_override=%s comparison=%s",
+            mode,
+            chosen["scenario_id"],
+            default_mode_choice["scenario_id"],
+            bool(operational_winners),
+            chosen_comparison,
+        )
         return {
             "mode": mode,
             "chosen_scenario": chosen["scenario_id"],
@@ -3106,9 +3319,10 @@ class OptimizerService:
             "justification": justification,
             "trade_offs": trade_offs,
             "rejected_scenarios": rejected,
+            "comparison_to_current_plan": chosen_comparison,
             "criteria": {
                 "strict": "Prioriza eliminar duties criticas e duties abaixo de 25%; pode aceitar +1 duty/crew.",
-                "balanced": "Aceita no maximo uma excecao critica com warning, buscando melhor equilibrio operacional.",
+                "balanced": "Publica candidato quando nao piora cobertura, nao aumenta hard violations e melhora ao menos 2 KPIs operacionais.",
                 "optimized": "Prioriza menor custo total entre cenarios operacionais viaveis.",
             },
             "available_scenarios": [
@@ -3129,9 +3343,18 @@ class OptimizerService:
         mode: str,
         chosen: Dict[str, Any],
         rejected: Dict[str, Any],
+        comparison: Optional[Dict[str, Any]] = None,
     ) -> str:
+        comparison = comparison or {}
         chosen_summary = chosen["summary"]
         rejected_summary = rejected["summary"]
+        blocking_reasons = list(comparison.get("blocking_reasons") or [])
+        if "coverage_regressed_unassigned_trips" in blocking_reasons or "coverage_regressed_uncovered_blocks" in blocking_reasons:
+            return "Piora cobertura do plano."
+        if "hard_violations_increased" in blocking_reasons:
+            return "Aumenta hard violations."
+        if rejected["scenario_id"] != "current_plan" and int(comparison.get("improved_count", 0) or 0) < 2:
+            return "Nao melhora ao menos 2 KPIs operacionais frente ao current_plan."
         if mode == "optimized" and rejected_summary["total_cost"] > chosen_summary["total_cost"]:
             return "Custo total maior do que o cenario escolhido."
         if rejected_summary["critical_count"] > chosen_summary["critical_count"]:
@@ -3149,25 +3372,55 @@ class OptimizerService:
         strict: Dict[str, Any],
         balanced: Dict[str, Any],
         cheapest: Dict[str, Any],
+        current_plan: Dict[str, Any],
+        comparison: Optional[Dict[str, Any]],
     ) -> List[str]:
         chosen_summary = chosen["summary"]
+        current_summary = current_plan["summary"]
         lines = [
             f"Modo operacional selecionado: {mode}.",
             (
                 f"Cenario escolhido: {chosen['title']} ({chosen['scenario_id']}) com custo {chosen_summary['total_cost']:.2f}, "
-                f"{chosen_summary['duties_below_25_pct']} duties abaixo de 25% e "
+                f"{chosen_summary['duties_below_25_pct']} duties abaixo de 25%, "
+                f"{chosen_summary['mandatory_rest_missing']} mandatory_rest_missing e "
                 f"{chosen_summary['critical_count']} excecao(oes) critica(s)."
             ),
         ]
+        if comparison and chosen["scenario_id"] != current_plan["scenario_id"]:
+            lines.append(
+                f"Comparado ao current_plan, o cenario escolhido melhorou {int(comparison.get('improved_count', 0))} KPI(s): "
+                + ", ".join(comparison.get("improvements") or ["sem melhoria listada"])
+                + "."
+            )
+            if comparison.get("cost_increased"):
+                lines.append(
+                    f"O custo aumentou {abs(float(comparison.get('cost_delta', 0.0) or 0.0)):.2f}, mas a melhora operacional foi considerada relevante."
+                )
+        elif chosen["scenario_id"] == current_plan["scenario_id"]:
+            lines.append(
+                "O current_plan foi mantido porque nenhum candidato melhorou pelo menos 2 KPIs operacionais sem piorar cobertura ou hard violations."
+            )
         if mode == "strict" and chosen["scenario_id"] != strict["scenario_id"]:
             lines.append("Nao houve cenario com zero duties abaixo de 25%; foi selecionado o fallback mais proximo sem aumentar hard violations.")
         if mode == "balanced" and chosen["scenario_id"] == balanced["scenario_id"]:
             lines.append("O criterio balanced priorizou reduzir a cauda operacional antes de custo marginal ou do numero de duties.")
         if mode == "optimized" and chosen["scenario_id"] == cheapest["scenario_id"]:
             lines.append("O criterio optimized escolheu o menor custo total entre os cenarios viaveis.")
+        if chosen["scenario_id"] != current_plan["scenario_id"]:
+            lines.append(
+                f"Current_plan: duties<25%={current_summary['duties_below_25_pct']}, duties>12h={current_summary['duties_above_12h']}, idle medio={current_summary['avg_idle_minutes']}, mandatory_rest_missing={current_summary['mandatory_rest_missing']}, overtime={current_summary['overtime_minutes']}."
+            )
+            lines.append(
+                f"Escolhido: duties<25%={chosen_summary['duties_below_25_pct']}, duties>12h={chosen_summary['duties_above_12h']}, idle medio={chosen_summary['avg_idle_minutes']}, mandatory_rest_missing={chosen_summary['mandatory_rest_missing']}, overtime={chosen_summary['overtime_minutes']}."
+            )
         return lines
 
-    def _scenario_tradeoffs(self, chosen: Dict[str, Any], candidates: List[Dict[str, Any]]) -> List[str]:
+    def _scenario_tradeoffs(
+        self,
+        chosen: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+        comparison: Optional[Dict[str, Any]],
+    ) -> List[str]:
         current = next((item for item in candidates if item["scenario_id"] == "current_plan"), chosen)
         chosen_summary = chosen["summary"]
         current_summary = current["summary"]
@@ -3181,10 +3434,20 @@ class OptimizerService:
             if not math.isclose(cost_delta, 0.0, abs_tol=0.01):
                 direction = "reduz" if cost_delta < 0 else "aumenta"
                 trade_offs.append(f"{direction.capitalize()} o custo total em {abs(cost_delta):.2f}.")
+            if comparison and comparison.get("regressions"):
+                trade_offs.append(
+                    "Ainda piora os seguintes KPIs frente ao current_plan: "
+                    + ", ".join(str(item) for item in comparison.get("regressions") or [])
+                    + "."
+                )
         if chosen_summary["critical_count"] < current_summary["critical_count"]:
             trade_offs.append("Reduz o numero de excecoes criticas no plano final.")
         if chosen_summary["duties_below_25_pct"] < current_summary["duties_below_25_pct"]:
             trade_offs.append("Encurta a cauda de duties abaixo de 25% de utilizacao.")
+        if chosen_summary["mandatory_rest_missing"] < current_summary["mandatory_rest_missing"]:
+            trade_offs.append("Reduz duties com mandatory_rest_missing.")
+        if chosen_summary["avg_idle_minutes"] < current_summary["avg_idle_minutes"]:
+            trade_offs.append("Reduz idle medio publicado.")
         if not trade_offs:
             trade_offs.append("Mantem o plano atual por nao haver alternativa melhor dentro dos criterios objetivos.")
         return trade_offs

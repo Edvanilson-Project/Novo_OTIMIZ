@@ -21,6 +21,7 @@ _log = logging.getLogger(__name__)
 from ...core.config import get_settings
 from ...domain.interfaces import ICSPAlgorithm
 from ...domain.models import Block, CSPSolution, Duty, Trip
+from ...services.operational_time_service import build_duty_operational_time_report
 from ..base import BaseAlgorithm
 
 settings = get_settings()
@@ -69,6 +70,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.mandatory_break_after = int(params.get("mandatory_break_after_minutes", self.max_driving))
         self.meal_break_minutes = int(params.get("meal_break_minutes", 0))
         self.inter_shift_rest = max(int(params.get("inter_shift_rest_minutes", 660)), 660)
+        self.pullout_counts_in_driver_shift = bool(params.get("pullout_counts_in_driver_shift", True))
+        self.pullback_counts_in_driver_shift = bool(params.get("pullback_counts_in_driver_shift", True))
 
         # Custos e Pesos
         self.cost_duty = float(params.get("cost_duty", 500.0))
@@ -131,6 +134,40 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             self.goal_weights.get("min_work_soft", params.get("min_work_soft_weight", 1.5)) or 1.5
         )
         self.utilization_target = float(params.get("duty_utilization_target", 0.30) or 0.30)
+        self.semantic_utilization_target = float(
+            params.get("operational_semantic_utilization_target", 0.50) or 0.50
+        )
+        self.semantic_spread_threshold = int(
+            params.get("operational_semantic_spread_threshold_minutes", 12 * 60) or 12 * 60
+        )
+        self.semantic_low_util_weight = float(
+            self.goal_weights.get(
+                "operational_semantic_low_util",
+                params.get("operational_semantic_low_util_weight", 1800.0),
+            )
+            or 1800.0
+        )
+        self.semantic_rest_penalty = float(
+            self.goal_weights.get(
+                "operational_semantic_rest",
+                params.get("operational_semantic_rest_penalty", max(60.0, self.idle_weight * 90.0)),
+            )
+            or max(60.0, self.idle_weight * 90.0)
+        )
+        self.semantic_break_count_weight = float(
+            self.goal_weights.get(
+                "operational_semantic_break_count",
+                params.get("operational_semantic_break_count_weight", 2.5),
+            )
+            or 2.5
+        )
+        self.semantic_max_idle_weight = float(
+            self.goal_weights.get(
+                "operational_semantic_max_idle",
+                params.get("operational_semantic_max_idle_weight", 0.15),
+            )
+            or 0.15
+        )
         self.max_spread_soft = int(params.get("duty_max_spread_soft_minutes", 12 * 60) or 12 * 60)
         self.max_idle_soft = int(params.get("duty_max_idle_soft_minutes", 180) or 180)
         self.min_work_soft = int(
@@ -590,6 +627,95 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "short_connection_count": short_connections,
             "gaps": gaps,
         }
+
+    def _build_operational_semantic_metrics(
+        self,
+        tasks: Sequence[Block],
+        *,
+        projected_work: Optional[int] = None,
+        projected_spread: Optional[int] = None,
+        duty_id: int = 0,
+    ) -> Dict[str, Any]:
+        ordered = sorted((task for task in tasks if task.trips), key=lambda item: (item.start_time, item.id))
+        if not ordered:
+            return {
+                "utilization": 1.0,
+                "spread_time": 0,
+                "work_time": 0,
+                "total_idle_time": 0,
+                "max_idle_time": 0,
+                "break_count": 0,
+                "mandatory_rest_missing": False,
+                "mandatory_rest_required": False,
+                "has_valid_mandatory_rest": False,
+                "invalid_rest_position": False,
+                "report": {},
+            }
+
+        start_buffer, end_buffer, duty_start, duty_end = self._duty_span_bounds(ordered)
+        work_time = int(projected_work if projected_work is not None else sum(self._block_regulatory_work(task) for task in ordered))
+        spread_time = int(projected_spread if projected_spread is not None else max(0, duty_end - duty_start))
+        synthetic = Duty(id=duty_id or -1, tasks=list(ordered), work_time=work_time, spread_time=spread_time)
+        synthetic.meta["start_buffer_minutes"] = start_buffer
+        synthetic.meta["end_buffer_minutes"] = end_buffer
+        synthetic.meta["duty_start_minutes"] = duty_start
+        synthetic.meta["duty_end_minutes"] = duty_end
+        synthetic.meta["max_continuous_drive_minutes"] = int(self._continuous_drive_stats(synthetic)[0])
+        report = build_duty_operational_time_report(
+            synthetic,
+            min_break_minutes=self.min_break,
+            meal_break_minutes=self.meal_break_minutes,
+            mandatory_break_after_minutes=self.mandatory_break_after,
+        )
+        break_segments = [
+            segment
+            for segment in (report.get("duty_time_segments") or [])
+            if segment.get("type") in {"idle", "normal_break", "mandatory_rest"}
+        ]
+        non_rest_segments = [
+            segment
+            for segment in break_segments
+            if segment.get("type") in {"idle", "normal_break"}
+        ]
+        total_idle_time = sum(int(segment.get("duration", 0) or 0) for segment in non_rest_segments)
+        max_idle_time = max((int(segment.get("duration", 0) or 0) for segment in non_rest_segments), default=0)
+        return {
+            "utilization": float(work_time / spread_time) if spread_time > 0 else 1.0,
+            "spread_time": spread_time,
+            "work_time": work_time,
+            "total_idle_time": total_idle_time,
+            "max_idle_time": max_idle_time,
+            "break_count": len(break_segments),
+            "mandatory_rest_missing": bool(
+                report.get("mandatory_rest_required") and not report.get("has_valid_mandatory_rest")
+            ),
+            "mandatory_rest_required": bool(report.get("mandatory_rest_required")),
+            "has_valid_mandatory_rest": bool(report.get("has_valid_mandatory_rest")),
+            "invalid_rest_position": bool(report.get("invalid_rest_position")),
+            "report": report,
+        }
+
+    def _operational_semantic_score(
+        self,
+        metrics: Dict[str, Any],
+        *,
+        base_cost: float = 0.0,
+    ) -> float:
+        utilization = float(metrics.get("utilization", 1.0) or 0.0)
+        total_idle_time = int(metrics.get("total_idle_time", 0) or 0)
+        max_idle_time = int(metrics.get("max_idle_time", 0) or 0)
+        break_count = int(metrics.get("break_count", 0) or 0)
+        spread_time = int(metrics.get("spread_time", 0) or 0)
+        mandatory_rest_missing = bool(metrics.get("mandatory_rest_missing"))
+        return float(
+            base_cost
+            + self.idle_weight * total_idle_time
+            + self.semantic_low_util_weight * max(0.0, self.semantic_utilization_target - utilization)
+            + self.spread_weight * max(0, spread_time - self.semantic_spread_threshold)
+            + self.semantic_rest_penalty * int(mandatory_rest_missing)
+            + self.semantic_break_count_weight * break_count
+            + self.semantic_max_idle_weight * max_idle_time
+        )
 
     def _operational_quality_penalty(self, metrics: Dict[str, Any]) -> float:
         spread_time = int(metrics.get("spread_time", 0) or 0)
@@ -1305,10 +1431,43 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     "short_connection_threshold_minutes": self.short_connection_threshold,
                 },
             }
+            semantic_metrics = self._build_operational_semantic_metrics(
+                duty.tasks,
+                projected_work=int(duty.work_time),
+                projected_spread=int(duty.spread_time),
+                duty_id=int(duty.id),
+            )
+            duty.meta["quality_metrics"]["operational_semantic"] = {
+                "utilization": round(float(semantic_metrics["utilization"]), 4),
+                "spread_time": int(semantic_metrics["spread_time"]),
+                "total_idle_time": int(semantic_metrics["total_idle_time"]),
+                "max_idle_time": int(semantic_metrics["max_idle_time"]),
+                "break_count": int(semantic_metrics["break_count"]),
+                "mandatory_rest_missing": bool(semantic_metrics["mandatory_rest_missing"]),
+                "score": round(float(self._operational_semantic_score(semantic_metrics)), 2),
+                "thresholds": {
+                    "utilization_target": self.semantic_utilization_target,
+                    "spread_threshold_minutes": self.semantic_spread_threshold,
+                    "rest_penalty": self.semantic_rest_penalty,
+                },
+            }
 
             max_continuous_drive, meal_break_found = self._continuous_drive_stats(duty)
             duty.meta["max_continuous_drive_minutes"] = max_continuous_drive
             duty.meta["meal_break_found"] = meal_break_found
+            operational_time_report = build_duty_operational_time_report(
+                duty,
+                min_break_minutes=self.min_break,
+                meal_break_minutes=self.meal_break_minutes,
+                mandatory_break_after_minutes=self.mandatory_break_after,
+            )
+            duty.meta["duty_time_segments"] = list(operational_time_report.get("duty_time_segments") or [])
+            duty.meta["operational_time_report"] = {
+                key: value
+                for key, value in operational_time_report.items()
+                if key != "duty_time_segments"
+            }
+            duty.meta["meal_break_found"] = bool(operational_time_report.get("has_valid_mandatory_rest", False))
 
             if self.apply_cct:
                 if self.min_work > 0 and duty.work_time < self.min_work:
@@ -1323,9 +1482,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     duty.rest_violations += 1
                     duty.warnings.append(f"Condução contínua excedida: {max_continuous_drive}min")
                     violations += 1
-                if self.meal_break_minutes > 0 and duty.spread_time >= 360 and not meal_break_found:
+                if operational_time_report.get("invalid_rest_position"):
+                    duty.warnings.append(
+                        "Pausa longa em soltura/recolhimento nao conta como descanso obrigatorio."
+                    )
+                if operational_time_report.get("mandatory_rest_required") and not operational_time_report.get("has_valid_mandatory_rest"):
                     duty.rest_violations += 1
-                    duty.warnings.append(f"Intervalo de refeição insuficiente: 0min < {self.meal_break_minutes}min")
+                    duty.warnings.append(
+                        f"Descanso obrigatorio ausente: 0min < {max(self.min_break, self.meal_break_minutes)}min"
+                    )
                     violations += 1
                 if duty.overtime_minutes > self.overtime_limit:
                     duty.shift_violations += 1
@@ -1506,7 +1671,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if getattr(trip, "trip_group_id", None) is not None
             }
             assigned = False
-            feasible_candidates: List[Tuple[float, Duty, Dict[str, Any]]] = []
+            feasible_candidates: List[Tuple[float, float, int, int, Duty, Dict[str, Any]]] = []
             ordered_duties = sorted(
                 duties,
                 key=lambda duty: (
@@ -1538,7 +1703,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     projected_spread=int(data.get("new_spread", duty.spread_time)),
                 )
                 quality_penalty = self._operational_quality_penalty(quality_metrics)
-                candidate_score = (
+                base_candidate_score = (
                     gap
                     + float(data.get("passive_transfer", 0)) * self.passive_transfer_weight
                     + fairness_penalty
@@ -1549,9 +1714,31 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     + spread_penalty
                     + quality_penalty
                 )
-                feasible_candidates.append((candidate_score, duty, data))
+                semantic_metrics = self._build_operational_semantic_metrics(
+                    [*duty.tasks, task],
+                    projected_work=projected_work,
+                    projected_spread=int(data.get("new_spread", duty.spread_time)),
+                    duty_id=int(duty.id),
+                )
+                semantic_score = self._operational_semantic_score(
+                    semantic_metrics,
+                    base_cost=base_candidate_score,
+                )
+                feasible_candidates.append(
+                    (
+                        base_candidate_score,
+                        semantic_score,
+                        int(semantic_metrics["mandatory_rest_missing"]),
+                        int(semantic_metrics["max_idle_time"]),
+                        duty,
+                        data,
+                    )
+                )
             if feasible_candidates:
-                _, duty, data = min(feasible_candidates, key=lambda item: (item[0], item[1].id))
+                _, _, _, _, duty, data = min(
+                    feasible_candidates,
+                    key=lambda item: (item[0], item[1], item[2], item[3], item[4].id),
+                )
                 self._apply_block(duty, task, data)
                 covered_trip_ids.update(task_trip_ids)
                 assigned = True
@@ -1857,8 +2044,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         )
         return (
             utilization < self.extreme_utilization_threshold
-            and spread_time > self.extreme_spread_threshold
-            and total_idle_time >= self.extreme_total_idle_threshold
+            and spread_time > self.semantic_spread_threshold
         )
 
     def _seed_duty_with_task(self, duty_id: int, task: Block) -> Duty:
@@ -1899,6 +2085,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         total_overtime_minutes = 0
         total_paid_minutes = 0
         meal_break_missing = 0
+        mandatory_rest_missing = 0
         low_utilization_duties = 0
         high_spread_duties = 0
         extreme_duties = 0
@@ -1907,6 +2094,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         short_connection_total = 0
         max_idle_time = 0
         total_utilization = 0.0
+        total_idle_minutes = 0
+        total_semantic_score = 0.0
         relief_handoff_map: Dict[int, set[int]] = defaultdict(set)
         duty_group_map: Dict[int, set[int]] = defaultdict(set)
         roster_group_map: Dict[int, set[int]] = defaultdict(set)
@@ -1935,9 +2124,17 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 projected_work=int(duty.work_time),
                 projected_spread=int(duty.spread_time),
             )
+            semantic_metrics = self._build_operational_semantic_metrics(
+                duty.tasks,
+                projected_work=int(duty.work_time),
+                projected_spread=int(duty.spread_time),
+                duty_id=int(duty.id),
+            )
             total_utilization += float(quality_metrics["utilization"])
-            max_idle_time = max(max_idle_time, int(quality_metrics["max_idle_time"]))
+            max_idle_time = max(max_idle_time, int(semantic_metrics["max_idle_time"]))
             short_connection_total += int(quality_metrics["short_connection_count"])
+            total_idle_minutes += int(semantic_metrics["total_idle_time"])
+            total_semantic_score += self._operational_semantic_score(semantic_metrics)
             if float(quality_metrics["utilization"]) < self.utilization_target:
                 low_utilization_duties += 1
             if self.max_spread_soft > 0 and int(quality_metrics["spread_time"]) > self.max_spread_soft:
@@ -1948,12 +2145,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 low_work_duties += 1
             if int(quality_metrics["break_count"]) > self.fragmentation_soft_limit:
                 fragmented_duties += 1
-            if self._duty_needs_meal_break(
-                duty,
-                projected_spread=int(duty.spread_time),
-                projected_has_break=bool(duty.meta.get("meal_break_found", False)),
-            ):
+            if bool(semantic_metrics["mandatory_rest_missing"]):
                 meal_break_missing += 1
+                mandatory_rest_missing += 1
 
             roster_id = duty.meta.get("roster_id")
             for group_id in (duty.meta.get("covered_trip_group_ids") or []):
@@ -1999,6 +2193,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "short_connection_total": short_connection_total,
             "max_idle_time": max_idle_time,
             "meal_break_missing": meal_break_missing,
+            "mandatory_rest_missing": mandatory_rest_missing,
+            "average_idle_minutes": round(total_idle_minutes / max(1, len(duties)), 2),
+            "total_idle_minutes": total_idle_minutes,
+            "operational_semantic_score": round(total_semantic_score, 2),
             "duty_group_splits": duty_group_splits,
             "roster_group_splits": roster_group_splits,
             "relief_handoffs": relief_handoffs,
@@ -2010,6 +2208,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         return (
             int(metrics.get("violations", 0)),
             int(metrics.get("uncovered_blocks", 0)),
+            int(metrics.get("mandatory_rest_missing", metrics.get("meal_break_missing", 0))),
             int(metrics.get("meal_break_missing", 0)),
             int(metrics.get("duty_group_splits", 0)),
             int(metrics.get("roster_group_splits", 0)),
@@ -2027,6 +2226,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             int(metrics.get("short_duties", 0)),
             int(metrics.get("total_overtime_minutes", 0)),
             int(metrics.get("waiting_minutes", 0)),
+            int(round(float(metrics.get("operational_semantic_score", 0.0) or 0.0))),
         )
 
     def _evaluate_relief_candidate_duties(
@@ -2049,6 +2249,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
     def _soft_issue_operational_rank(self, metrics: Dict[str, Any]) -> Tuple[int, ...]:
         return (
             int(metrics.get("extreme_duties", 0)),
+            int(metrics.get("mandatory_rest_missing", metrics.get("meal_break_missing", 0))),
             int(metrics.get("low_utilization_duties", 0)),
             int(metrics.get("high_spread_duties", 0)),
             int(metrics.get("fragmented_duties", 0)),
@@ -2056,6 +2257,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             int(metrics.get("max_idle_time", 0)),
             int(metrics.get("total_overtime_minutes", 0)),
             int(metrics.get("waiting_minutes", 0)),
+            int(round(float(metrics.get("operational_semantic_score", 0.0) or 0.0))),
         )
 
     def _soft_issue_candidate_accepted(
@@ -2071,6 +2273,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         guard_keys = (
             "violations",
             "uncovered_blocks",
+            "mandatory_rest_missing",
             "meal_break_missing",
             "duty_group_splits",
             "roster_group_splits",
@@ -2556,38 +2759,54 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             if not ordered_bundle:
                 continue
 
-            best_choice: Optional[Tuple[float, str, Optional[int], Duty]] = None
+            best_choice: Optional[Tuple[float, int, int, str, Optional[int], Duty]] = None
             for duty_index, dedicated in enumerate(dedicated_duties):
                 rebuilt, reason = self._rebuild_duty_from_tasks([*dedicated.tasks, *ordered_bundle], dedicated.id)
                 if rebuilt is None:
                     continue
-                metrics = self._build_duty_quality_metrics(
+                semantic_metrics = self._build_operational_semantic_metrics(
                     rebuilt.tasks,
                     projected_work=int(rebuilt.work_time),
                     projected_spread=int(rebuilt.spread_time),
+                    duty_id=int(rebuilt.id),
                 )
-                penalty = self._operational_quality_penalty(metrics)
-                choice = (penalty, "merge", duty_index, rebuilt)
+                semantic_score = self._operational_semantic_score(semantic_metrics)
+                choice = (
+                    semantic_score,
+                    int(semantic_metrics["mandatory_rest_missing"]),
+                    int(semantic_metrics["max_idle_time"]),
+                    "merge",
+                    duty_index,
+                    rebuilt,
+                )
                 if best_choice is None or choice < best_choice:
                     best_choice = choice
 
             rebuilt, reason = self._rebuild_duty_from_tasks(ordered_bundle, next_id)
             if rebuilt is None:
                 raise ValueError(f"bundle_dedicated_rebuild_failed:{reason}")
-            metrics = self._build_duty_quality_metrics(
+            semantic_metrics = self._build_operational_semantic_metrics(
                 rebuilt.tasks,
                 projected_work=int(rebuilt.work_time),
                 projected_spread=int(rebuilt.spread_time),
+                duty_id=int(rebuilt.id),
             )
-            new_penalty = self._operational_quality_penalty(metrics)
-            new_choice = (new_penalty, "new", None, rebuilt)
+            semantic_score = self._operational_semantic_score(semantic_metrics)
+            new_choice = (
+                semantic_score,
+                int(semantic_metrics["mandatory_rest_missing"]),
+                int(semantic_metrics["max_idle_time"]),
+                "new",
+                None,
+                rebuilt,
+            )
             if best_choice is None or new_choice < best_choice:
                 best_choice = new_choice
 
             if best_choice is None:
                 raise ValueError("bundle_dedicated_choice_missing")
 
-            _, choice_mode, duty_index, chosen_duty = best_choice
+            _, _, _, choice_mode, duty_index, chosen_duty = best_choice
             if choice_mode == "merge" and duty_index is not None:
                 dedicated_duties[duty_index] = chosen_duty
                 allocation_details.append(
@@ -2638,26 +2857,36 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 continue
             bundle_group_ids = self._tasks_group_ids(ordered_bundle)
             target_seed = ordered_bundle[0]
-            candidates: List[Tuple[float, int, str, Duty]] = []
+            candidates: List[Tuple[float, int, int, int, str, Duty]] = []
             for target_duty in self._soft_issue_target_duties(candidate_duties, source_duty, target_seed, bundle_group_ids):
                 for mode in ("append", "prepend"):
                     rebuilt, reason = self._soft_issue_rebuild_bundle_into_duty(target_duty, ordered_bundle, mode)
                     if rebuilt is None:
                         continue
-                    metrics = self._build_duty_quality_metrics(
+                    semantic_metrics = self._build_operational_semantic_metrics(
                         rebuilt.tasks,
                         projected_work=int(rebuilt.work_time),
                         projected_spread=int(rebuilt.spread_time),
+                        duty_id=int(rebuilt.id),
                     )
-                    penalty = self._operational_quality_penalty(metrics)
-                    candidates.append((penalty, int(target_duty.id), mode, rebuilt))
+                    semantic_score = self._operational_semantic_score(semantic_metrics)
+                    candidates.append(
+                        (
+                            semantic_score,
+                            int(semantic_metrics["mandatory_rest_missing"]),
+                            int(semantic_metrics["max_idle_time"]),
+                            int(target_duty.id),
+                            mode,
+                            rebuilt,
+                        )
+                    )
 
             if not candidates:
                 deferred_bundles.append(ordered_bundle)
                 continue
 
-            candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-            _, chosen_target_id, chosen_mode, rebuilt_target = candidates[0]
+            candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[4]))
+            _, _, _, chosen_target_id, chosen_mode, rebuilt_target = candidates[0]
             updated_duties: List[Duty] = []
             for existing_duty in candidate_duties:
                 if int(existing_duty.id) == chosen_target_id:
@@ -2855,6 +3084,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
     def _soft_issue_improved(self, current_metrics: Dict[str, Any], candidate_metrics: Dict[str, Any]) -> bool:
         improvement_keys = (
             "uncovered_blocks",
+            "mandatory_rest_missing",
             "meal_break_missing",
             "duty_group_splits",
             "roster_group_splits",
@@ -2864,9 +3094,13 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "fragmented_duties",
             "short_connection_total",
         )
-        return any(
+        if any(
             int(candidate_metrics.get(key, 0)) < int(current_metrics.get(key, 0))
             for key in improvement_keys
+        ):
+            return True
+        return float(candidate_metrics.get("operational_semantic_score", 0.0) or 0.0) < float(
+            current_metrics.get("operational_semantic_score", 0.0) or 0.0
         )
 
     def _soft_issue_reassignment_postopt(

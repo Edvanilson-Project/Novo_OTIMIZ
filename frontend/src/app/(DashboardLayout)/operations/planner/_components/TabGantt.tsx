@@ -11,7 +11,7 @@ import {
 import { List, type RowComponentProps } from 'react-window';
 import {
   IconBus, IconUsers, IconMaximize, IconMinimize,
-  IconFileSpreadsheet, IconTable, IconRoute,
+  IconFileSpreadsheet, IconTable, IconRoute, IconClipboardData,
   IconChevronDown, IconChevronUp,
   IconFlag, IconMapPin, IconCoffee,
 } from '@tabler/icons-react';
@@ -38,7 +38,7 @@ const SIDEBAR_WIDTH = 140;
 const DESCANSO_MIN_GAP = 5; // min gap to show as interval event
 
 // ─── Domain Interfaces ────────────────────────────────────────────────────────
-export type EventKind = 'soltura' | 'viagem' | 'recolhimento' | 'descanso';
+export type EventKind = 'inicio_jornada' | 'fim_jornada' | 'soltura' | 'viagem' | 'recolhimento' | 'descanso' | 'deslocamento_operacional' | 'troca_motorista' | 'troca_veiculo';
 export type IntervalKind = 'espera' | 'descanso' | 'refeicao';
 
 export interface PlanEvent {
@@ -55,7 +55,13 @@ export interface PlanEvent {
   gapMinutes?: number;
   intervalKind?: IntervalKind;
   vehicleId?: number;
+  vehicleFromId?: number;
+  vehicleToId?: number;
   dutyId?: number | null;
+  tripIds?: number[];
+  tripCount?: number;
+  eventScope?: string;
+  explanation?: string;
   color?: string;
 }
 
@@ -88,12 +94,126 @@ interface TripMetadata {
 }
 
 // ─── Event Kind Config ────────────────────────────────────────────────────────
-const EVENT_CONFIG: Record<EventKind, { label: string; color: 'success' | 'primary' | 'error' | 'warning'; icon: React.ReactNode }> = {
-  soltura:       { label: 'Soltura',         color: 'success', icon: <IconMapPin size={14} /> },
-  viagem:        { label: 'Viagem',          color: 'primary', icon: <IconBus size={14} /> },
-  recolhimento:  { label: 'Recolhimento',    color: 'error',   icon: <IconFlag size={14} /> },
-  descanso:      { label: 'Descanso/Refeição', color: 'warning', icon: <IconCoffee size={14} /> },
+const EVENT_CONFIG: Record<EventKind, { label: string; color: 'success' | 'primary' | 'error' | 'warning' | 'default' | 'info' | 'secondary'; icon: React.ReactNode }> = {
+  inicio_jornada:  { label: 'Início de jornada', color: 'info', icon: <IconCoffee size={14} /> },
+  fim_jornada:     { label: 'Fim de jornada', color: 'info', icon: <IconCoffee size={14} /> },
+  soltura:         { label: 'Soltura',         color: 'success', icon: <IconMapPin size={14} /> },
+  viagem:          { label: 'Viagem',          color: 'primary', icon: <IconBus size={14} /> },
+  recolhimento:    { label: 'Recolhimento',    color: 'error',   icon: <IconFlag size={14} /> },
+  descanso:        { label: 'Descanso/Refeição', color: 'warning', icon: <IconCoffee size={14} /> },
+  deslocamento_operacional: { label: 'Deslocamento oper.', color: 'default', icon: <IconBus size={14} /> },
+  troca_motorista: { label: 'Troca motorista', color: 'default', icon: <IconUsers size={14} /> },
+  troca_veiculo:   { label: 'Troca de veículo', color: 'secondary', icon: <IconRoute size={14} /> },
 };
+
+function sortOperationalTrips<T extends Record<string, any>>(trips: T[]): T[] {
+  return [...trips].sort((left, right) => {
+    const startDiff = Number(left.start_time ?? left.startTime ?? 0) - Number(right.start_time ?? right.startTime ?? 0);
+    if (startDiff !== 0) {
+      return startDiff;
+    }
+
+    const endDiff = Number(left.end_time ?? left.endTime ?? 0) - Number(right.end_time ?? right.endTime ?? 0);
+    if (endDiff !== 0) {
+      return endDiff;
+    }
+
+    return Number(left.id ?? left.tripId ?? left.trip_id ?? 0) - Number(right.id ?? right.tripId ?? right.trip_id ?? 0);
+  });
+}
+
+function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] {
+  const dutyId = duty.duty_id ?? duty.id;
+  const explicitTrips = Array.isArray(duty.detailed_trip_assignments) ? duty.detailed_trip_assignments : [];
+  if (explicitTrips.length > 0) {
+    return explicitTrips
+      .map((trip: any) => {
+        const sourceTripId = Number(trip.source_trip_id ?? trip.id ?? trip.trip_id ?? 0);
+        const hydratedTrip = tripById.get(sourceTripId) ?? tripById.get(Number(trip.trip_id ?? 0));
+        const vehicleId = trip.vehicle_id ?? trip.block_id ?? hydratedTrip?.block_id ?? hydratedTrip?.vehicle_id ?? null;
+        return {
+          ...hydratedTrip,
+          ...trip,
+          source_trip_id: sourceTripId || undefined,
+          trip_id: trip.trip_id ?? trip.public_trip_id ?? trip.id,
+          block_id: trip.block_id ?? vehicleId,
+          vehicle_id: vehicleId,
+          duty_id: dutyId,
+          driver_id: dutyId,
+        };
+      })
+      .sort((left: any, right: any) => {
+        const sequenceDiff = Number(left.sequence_in_duty ?? 0) - Number(right.sequence_in_duty ?? 0);
+        if (sequenceDiff !== 0) {
+          return sequenceDiff;
+        }
+        return sortOperationalTrips([left, right])[0] === left ? -1 : 1;
+      })
+      .map((trip: any, index: number) => ({
+        ...trip,
+        sequence_in_duty: Number(trip.sequence_in_duty ?? index + 1),
+        sequence_in_bundle: Number(trip.sequence_in_bundle ?? 1),
+        bundle_trip_count: Number(trip.bundle_trip_count ?? 1),
+        bundle_event_type: trip.bundle_event_type ?? (Number(trip.bundle_trip_count ?? 1) > 1 ? 'commercial_trip_bundle' : 'commercial_trip'),
+      }));
+  }
+
+  const segmentTrips = Array.isArray(duty.duty_time_segments)
+    ? duty.duty_time_segments.flatMap((segment: any, segmentIndex: number) => {
+      if ((segment.type ?? segment.event_type) !== 'commercial_trip') {
+        return [];
+      }
+      const trips = sortOperationalTrips(
+        (Array.isArray(segment.trip_ids) ? segment.trip_ids : [])
+          .map((tripId: number) => tripById.get(Number(tripId)))
+          .filter(Boolean),
+      );
+      return trips.map((trip: any, tripIndex: number) => ({
+        ...trip,
+        source_trip_id: trip.tripId ?? trip.id ?? trip.trip_id,
+        trip_id: trip.trip_id ?? trip.tripId ?? trip.id,
+        block_id: trip.block_id ?? segment.block_id ?? null,
+        vehicle_id: trip.block_id ?? segment.block_id ?? null,
+        duty_id: dutyId,
+        driver_id: dutyId,
+        event_scope: 'trip',
+        sequence_in_duty: 0,
+        segment_sequence: segmentIndex + 1,
+        sequence_in_bundle: tripIndex + 1,
+        bundle_trip_count: trips.length,
+        bundle_event_type: segment.bundle_event_type ?? (trips.length > 1 ? 'commercial_trip_bundle' : 'commercial_trip'),
+        is_paired: trips.length > 1,
+      }));
+    })
+    : [];
+
+  const fallbackTrips = segmentTrips.length > 0
+    ? segmentTrips
+    : sortOperationalTrips(
+      ((duty.trip_ids || duty.trips || []) as number[])
+        .map((tripId: number) => tripById.get(Number(tripId)))
+        .filter(Boolean)
+        .map((trip: any) => ({
+          ...trip,
+          source_trip_id: trip.tripId ?? trip.id ?? trip.trip_id,
+          trip_id: trip.trip_id ?? trip.tripId ?? trip.id,
+          block_id: trip.block_id ?? null,
+          vehicle_id: trip.block_id ?? null,
+          duty_id: dutyId,
+          driver_id: dutyId,
+          event_scope: 'trip',
+          sequence_in_bundle: 1,
+          bundle_trip_count: 1,
+          bundle_event_type: 'commercial_trip',
+          is_paired: false,
+        })),
+    );
+
+  return fallbackTrips.map((trip: any, index: number) => ({
+    ...trip,
+    sequence_in_duty: Number(trip.sequence_in_duty ?? index + 1),
+  }));
+}
 
 // ─── Helper: build PlanEvent[] from a sorted trip list ───────────────────────
 // Soltura  = deadhead garagem → primeiro terminal (antes da 1ª viagem)
@@ -218,6 +338,142 @@ function buildEvents(
   return events;
 }
 
+// ─── Helper: build PlanEvent[] correctly directly from duty_time_segments ───
+function buildEventsFromSegments(
+  dutySegments: any[],
+  dutyId: number | undefined,
+  terminalMap: Map<number, Terminal>,
+  tripById: Map<number, any>,
+  detailedTrips: any[] = [],
+  blockId?: number
+): PlanEvent[] {
+  const events: PlanEvent[] = [];
+  const detailedTripsBySegment = new Map<number, any[]>();
+
+  detailedTrips.forEach((trip: any) => {
+    const key = Number(trip.segment_sequence ?? 0);
+    if (!Number.isFinite(key) || key <= 0) {
+      return;
+    }
+    const current = detailedTripsBySegment.get(key) ?? [];
+    current.push(trip);
+    detailedTripsBySegment.set(key, current);
+  });
+
+  dutySegments.forEach((seg, segIndex) => {
+    const type = seg.type ?? seg.event_type;
+    const start = Number(seg.start ?? 0);
+    const end = Number(seg.end ?? start);
+    const dur = end - start;
+
+    let kind: EventKind | null = null;
+    let intervalKind: IntervalKind | undefined;
+
+    if (type === 'commercial_trip') kind = 'viagem';
+    else if (type === 'pullout' || type === 'vehicle_pullout') kind = 'soltura';
+    else if (type === 'pullback' || type === 'vehicle_pullback') kind = 'recolhimento';
+    else if (type === 'idle' || type === 'driver_idle') { kind = 'descanso'; intervalKind = 'espera'; }
+    else if (type === 'normal_break') { kind = 'descanso'; intervalKind = 'refeicao'; }
+    else if (type === 'mandatory_rest') { kind = 'descanso'; intervalKind = 'descanso'; }
+    else if (type === 'duty_start') kind = 'inicio_jornada';
+    else if (type === 'duty_end') kind = 'fim_jornada';
+    else if (type === 'deadhead') kind = 'deslocamento_operacional';
+    else if (type === 'driver_change') kind = 'troca_motorista';
+    else if (type === 'driver_vehicle_change') kind = 'troca_veiculo';
+
+    if (!kind) return;
+
+    const tName = (id?: number | string) =>
+      id != null ? (terminalMap.get(Number(id))?.shortName ?? terminalMap.get(Number(id))?.name ?? `T${id}`) : '—';
+
+    if (type === 'commercial_trip') {
+      const segmentKey = seg.segment_sequence ?? (segIndex + 1);
+      const segmentTrips = sortOperationalTrips(
+        (detailedTripsBySegment.get(segmentKey) ??
+          (Array.isArray(seg.trip_ids) ? seg.trip_ids : [])
+            .map((tripId: number) => tripById.get(Number(tripId)))
+            .filter(Boolean)) as any[],
+      );
+      if (segmentTrips.length > 0) {
+        segmentTrips.forEach((trip: any) => {
+          const sourceTripId = Number(trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? 0);
+          const hydratedTrip = tripById.get(sourceTripId) ?? tripById.get(Number(trip.trip_id ?? 0));
+          const lineCode = trip.lineCode ?? hydratedTrip?.lineCode ?? trip.line_code ?? hydratedTrip?.line_code ?? null;
+          const lineId = trip.lineId ?? hydratedTrip?.lineId ?? trip.line_id ?? hydratedTrip?.line_id ?? null;
+          const vehicleId = trip.vehicle_id ?? trip.block_id ?? hydratedTrip?.block_id ?? seg.block_id ?? blockId;
+          events.push({
+            kind,
+            tripId: sourceTripId || undefined,
+            tripIds: [sourceTripId],
+            tripCount: Number(trip.bundle_trip_count ?? segmentTrips.length),
+            linha: lineCode ?? String(lineId ?? '—'),
+            sentido: trip.direction ?? hydratedTrip?.direction ?? trip.sentido ?? hydratedTrip?.sentido ?? '—',
+            inicio: Number(trip.start_time ?? hydratedTrip?.start_time ?? start),
+            chegada: Number(trip.end_time ?? hydratedTrip?.end_time ?? end),
+            origemName: tName(trip.origin_id ?? hydratedTrip?.origin_id ?? seg.location_start),
+            destinoName: tName(trip.destination_id ?? hydratedTrip?.destination_id ?? seg.location_end),
+            km: Number(trip.distance_km ?? hydratedTrip?.distance_km ?? seg.distance_km ?? 0),
+            duracao: Number(trip.duration ?? hydratedTrip?.duration ?? ((trip.end_time ?? hydratedTrip?.end_time ?? end) - (trip.start_time ?? hydratedTrip?.start_time ?? start))),
+            vehicleId: vehicleId != null ? Number(vehicleId) : undefined,
+            dutyId,
+            eventScope: 'trip',
+            explanation: seg.explanation,
+            color: trip.color ?? hydratedTrip?.color,
+          });
+        });
+        return;
+      }
+    }
+
+    // Fetch trip if possible to get line names
+    let trip = null;
+    let tid = null;
+    if (Array.isArray(seg.trip_ids) && seg.trip_ids.length > 0) {
+      tid = Number(seg.trip_ids[0]);
+      trip = tripById.get(tid);
+    } else if (seg.tripId || seg.trip_id) {
+      tid = Number(seg.tripId ?? seg.trip_id);
+      trip = tripById.get(tid);
+    }
+
+    let color = trip?.color;
+    if (kind === 'descanso') {
+      color = intervalKind === 'refeicao' ? '#2e7d32' : intervalKind === 'descanso' ? '#ffc107' : '#90a4ae';
+    }
+
+    events.push({
+      kind,
+      tripId: tid ?? undefined,
+      linha: trip?.lineCode ?? String(trip?.lineId ?? '—'),
+      sentido: trip?.direction ?? trip?.sentido ?? '—',
+      inicio: start,
+      chegada: end,
+      origemName: tName(seg.location_start ?? seg.location ?? trip?.origin_id),
+      destinoName: tName(seg.location_end ?? seg.location ?? trip?.destination_id),
+      km: Number(seg.distance_km ?? trip?.distance_km ?? 0),
+      duracao: dur,
+      gapMinutes: kind === 'descanso' ? dur : undefined,
+      intervalKind,
+      vehicleId: kind === 'troca_veiculo'
+        ? Number(seg.to_vehicle_id ?? seg.from_vehicle_id ?? seg.block_id ?? blockId)
+        : (blockId ?? seg.block_id) != null
+          ? Number(blockId ?? seg.block_id)
+          : undefined,
+      vehicleFromId: seg.from_vehicle_id != null ? Number(seg.from_vehicle_id) : undefined,
+      vehicleToId: seg.to_vehicle_id != null ? Number(seg.to_vehicle_id) : undefined,
+      dutyId,
+      tripIds: Array.isArray(seg.trip_ids) ? seg.trip_ids.map(Number) : undefined,
+      tripCount: Number(seg.trip_count ?? (Array.isArray(seg.trip_ids) ? seg.trip_ids.length : 0) ?? 0),
+      eventScope: seg.event_scope,
+      explanation: seg.explanation,
+      color,
+    });
+  });
+
+  return events;
+}
+
+
 // ─── Helper: export CSV ───────────────────────────────────────────────────────
 function exportCsv(rows: Record<string, unknown>[], filename: string) {
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -248,19 +504,229 @@ function ExportButtons({ rows, filename, sheet }: { rows: Record<string, unknown
   );
 }
 
+// ─── Operational Event Type Mapping (Solver → CSV) ────────────────────────────
+const OPERATIONAL_EVENT_LABELS: Record<string, string> = {
+  commercial_trip: 'Viagem',
+  commercial_trip_bundle: 'Viagem agrupada',
+  idle: 'Ociosa',
+  driver_idle: 'Ociosa',
+  normal_break: 'Intervalo normal',
+  mandatory_rest: 'Descanso obrigatório',
+  pullout: 'Soltura',
+  pullback: 'Recolhimento',
+  deadhead: 'Deslocamento operacional',
+  driver_change: 'Troca de motorista',
+  driver_vehicle_change: 'Troca de veículo',
+  duty_start: 'Início de jornada',
+  duty_end: 'Fim de jornada',
+};
+
+const WORK_TIME_TYPES = new Set(['commercial_trip', 'commercial_trip_bundle', 'deadhead']);
+const DRIVING_TIME_TYPES = new Set(['commercial_trip', 'commercial_trip_bundle', 'deadhead']);
+
+/** Build operational export rows using solver duty_time_segments as primary source */
+function buildOperationalExportRows(
+  duties: any[],
+  effectiveBlocks: any[],
+  scheduleId: number | string,
+): Record<string, unknown>[] {
+  // tripId → blockId map
+  const tripToBlock = new Map<number, number>();
+  effectiveBlocks.forEach((b) => {
+    const blockId = b.block_id ?? b.id;
+    (b.items || b.trips || []).forEach((t: any) => {
+      const tid = t.tripId ?? t.id ?? t.trip_id;
+      if (tid != null) tripToBlock.set(Number(tid), Number(blockId));
+    });
+  });
+
+  const rows: Record<string, unknown>[] = [];
+
+  duties.forEach((duty: any) => {
+    const dutyId = duty.duty_id ?? duty.id;
+    const segments: any[] = duty.duty_time_segments ?? [];
+    const dutyTripIds: number[] = duty.trip_ids ?? [];
+
+    if (segments.length > 0) {
+      // ── Primary path: use solver segments ──
+      segments.forEach((seg: any, idx: number) => {
+        const baseEventType = seg.type ?? seg.event_type ?? 'unknown';
+        const tripCount = Number(seg.trip_count ?? (Array.isArray(seg.trip_ids) ? seg.trip_ids.length : 0) ?? 0);
+        const eventType = baseEventType === 'commercial_trip' && tripCount > 1
+          ? 'commercial_trip_bundle'
+          : baseEventType;
+        const eventLabel = OPERATIONAL_EVENT_LABELS[eventType] ?? eventType;
+        const startTime = Number(seg.start ?? 0);
+        const endTime = Number(seg.end ?? 0);
+        const computedDuration = endTime - startTime;
+        const segDuration = Number(seg.duration ?? computedDuration);
+        const durationMismatch = segDuration !== computedDuration;
+        const tripIds = Array.isArray(seg.trip_ids) ? seg.trip_ids.join(';') : '';
+        const eventScope = seg.event_scope ?? (baseEventType === 'commercial_trip' ? 'driver_vehicle' : 'driver');
+
+        // Flags: respect segment-level overrides when available
+        const isWorkTime = seg.is_work_time ?? WORK_TIME_TYPES.has(eventType);
+        const isDrivingTime = seg.is_driving_time ?? DRIVING_TIME_TYPES.has(eventType);
+        const isIdleTime = seg.is_idle_time ?? (baseEventType === 'idle' || baseEventType === 'driver_idle');
+        const isNormalBreak = seg.is_normal_break ?? (baseEventType === 'normal_break');
+        const isMandatoryRest = seg.is_mandatory_rest ?? (baseEventType === 'mandatory_rest');
+        const isPullout = seg.is_pullout ?? (baseEventType === 'pullout');
+        const isPullback = seg.is_pullback ?? (baseEventType === 'pullback');
+        const restValid = seg.rest_valid ?? (baseEventType === 'mandatory_rest');
+        const driverId = dutyId != null ? String(dutyId) : '';
+
+        // Infer block_id from trip_ids or segment metadata
+        const segBlockId = seg.block_id ?? seg.from_block_id ?? (
+          Array.isArray(seg.trip_ids) && seg.trip_ids.length > 0
+            ? tripToBlock.get(Number(seg.trip_ids[0]))
+            : null
+        ) ?? '';
+
+        rows.push({
+          schedule_id: scheduleId,
+          block_id: segBlockId,
+          duty_id: dutyId,
+          driver_id: driverId,
+          vehicle_id: eventScope === 'driver_vehicle' ? segBlockId : '',
+          from_vehicle_id: seg.from_vehicle_id ?? seg.from_block_id ?? '',
+          to_vehicle_id: seg.to_vehicle_id ?? seg.to_block_id ?? '',
+          sequence: idx + 1,
+          event_type: eventType,
+          event_label: eventLabel,
+          event_scope: eventScope,
+          start_time: minToHHMM(startTime),
+          end_time: minToHHMM(endTime),
+          duration_minutes: segDuration,
+          origin_id: seg.location_start ?? seg.location ?? '',
+          destination_id: seg.location_end ?? seg.location ?? '',
+          trip_ids: tripIds,
+          trip_count: tripCount,
+          is_work_time: isWorkTime,
+          is_driving_time: isDrivingTime,
+          is_idle_time: isIdleTime,
+          is_normal_break: isNormalBreak,
+          is_mandatory_rest: isMandatoryRest,
+          is_pullout: isPullout,
+          is_pullback: isPullback,
+          rest_valid: restValid,
+          rule_code: '',
+          violation_code: durationMismatch ? 'EXPORT_DURATION_MISMATCH' : '',
+          explanation: seg.explanation ?? (driverId ? 'Motorista real não disponível; usando identificador da duty' : ''),
+        });
+      });
+    } else {
+      // ── Fallback: reconstruct from trip gaps ──
+      const fallbackExplanation = 'Classificação inferida pelo frontend por ausência de segmentos do solver';
+
+      // Get trips for this duty from blocks
+      const dutyTrips = dutyTripIds
+        .map((tid: number) => {
+          for (const b of effectiveBlocks) {
+            const found = (b.items || b.trips || []).find(
+              (t: any) => (t.tripId ?? t.id ?? t.trip_id) === tid
+            );
+            if (found) return { ...found, _blockId: b.block_id ?? b.id };
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .sort((a: any, b: any) => (a.start_time ?? 0) - (b.start_time ?? 0));
+
+      if (dutyTrips.length === 0) return;
+
+      let seq = 0;
+      dutyTrips.forEach((trip: any, idx: number) => {
+        const tid = trip.tripId ?? trip.id ?? trip.trip_id;
+        const st = Number(trip.start_time ?? 0);
+        const et = Number(trip.end_time ?? 0);
+        const driverId = dutyId != null ? String(dutyId) : '';
+        seq++;
+        rows.push({
+          schedule_id: scheduleId,
+          block_id: trip._blockId ?? '',
+          duty_id: dutyId,
+          driver_id: driverId,
+          vehicle_id: trip._blockId ?? '',
+          sequence: seq,
+          event_type: 'commercial_trip',
+          event_label: 'Viagem',
+          start_time: minToHHMM(st),
+          end_time: minToHHMM(et),
+          duration_minutes: et - st,
+          origin_id: trip.origin_id ?? '',
+          destination_id: trip.destination_id ?? '',
+          trip_ids: String(tid),
+          is_work_time: true,
+          is_driving_time: true,
+          is_idle_time: false,
+          is_normal_break: false,
+          is_mandatory_rest: false,
+          is_pullout: false,
+          is_pullback: false,
+          rest_valid: false,
+          rule_code: '',
+          violation_code: '',
+          explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
+        });
+
+        // Gap between consecutive trips
+        const nextTrip = dutyTrips[idx + 1];
+        if (nextTrip) {
+          const gapStart = et;
+          const gapEnd = Number(nextTrip.start_time ?? 0);
+          const gap = gapEnd - gapStart;
+          if (gap > 0) {
+            const gapType = gap >= 30 ? 'normal_break' : 'idle';
+            seq++;
+            rows.push({
+              schedule_id: scheduleId,
+              block_id: trip._blockId ?? '',
+              duty_id: dutyId,
+              driver_id: driverId,
+              vehicle_id: trip._blockId ?? '',
+              sequence: seq,
+              event_type: gapType,
+              event_label: OPERATIONAL_EVENT_LABELS[gapType] ?? gapType,
+              start_time: minToHHMM(gapStart),
+              end_time: minToHHMM(gapEnd),
+              duration_minutes: gap,
+              origin_id: trip.destination_id ?? '',
+              destination_id: nextTrip.origin_id ?? '',
+              trip_ids: '',
+              is_work_time: false,
+              is_driving_time: false,
+              is_idle_time: gapType === 'idle',
+              is_normal_break: gapType === 'normal_break',
+              is_mandatory_rest: false,
+              is_pullout: false,
+              is_pullback: false,
+              rest_valid: false,
+              rule_code: '',
+              violation_code: '',
+              explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
+            });
+          }
+        }
+      });
+    }
+  });
+
+  return rows;
+}
+
 // ─── EventKindChip ────────────────────────────────────────────────────────────
 function eventDisplayLabel(event: Pick<PlanEvent, 'kind' | 'gapMinutes' | 'intervalKind'>): string {
   if (event.kind !== 'descanso') return EVENT_CONFIG[event.kind].label;
   const duration = event.gapMinutes != null ? ` (${minToDuration(event.gapMinutes)})` : '';
-  if (event.intervalKind === 'refeicao') return `Refeição${duration}`;
-  if (event.intervalKind === 'descanso') return `Descanso${duration}`;
-  return `Espera${duration}`;
+  if (event.intervalKind === 'refeicao') return `Intervalo normal${duration}`;
+  if (event.intervalKind === 'descanso') return `Descanso obrigatório${duration}`;
+  return `Ociosa${duration}`;
 }
 
 function EventKindChip({ kind, gap, intervalKind }: { kind: EventKind; gap?: number; intervalKind?: IntervalKind }) {
   const cfg = EVENT_CONFIG[kind];
   if (kind === 'descanso' && gap != null) {
-    const resolvedKind: IntervalKind = intervalKind ?? (gap >= 60 ? 'refeicao' : 'espera');
+    const resolvedKind: IntervalKind = intervalKind ?? 'espera';
     return (
       <Chip
         size="small"
@@ -531,6 +997,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     let colorIdx = 0;
     rawBlocks.forEach((block) => {
       (block as any).trips?.forEach((trip: any) => {
+        if (typeof trip === 'number') return;
         const code = trip.line_code ?? trip.lineCode ?? null;
         if (code && !codeColorMap.has(code)) {
           codeColorMap.set(code, linePalette[colorIdx % linePalette.length]);
@@ -705,15 +1172,17 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     return duties.map((duty: any) => {
       const dutyId = duty.duty_id ?? duty.id;
       const tripIds: number[] = duty.trip_ids || duty.trips || [];
-      const dutyTrips = tripIds
+      const fallbackDutyTrips = tripIds
         .map((id) => tripById.get(id))
         .filter(Boolean)
         .sort((a: any, b: any) => (a.start_time ?? 0) - (b.start_time ?? 0));
+      const detailedDutyTrips = resolveDutyDetailedTrips(duty, tripById);
+      const dutyTrips = detailedDutyTrips.length > 0 ? detailedDutyTrips : fallbackDutyTrips;
 
       // Soltura só se o motorista conduz a 1ª viagem do bloco de veículo
       // Recolhimento só se o motorista conduz a última viagem do bloco de veículo
-      const firstDutyTripId = dutyTrips[0]?.tripId;
-      const lastDutyTripId = dutyTrips[dutyTrips.length - 1]?.tripId;
+      const firstDutyTripId = dutyTrips[0]?.source_trip_id ?? dutyTrips[0]?.tripId ?? dutyTrips[0]?.id;
+      const lastDutyTripId = dutyTrips[dutyTrips.length - 1]?.source_trip_id ?? dutyTrips[dutyTrips.length - 1]?.tripId ?? dutyTrips[dutyTrips.length - 1]?.id;
       let includeSoltura = false;
       let includeRecolhimento = false;
       for (const { firstTripId, lastTripId } of blockFirstLastTrip.values()) {
@@ -721,7 +1190,15 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         if (lastDutyTripId === lastTripId) includeRecolhimento = true;
       }
 
-      const events = buildEvents(dutyTrips, terminalMap, lineByCode, intervalPolicy, undefined, dutyId, includeSoltura, includeRecolhimento);
+
+      let events: PlanEvent[] = [];
+      const segments = duty.duty_time_segments;
+      if (segments && segments.length > 0) {
+        events = buildEventsFromSegments(segments, dutyId, terminalMap, tripById, detailedDutyTrips);
+      } else {
+        events = buildEvents(fallbackDutyTrips, terminalMap, lineByCode, intervalPolicy, undefined, dutyId, includeSoltura, includeRecolhimento);
+      }
+
       const violations = (duty.shift_violations ?? 0) + (duty.rest_violations ?? 0);
 
       // Jornada inclui soltura e recolhimento se configurados
@@ -737,7 +1214,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         totalKm: events.reduce((s, e) => s + (e.km ?? 0), 0),
         startTime: jornStart,
         endTime: jornEnd,
-        workTime: jornEnd - jornStart, // jornada completa incluindo morto e deadhead
+        workTime: duty.work_time ?? duty.operational_time_report?.work_time ?? (jornEnd - jornStart),
         totalCost: duty.total_cost ?? 0,
         violations,
         events,
@@ -801,29 +1278,53 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         'Início Evento': minToHHMM(ev.inicio),
         'Chegada Evento': minToHHMM(ev.chegada),
         'Duração Evento (min)': ev.duracao || 0,
+        'Escopo Evento': ev.eventScope || 'driver',
+        'ID Viagem': ev.tripId || '—',
+        'Trip IDs': ev.tripIds?.join(';') || '—',
+        'Qtd Trips no Bundle': ev.tripCount || (ev.tripId ? 1 : 0),
         Origem: ev.origemName || '—',
         Destino: ev.destinoName || '—',
         'Veículo': ev.vehicleId != null ? `V${ev.vehicleId}` : '—',
+        'Veículo Origem': ev.vehicleFromId != null ? `V${ev.vehicleFromId}` : '—',
+        'Veículo Destino': ev.vehicleToId != null ? `V${ev.vehicleToId}` : '—',
+        'Explicação': ev.explanation || '—',
       }))
     ), [dutyGroups]);
 
-  const viagensExportRows = useMemo(() =>
-    allEventsSorted.map((ev) => ({
-      'ID Viagem': ev.tripId || '—',
-      Evento: eventDisplayLabel(ev),
-      Linha: ev.linha || '—',
-      Sentido: ev.sentido || '—',
-      'Início': minToHHMM(ev.inicio),
-      'Início (min)': ev.inicio,
-      'Chegada': minToHHMM(ev.chegada),
-      'Chegada (min)': ev.chegada,
-      'Duração (min)': ev.duracao || 0,
-      Origem: ev.origemName || '—',
-      Destino: ev.destinoName || '—',
-      'KM': ev.kind === 'descanso' ? '—' : (ev.km || 0).toFixed(2),
-      Veículo: ev.vehicleId != null ? `V${ev.vehicleId}` : '—',
-      Motorista: ev.dutyId != null ? `M${ev.dutyId}` : '—',
-    })), [allEventsSorted]);
+  const viagensDetalhadasExportRows = useMemo(() =>
+    duties.flatMap((duty: any) => {
+      const dutyId = duty.duty_id ?? duty.id;
+      return resolveDutyDetailedTrips(duty, tripById).map((trip: any) => {
+        const sourceTripId = trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id;
+        const lineCode = trip.lineCode ?? trip.line_code ?? '—';
+        const lineId = trip.lineId ?? trip.line_id ?? null;
+        const vehicleId = trip.vehicle_id ?? trip.block_id ?? null;
+        return {
+          'ID Jornada': dutyId,
+          'Seq. na Jornada': trip.sequence_in_duty ?? '—',
+          'Seq. no Bundle': trip.sequence_in_bundle ?? 1,
+          'Qtd Trips no Bundle': trip.bundle_trip_count ?? 1,
+          'Tipo Bundle': trip.bundle_event_type ?? 'commercial_trip',
+          'ID Viagem': sourceTripId,
+          'ID Público Viagem': trip.trip_id ?? trip.public_trip_id ?? sourceTripId,
+          Linha: lineCode !== '—' ? lineCode : String(lineId ?? '—'),
+          Sentido: trip.direction ?? trip.sentido ?? '—',
+          'Início': minToHHMM(Number(trip.start_time ?? trip.startTime ?? 0)),
+          'Início (min)': Number(trip.start_time ?? trip.startTime ?? 0),
+          'Chegada': minToHHMM(Number(trip.end_time ?? trip.endTime ?? 0)),
+          'Chegada (min)': Number(trip.end_time ?? trip.endTime ?? 0),
+          'Duração (min)': Number(trip.duration ?? ((trip.end_time ?? trip.endTime ?? 0) - (trip.start_time ?? trip.startTime ?? 0))),
+          Origem: trip.origin_id ?? trip.originId ?? '—',
+          Destino: trip.destination_id ?? trip.destinationId ?? '—',
+          'Block ID': trip.block_id ?? '—',
+          Veículo: vehicleId != null ? `V${vehicleId}` : '—',
+          Motorista: `M${dutyId}`,
+          'Trip Group': trip.trip_group_id ?? '—',
+          'Pair ID': trip.pair_id ?? '—',
+        };
+      });
+    }),
+  [duties, tripById]);
 
   // ─── Drag-and-drop ───
   const handleDragStart = useCallback((e: React.DragEvent, item: any) => {
@@ -1178,7 +1679,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         <Box>
           <Stack direction="row" sx={{ p: 2, justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${theme.palette.divider}` }}>
             <Typography variant="caption" color="text.secondary">Clique em um motorista para expandir sua jornada</Typography>
-            <ExportButtons rows={motoristasExportRows} filename="motoristas" sheet="Motoristas" />
+            <ExportButtons rows={motoristasExportRows} filename="motoristas_corrigido" sheet="MotoristasCorrigido" />
           </Stack>
           {dutyGroups.length === 0 ? (
             <Box sx={{ p: 4 }}><Alert severity="info">Nenhuma escala de motorista gerada neste schedule.</Alert></Box>
@@ -1216,7 +1717,19 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
             <Typography variant="caption" color="text.secondary">
               Todos os eventos do plano em ordem cronológica ({allEventsSorted.length} entradas)
             </Typography>
-            <ExportButtons rows={viagensExportRows} filename="viagens" sheet="Viagens" />
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Tooltip title="Exportar Programação Operacional (CSV com segmentos do solver)">
+                <Button size="small" variant="contained" color="primary"
+                  startIcon={<IconClipboardData size={15} />}
+                  onClick={() => {
+                    const scheduleId = (res as any)?.id ?? (res as any)?.scheduleId ?? '';
+                    const opRows = buildOperationalExportRows(duties, effectiveBlocks, scheduleId);
+                    exportCsv(opRows, 'programacao_operacional_corrigida.csv');
+                  }}
+                >Programação Operacional</Button>
+              </Tooltip>
+              <ExportButtons rows={viagensDetalhadasExportRows} filename="viagens_detalhadas" sheet="ViagensDetalhadas" />
+            </Stack>
           </Stack>
           <TableContainer sx={{ maxHeight: fullscreen ? 'calc(100vh - 160px)' : 600, overflowY: 'auto' }}>
             <Table size="small" stickyHeader>

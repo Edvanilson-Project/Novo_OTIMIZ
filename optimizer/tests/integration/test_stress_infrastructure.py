@@ -21,7 +21,7 @@ async def test_infrastructure_stress_queueing():
     
     payload = {
         "algorithm": "greedy",
-        "time_budget_s": 0.5, # Muito rápido para não travar os workers para sempre
+        "time_budget_s": 1.0, # Este serviço externo rejeita budgets menores que 1 segundo
         "trips": [
             {
                 "id": 1,
@@ -34,17 +34,30 @@ async def test_infrastructure_stress_queueing():
                 "distance_km": 10.0,
             }
         ],
-        "vehicle_types": [],
+        "vehicle_types": [
+            {
+                "id": 1,
+                "name": "Std",
+                "passenger_capacity": 40,
+                "cost_per_km": 1.0,
+                "cost_per_hour": 10.0,
+                "fixed_cost": 100.0,
+            }
+        ],
         "cct_params": {"strict_hard_validation": False},
-        "vsp_params": {"time_budget_s": 0.5}
+        "vsp_params": {"time_budget_s": 1.0}
     }
     
     headers = {
         "X-Internal-Key": "internal-key-123456"
     }
 
-    async def _send_request(client: httpx.AsyncClient) -> httpx.Response:
-        return await client.post("http://localhost:8000/optimize/", json=payload, headers=headers)
+    async def _send_request(client: httpx.AsyncClient, request_id: int) -> httpx.Response:
+        request_payload = {
+            **payload,
+            "request_metadata": {"stress_request_id": request_id},
+        }
+        return await client.post("http://localhost:8000/optimize/", json=request_payload, headers=headers)
         
     start_time = time.time()
     
@@ -60,7 +73,7 @@ async def test_infrastructure_stress_queueing():
              pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
              
         # Dispara todas as tarefas de uma vez
-        tasks = [_send_request(client) for _ in range(num_requests)]
+        tasks = [_send_request(client, request_id) for request_id in range(num_requests)]
         responses: List[httpx.Response] = await asyncio.gather(*tasks)
 
     elapsed = time.time() - start_time

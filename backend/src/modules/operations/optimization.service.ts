@@ -10,6 +10,7 @@ import { Driver } from '../database/entities/driver.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
+import { normalizeLegacyCompanyParameters } from '../parameters/parameter-normalization';
 import { OptimizationGateway } from './optimization.gateway';
 
 @Injectable()
@@ -601,7 +602,10 @@ export class OptimizationService implements OnModuleInit {
                 overtime_cost: d.overtime_cost,
                 overtime_minutes: d.overtime_minutes,
                 shift_violations: d.shift_violations,
-                rest_violations: d.rest_violations
+                rest_violations: d.rest_violations,
+                duty_time_segments: d.meta?.duty_time_segments ?? d.segments ?? null,
+                operational_time_report: d.meta?.operational_time_report ?? null,
+                quality_metrics: d.meta?.quality_metrics ?? null
               },
             });
           });
@@ -620,6 +624,7 @@ export class OptimizationService implements OnModuleInit {
           reproducibility: result.reproducibility ?? result.meta?.reproducibility ?? null,
           performance: result.performance ?? result.meta?.performance ?? null,
           hard_constraint_report: result.meta?.hard_constraint_report ?? null,
+          operational_time_reports: result.operational_time_reports ?? result.meta?.operational_time_reports ?? null,
           operational_kpis: result.meta?.operational_kpis ?? null,
           resolved_params: result.meta?.input ?? null,
           run_snapshot: result.meta?.run_snapshot ?? result.meta?.input?.run_snapshot ?? null,
@@ -851,7 +856,9 @@ export class OptimizationService implements OnModuleInit {
   }
 
   private buildCctParams(params: CompanyParameters | null): Record<string, any> {
-    if (!params) {
+    const runtimeParams = normalizeLegacyCompanyParameters(params).normalized;
+
+    if (!runtimeParams) {
       return {
         max_work_minutes: 480,
         max_shift_minutes: 720,
@@ -896,37 +903,37 @@ export class OptimizationService implements OnModuleInit {
 
     const result: Record<string, any> = {};
     for (const field of cctFields) {
-      const value = params[field];
+      const value = runtimeParams[field];
       if (value !== null && value !== undefined) {
         result[field] = value;
       }
     }
 
     // Fallbacks obrigatorios
-    if (!result.max_work_minutes) result.max_work_minutes = params.max_driving_time_minutes || 480;
-    if (!result.max_driving_minutes && params.max_driving_time_minutes !== null && params.max_driving_time_minutes !== undefined) {
-      result.max_driving_minutes = params.max_driving_time_minutes;
+    if (!result.max_work_minutes) result.max_work_minutes = runtimeParams.max_driving_time_minutes || 480;
+    if (!result.max_driving_minutes && runtimeParams.max_driving_time_minutes !== null && runtimeParams.max_driving_time_minutes !== undefined) {
+      result.max_driving_minutes = runtimeParams.max_driving_time_minutes;
     }
-    if (!result.max_shift_minutes) result.max_shift_minutes = params.max_shift_minutes || 720;
-    if (!result.meal_break_minutes) result.meal_break_minutes = params.meal_break_minutes || 60;
+    if (!result.max_shift_minutes) result.max_shift_minutes = runtimeParams.max_shift_minutes || 720;
+    if (!result.meal_break_minutes) result.meal_break_minutes = runtimeParams.meal_break_minutes || 60;
 
     if (result.enforce_min_interval === undefined) {
       result.enforce_min_interval = true;
     }
 
     if (result.enforce_min_interval && result.min_break_minutes === undefined) {
-      result.min_break_minutes = params.min_break_minutes ?? 30;
+      result.min_break_minutes = runtimeParams.min_break_minutes ?? 30;
     }
 
     if (result.min_layover_minutes === undefined) {
-      result.min_layover_minutes = params.min_layover_minutes ?? result.min_break_minutes ?? 30;
+      result.min_layover_minutes = runtimeParams.min_layover_minutes ?? result.min_break_minutes ?? 30;
     }
 
-    if (params.force_round_trip) {
+    if (runtimeParams.force_round_trip) {
       result.enforce_trip_groups_hard = true;
       result.operator_pairing_hard = true;
     }
-    if (params.allow_vehicle_swap === false) {
+    if (runtimeParams.allow_vehicle_swap === false) {
       result.operator_single_vehicle_only = true;
     }
     if (result.apply_cct === undefined) result.apply_cct = true;
@@ -1150,6 +1157,28 @@ export class OptimizationService implements OnModuleInit {
       };
     }).sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
 
+    const tripDetailsById = new Map<number, any>();
+    hydratedBlocks.forEach((block) => {
+      (block.trips || []).forEach((trip: any, index: number) => {
+        const detailedTrip = {
+          ...trip,
+          source_trip_id: trip.id,
+          public_trip_id: trip.trip_id ?? trip.id,
+          block_id: block.block_id,
+          vehicle_id: block.block_id,
+          sequence_in_block: index + 1,
+        };
+        const sourceTripId = this.toPositiveInteger(trip.id);
+        if (sourceTripId != null) {
+          tripDetailsById.set(sourceTripId, detailedTrip);
+        }
+        const publicTripId = this.toPositiveInteger(trip.trip_id);
+        if (publicTripId != null && !tripDetailsById.has(publicTripId)) {
+          tripDetailsById.set(publicTripId, detailedTrip);
+        }
+      });
+    });
+
     // Monta resultSummary a partir do metadata salvo
     const meta = (schedule.metadata || {}) as any;
     const rawMeta = (meta.meta || {}) as any;
@@ -1215,8 +1244,24 @@ export class OptimizationService implements OnModuleInit {
       // blocks: hydratedBlocks, // REMOVIDO: Já enviado na raiz do objeto finalResult
       duties: duties.map((d) => {
         const dm = (d.metadata || {}) as any;
+        const dutyId = d.dutyId;
+        const dutyTripIds = Array.isArray(d.tripIds)
+          ? d.tripIds
+            .map((tripId) => this.toPositiveInteger(tripId))
+            .filter((tripId): tripId is number => tripId != null)
+          : [];
+        const dutyTimeSegments = this.normalizeDutyTimeSegments(
+          dm.duty_time_segments ?? [],
+          tripDetailsById,
+        );
+        const detailedTripAssignments = this.buildDetailedDutyTripAssignments(
+          dutyId,
+          dutyTripIds,
+          dutyTimeSegments,
+          tripDetailsById,
+        );
         return {
-          duty_id: d.dutyId,
+          duty_id: dutyId,
           work_time: dm.work_time ?? 0,
           spread_time: dm.spread_time ?? 0,
           start_time: dm.start_time ?? 0,
@@ -1227,7 +1272,11 @@ export class OptimizationService implements OnModuleInit {
           overtime_minutes: dm.overtime_minutes ?? 0,
           shift_violations: dm.shift_violations ?? 0,
           rest_violations: dm.rest_violations ?? 0,
-          trip_ids: d.tripIds ?? [],
+          duty_time_segments: dutyTimeSegments,
+          operational_time_report: dm.operational_time_report ?? null,
+          quality_metrics: dm.quality_metrics ?? null,
+          detailed_trip_assignments: detailedTripAssignments,
+          trip_ids: dutyTripIds,
         };
       }),
     };
@@ -1258,6 +1307,234 @@ export class OptimizationService implements OnModuleInit {
     this.scheduleCache.set(companyId, { data: finalResult, timestamp: Date.now() });
 
     return finalResult;
+  }
+
+  private normalizeDutyTimeSegments(
+    rawSegments: any[],
+    tripDetailsById: Map<number, any>,
+  ): Record<string, any>[] {
+    if (!Array.isArray(rawSegments) || rawSegments.length === 0) {
+      return [];
+    }
+
+    const segments = rawSegments.map((segment) => {
+      const type = String(segment?.type ?? segment?.event_type ?? 'unknown');
+      const tripIds = Array.isArray(segment?.trip_ids)
+        ? segment.trip_ids
+          .map((tripId: unknown) => this.toPositiveInteger(tripId))
+          .filter((tripId): tripId is number => tripId != null)
+        : [];
+      const tripDetails = this.sortOperationalTrips(
+        tripIds
+          .map((tripId) => tripDetailsById.get(tripId))
+          .filter((trip): trip is Record<string, any> => !!trip),
+      );
+      const inferredBlockId = this.resolveSegmentBlockId(segment, tripDetails);
+      const directions = [...new Set(tripDetails.map((trip) => trip.direction).filter(Boolean))];
+      const tripGroupIds = [...new Set(
+        tripDetails
+          .map((trip) => this.toPositiveInteger(trip.trip_group_id))
+          .filter((value): value is number => value != null),
+      )];
+      const tripCount = tripIds.length;
+      const bundleEventType = type === 'commercial_trip' && tripCount > 1
+        ? 'commercial_trip_bundle'
+        : type;
+      const eventScope = typeof segment?.event_scope === 'string' && segment.event_scope.trim().length > 0
+        ? segment.event_scope.trim()
+        : (type === 'commercial_trip' || type === 'deadhead' ? 'driver_vehicle' : 'driver');
+      const normalizedSegment: Record<string, any> = {
+        ...segment,
+        type,
+        event_type: type,
+        block_id: inferredBlockId,
+        vehicle_id: inferredBlockId,
+        event_scope: eventScope,
+        trip_ids: tripIds,
+        trip_count: tripCount,
+        trip_directions: directions,
+        trip_group_ids: tripGroupIds,
+      };
+
+      if (bundleEventType !== type) {
+        normalizedSegment.bundle_event_type = bundleEventType;
+        normalizedSegment.explanation = normalizedSegment.explanation
+          ?? `Segmento operacional agrupado com ${tripCount} viagens reais.`;
+      }
+
+      return normalizedSegment;
+    });
+
+    const normalizedSegments: Record<string, any>[] = [];
+    segments.forEach((segment, index) => {
+      const segmentType = String(segment.type ?? segment.event_type ?? 'unknown');
+      const fromBlockId = this.toPositiveInteger(segment.from_block_id);
+      const toBlockId = this.toPositiveInteger(segment.to_block_id);
+      if (
+        fromBlockId != null
+        && toBlockId != null
+        && fromBlockId !== toBlockId
+        && segmentType !== 'driver_vehicle_change'
+      ) {
+        normalizedSegments.push(this.buildDriverVehicleChangeSegment(segment, fromBlockId, toBlockId));
+      }
+
+      normalizedSegments.push(segment);
+
+      const nextSegment = segments[index + 1];
+      if (!nextSegment) {
+        return;
+      }
+      const nextType = String(nextSegment.type ?? nextSegment.event_type ?? 'unknown');
+      if (segmentType !== 'commercial_trip' || nextType !== 'commercial_trip') {
+        return;
+      }
+
+      const currentBlockId = this.toPositiveInteger(segment.block_id);
+      const nextBlockId = this.toPositiveInteger(nextSegment.block_id);
+      const currentEnd = Number(segment.end ?? segment.start ?? 0);
+      const nextStart = Number(nextSegment.start ?? currentEnd);
+      if (
+        currentBlockId != null
+        && nextBlockId != null
+        && currentBlockId !== nextBlockId
+        && nextStart <= currentEnd
+      ) {
+        normalizedSegments.push(this.buildDriverVehicleChangeSegment(segment, currentBlockId, nextBlockId));
+      }
+    });
+
+    return normalizedSegments;
+  }
+
+  private buildDetailedDutyTripAssignments(
+    dutyId: number,
+    dutyTripIds: number[],
+    dutyTimeSegments: Record<string, any>[],
+    tripDetailsById: Map<number, any>,
+  ): Record<string, any>[] {
+    const detailedTrips: Record<string, any>[] = [];
+    const seenTripIds = new Set<number>();
+
+    const appendTrip = (
+      trip: Record<string, any>,
+      segmentSequence: number | null,
+      sequenceInBundle: number,
+      bundleTripCount: number,
+      bundleType: string,
+    ) => {
+      const sourceTripId = this.toPositiveInteger(trip.source_trip_id ?? trip.id);
+      if (sourceTripId == null || seenTripIds.has(sourceTripId)) {
+        return;
+      }
+      seenTripIds.add(sourceTripId);
+      detailedTrips.push({
+        ...trip,
+        trip_id: trip.trip_id ?? trip.id,
+        duty_id: dutyId,
+        driver_id: dutyId,
+        event_scope: 'trip',
+        sequence_in_duty: detailedTrips.length + 1,
+        segment_sequence: segmentSequence,
+        sequence_in_bundle: sequenceInBundle,
+        bundle_trip_count: bundleTripCount,
+        bundle_event_type: bundleType,
+        is_paired: bundleTripCount > 1,
+      });
+    };
+
+    dutyTimeSegments.forEach((segment, index) => {
+      const segmentType = String(segment.type ?? segment.event_type ?? 'unknown');
+      if (segmentType !== 'commercial_trip') {
+        return;
+      }
+      const segmentTrips = this.sortOperationalTrips(
+        (segment.trip_ids || [])
+          .map((tripId: unknown) => this.toPositiveInteger(tripId))
+          .filter((tripId): tripId is number => tripId != null)
+          .map((tripId) => tripDetailsById.get(tripId))
+          .filter((trip): trip is Record<string, any> => !!trip),
+      );
+      segmentTrips.forEach((trip, tripIndex) => {
+        appendTrip(
+          trip,
+          index + 1,
+          tripIndex + 1,
+          segmentTrips.length,
+          String(segment.bundle_event_type ?? segment.type ?? 'commercial_trip'),
+        );
+      });
+    });
+
+    this.sortOperationalTrips(
+      dutyTripIds
+        .map((tripId) => tripDetailsById.get(tripId))
+        .filter((trip): trip is Record<string, any> => !!trip),
+    ).forEach((trip) => {
+      appendTrip(trip, null, 1, 1, 'commercial_trip');
+    });
+
+    return detailedTrips;
+  }
+
+  private buildDriverVehicleChangeSegment(segment: Record<string, any>, fromBlockId: number, toBlockId: number) {
+    const timestamp = Number(segment.start ?? segment.end ?? 0);
+    return {
+      type: 'driver_vehicle_change',
+      event_type: 'driver_vehicle_change',
+      event_scope: 'driver',
+      start: timestamp,
+      end: timestamp,
+      duration: 0,
+      location: segment.location ?? segment.location_start ?? segment.location_end ?? null,
+      from_block_id: fromBlockId,
+      to_block_id: toBlockId,
+      from_vehicle_id: fromBlockId,
+      to_vehicle_id: toBlockId,
+      explanation: 'Motorista troca de veículo entre blocos distintos da mesma jornada.',
+    };
+  }
+
+  private resolveSegmentBlockId(segment: Record<string, any>, tripDetails: Record<string, any>[]): number | null {
+    const explicitBlockId = this.toPositiveInteger(segment.block_id);
+    if (explicitBlockId != null) {
+      return explicitBlockId;
+    }
+
+    const fromBlockId = this.toPositiveInteger(segment.from_block_id);
+    if (fromBlockId != null) {
+      return fromBlockId;
+    }
+
+    const toBlockId = this.toPositiveInteger(segment.to_block_id);
+    if (toBlockId != null) {
+      return toBlockId;
+    }
+
+    for (const trip of tripDetails) {
+      const tripBlockId = this.toPositiveInteger(trip.block_id ?? trip.vehicle_id);
+      if (tripBlockId != null) {
+        return tripBlockId;
+      }
+    }
+
+    return null;
+  }
+
+  private sortOperationalTrips(trips: Record<string, any>[]): Record<string, any>[] {
+    return [...trips].sort((left, right) => {
+      const startDiff = Number(left.start_time ?? 0) - Number(right.start_time ?? 0);
+      if (startDiff !== 0) {
+        return startDiff;
+      }
+
+      const endDiff = Number(left.end_time ?? 0) - Number(right.end_time ?? 0);
+      if (endDiff !== 0) {
+        return endDiff;
+      }
+
+      return Number(left.id ?? 0) - Number(right.id ?? 0);
+    });
   }
 
   private summarizeTripGroupPayload(trips: Trip[]): Record<string, number> {

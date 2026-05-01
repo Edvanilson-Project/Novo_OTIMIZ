@@ -205,7 +205,7 @@ class TestHybridPipelineBudgetGuards:
             captured["ilp_called"] += 1
             return CSPSolution(duties=[], algorithm="set_partitioning")
 
-        def fake_joint_swap(csp_sol, vsp_result, source_trips, cct_params, kwargs):
+        def fake_joint_swap(csp_sol, vsp_result, source_trips, vehicle_types, cct_params, kwargs):
             return csp_sol, vsp_result
 
         monkeypatch.setattr("src.algorithms.csp.greedy.GreedyCSP.solve", fake_greedy_solve)

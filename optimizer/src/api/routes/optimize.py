@@ -62,7 +62,11 @@ def _to_vt(v) -> VehicleType:
 
 def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
     """Constrói OptimizeResponse a partir do dict retornado pela task Celery."""
-    meta = raw.get("meta") or {}
+    meta = dict(raw.get("meta") or {})
+    reproducibility = raw.get("reproducibility") or meta.get("reproducibility") or {}
+    performance = raw.get("performance") or meta.get("performance") or {}
+    meta.setdefault("reproducibility", reproducibility)
+    meta.setdefault("performance", performance)
     return OptimizeResponse(
         status="ok",
         vehicles=raw["vehicles"],
@@ -88,8 +92,9 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
         solver_explanation=raw.get("solver_explanation") or {},
         phase_summary=raw.get("phase_summary") or {},
         trip_group_audit=raw.get("trip_group_audit") or {},
-        reproducibility=raw.get("reproducibility") or {},
-        performance=meta.get("performance") or {},
+        operational_time_reports=raw.get("operational_time_reports") or meta.get("operational_time_reports") or {},
+        reproducibility=reproducibility,
+        performance=performance,
         parameter_effect_report=raw.get("parameter_effect_report") or meta.get("parameter_effect_report") or {},
         chosen_scenario=raw.get("chosen_scenario") or meta.get("chosen_scenario"),
         rejected_scenarios=raw.get("rejected_scenarios") or meta.get("rejected_scenarios") or [],

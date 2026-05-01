@@ -197,6 +197,21 @@ describe('OptimizationService polling', () => {
     expect(vsp.group_infeasibility_mode).toBe('production');
   });
 
+  it('normaliza percentuais legados antes de montar os parametros CCT', () => {
+    const cct = (service as any).buildCctParams({
+      waiting_time_pay_pct: 30,
+      holiday_extra_pct: 100,
+      nocturnal_extra_pct: 20,
+      max_driving_time_minutes: 240,
+      meal_break_minutes: 15,
+      max_shift_minutes: 840,
+    });
+
+    expect(cct.waiting_time_pay_pct).toBeCloseTo(0.3);
+    expect(cct.holiday_extra_pct).toBeCloseTo(1);
+    expect(cct.nocturnal_extra_pct).toBeCloseTo(0.2);
+  });
+
   it('envia trip_group_id bruto e delega a inferencia ao optimizer', async () => {
     const tripRepo = {
       find: jest.fn().mockResolvedValue([
