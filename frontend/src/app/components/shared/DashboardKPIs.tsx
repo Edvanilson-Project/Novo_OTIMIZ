@@ -99,15 +99,24 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
   const theme = useTheme();
 
   const numVehicles = schedule?.blocks?.length || 0;
-  const totalCost = schedule?.totalCost || 0;
-  const cctViolations = schedule?.cctViolations || 0;
+  const totalCost = schedule?.totalCost ?? schedule?.resultSummary?.totalCost ?? 0;
+  const hardIssueCount = schedule?.hardIssueCount ?? schedule?.hard_issue_count ?? schedule?.resultSummary?.hardIssueCount ?? 0;
+  const softIssueCount = schedule?.softIssueCount ?? schedule?.soft_issue_count ?? schedule?.resultSummary?.softIssueCount ?? 0;
+  const splitGroups =
+    schedule?.trip_group_audit?.split_groups ??
+    schedule?.tripGroupAudit?.split_groups ??
+    schedule?.resultSummary?.tripGroupAudit?.split_groups ??
+    schedule?.resultSummary?.trip_group_audit?.split_groups ??
+    0;
 
   let totalMinutes = 0;
-  let totalTrips = 0;
+  let totalTrips = schedule?.totalTrips ?? schedule?.resultSummary?.total_trips ?? 0;
   schedule?.blocks?.forEach((b: any) => {
     // Suporta tanto b.trips (hidratado) quanto b.metadata?.trips (legado)
     const trips = b.trips || b.metadata?.trips || [];
-    totalTrips += trips.length;
+    if (!schedule?.totalTrips && !schedule?.resultSummary?.total_trips) {
+      totalTrips += trips.length;
+    }
     trips.forEach((t: any) => {
       const start = t.start_time ?? t.startTime ?? 0;
       const end = t.end_time ?? t.endTime ?? 0;
@@ -160,12 +169,31 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
         <KPICard
-          title="Violações CCT"
-          value={`${cctViolations} Alerta${cctViolations !== 1 ? 's' : ''}`}
-          changeKey={`violations-${cctViolations}-${scheduleVersion}`}
+          title="Hard Issues"
+          value={`${hardIssueCount}`}
+          changeKey={`hard-issues-${hardIssueCount}-${scheduleVersion}`}
           icon={<IconAlertTriangle size="24" />}
-          color={cctViolations > 0 ? theme.palette.error.main : theme.palette.text.secondary}
-          isError={cctViolations > 0}
+          color={hardIssueCount > 0 ? theme.palette.error.main : theme.palette.text.secondary}
+          isError={hardIssueCount > 0}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+        <KPICard
+          title="Soft Issues"
+          value={`${softIssueCount}`}
+          changeKey={`soft-issues-${softIssueCount}-${scheduleVersion}`}
+          icon={<IconAlertTriangle size="24" />}
+          color={softIssueCount > 0 ? theme.palette.warning.main : theme.palette.text.secondary}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+        <KPICard
+          title="Trip Groups Split"
+          value={`${splitGroups}`}
+          changeKey={`split-groups-${splitGroups}-${scheduleVersion}`}
+          icon={<IconRoute size="24" />}
+          color={splitGroups > 0 ? theme.palette.error.main : theme.palette.success.main}
+          isError={splitGroups > 0}
         />
       </Grid>
     </Grid>

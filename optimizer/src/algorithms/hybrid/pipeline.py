@@ -590,4 +590,13 @@ def _vsp_hard_issue_count(sol, vsp_params=None) -> int:
         if same_depot_required and trips:
             if trips[0].depot_id is not None and trips[-1].depot_id is not None and trips[0].depot_id != trips[-1].depot_id:
                 issues += 1
+    if bool(vsp_params.get("hard_pairing_vehicle_level", False)):
+        trip_group_blocks: dict[int, set[int]] = {}
+        for block in getattr(sol, "blocks", []):
+            for trip in getattr(block, "trips", []):
+                group_id = getattr(trip, "trip_group_id", None)
+                if group_id is None:
+                    continue
+                trip_group_blocks.setdefault(int(group_id), set()).add(int(block.id))
+        issues += sum(1 for block_ids in trip_group_blocks.values() if len(block_ids) > 1)
     return issues

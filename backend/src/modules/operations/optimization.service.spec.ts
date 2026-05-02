@@ -155,6 +155,8 @@ describe('OptimizationService polling', () => {
       group_infeasibility_mode: 'production',
       max_driving_time_minutes: 300,
       min_layover_minutes: 18,
+      pullout_counts_in_driver_shift: false,
+      pullback_counts_in_driver_shift: false,
       max_shift_minutes: 720,
       max_vehicles: 12,
       ilp_timeout_seconds: 45,
@@ -173,6 +175,8 @@ describe('OptimizationService polling', () => {
     expect(cct.operator_single_vehicle_only).toBe(true);
     expect(cct.max_driving_minutes).toBe(300);
     expect(cct.enforce_min_interval).toBe(true);
+    expect(cct.pullout_counts_in_driver_shift).toBe(false);
+    expect(cct.pullback_counts_in_driver_shift).toBe(false);
     expect(cct.strict_zero_gap_validation).toBe(true);
     expect(cct.strict_operational_mode).toBe(true);
     expect(cct.strict_hard_constraints).toBe(true);
@@ -485,6 +489,12 @@ describe('OptimizationService polling', () => {
         createdAt: new Date('2026-04-30T11:20:40.357Z'),
         updatedAt: new Date('2026-04-30T11:20:50.437Z'),
         metadata: {
+          hard_issue_count: 0,
+          soft_issue_count: 1,
+          trip_group_audit: {
+            split_groups: 0,
+            same_block_groups: 149,
+          },
           operational_quality_mode: 'optimized',
           operational_quality_decision: {
             mode: 'optimized',
@@ -497,15 +507,36 @@ describe('OptimizationService polling', () => {
         },
       }),
     };
+    const mockedBlockRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+    const mockedDutyRepo = {
+      find: jest.fn().mockResolvedValue([
+        {
+          dutyId: 463,
+          tripIds: [],
+          cost: 123,
+          metadata: {
+            start_time: 315,
+            end_time: 829,
+            work_time: 296,
+            spread_time: 514,
+            duty_time_segments: [],
+            operational_time_report: { mandatory_rest_required: true },
+            quality_metrics: { soft_issue_count: 1 },
+          },
+        },
+      ]),
+    };
     const localService = new OptimizationService(
       { find: jest.fn() } as any,
       {} as any,
       {} as any,
       scheduleRepoLocal as any,
       {
-        getRepository: jest.fn().mockReturnValue({
-          find: jest.fn().mockResolvedValue([]),
-        }),
+        getRepository: jest.fn()
+          .mockReturnValueOnce(mockedBlockRepo)
+          .mockReturnValueOnce(mockedDutyRepo),
       } as any,
       gateway as any,
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
@@ -526,6 +557,39 @@ describe('OptimizationService polling', () => {
       expect.objectContaining({
         mode: 'optimized',
         chosen_scenario: 'lowest_cost',
+      }),
+    );
+    expect(latest.resultSummary.hardIssueCount).toBe(0);
+    expect(latest.resultSummary.softIssueCount).toBe(1);
+    expect(latest.resultSummary.tripGroupAudit).toEqual(
+      expect.objectContaining({
+        split_groups: 0,
+        same_block_groups: 149,
+      }),
+    );
+    expect(latest.chosen_scenario).toBe('lowest_cost');
+    expect(latest.operational_quality_mode).toBe('optimized');
+    expect(latest.hardIssueCount).toBe(0);
+    expect(latest.softIssueCount).toBe(1);
+    expect(latest.trip_group_audit).toEqual(
+      expect.objectContaining({
+        split_groups: 0,
+        same_block_groups: 149,
+      }),
+    );
+    expect(latest.operational_quality_decision).toEqual(
+      expect.objectContaining({
+        mode: 'optimized',
+        chosen_scenario: 'lowest_cost',
+      }),
+    );
+    expect(latest.duties).toHaveLength(1);
+    expect(latest.duties[0]).toEqual(
+      expect.objectContaining({
+        duty_id: 463,
+        operational_time_report: { mandatory_rest_required: true },
+        quality_metrics: { soft_issue_count: 1 },
+        duty_time_segments: [],
       }),
     );
   });

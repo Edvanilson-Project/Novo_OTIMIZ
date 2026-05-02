@@ -63,6 +63,8 @@ class BaseOptimizationConfig(BaseModel):
     min_connection_time: Optional[int] = Field(None, description="Alias operacional para min_layover_minutes")
     pullout_minutes: int = Field(10, description="Tempo de soltura (garagem -> primeiro terminal)")
     pullback_minutes: int = Field(10, description="Tempo de recolhimento (último terminal -> garagem)")
+    pullout_counts_in_driver_shift: bool = Field(True, description="Inclui o pull-out no spread e no início efetivo da jornada")
+    pullback_counts_in_driver_shift: bool = Field(True, description="Inclui o pull-back no spread e no fim efetivo da jornada")
     connection_tolerance_minutes: int = Field(0, description="Tolerância para conexões apertadas")
     allow_relief_points: bool = Field(False, description="Permitir trocas de motorista em pontos de rendição na rota")
     enforce_same_depot_start_end: bool = Field(False, description="Forçar início e fim da jornada na mesma garagem")
@@ -245,6 +247,8 @@ class CctParamsInput(BaseModel):
     min_connection_time: Optional[int] = None
     pullout_minutes: Optional[int] = None
     pullback_minutes: Optional[int] = None
+    pullout_counts_in_driver_shift: Optional[bool] = None
+    pullback_counts_in_driver_shift: Optional[bool] = None
     idle_time_is_paid: Optional[bool] = None
     waiting_time_pay_pct: Optional[float] = None
     min_guaranteed_work_minutes: Optional[int] = None

@@ -199,13 +199,14 @@ def build_duty_operational_time_report(
 
     has_valid_mandatory_rest = mandatory_rest_time > 0
     invalid_rest_position = bool(required_rest > 0 and (start_buffer >= required_rest or end_buffer >= required_rest))
+    productive_minutes = int(duty.work_time or total_drive)
+    max_continuous_drive = int(duty.meta.get("max_continuous_drive_minutes", 0) or 0)
     mandatory_rest_required = bool(
         required_rest > 0
         and (
             has_valid_mandatory_rest
-            or total_drive > max(360, mandatory_break_after)
-            or int(duty.meta.get("max_continuous_drive_minutes", 0) or 0) > mandatory_break_after
-            or int(duty.spread_time or 0) > max(360, mandatory_break_after)
+            or productive_minutes > mandatory_break_after
+            or max_continuous_drive > mandatory_break_after
         )
     )
 

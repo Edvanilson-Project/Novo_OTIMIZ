@@ -51,6 +51,8 @@ CSV_COLUMNS = [
     "block_id",
     "duty_id",
     "driver_id",
+    "driver_display_name",
+    "operator_not_assigned",
     "vehicle_id",
     "from_vehicle_id",
     "to_vehicle_id",
@@ -58,6 +60,8 @@ CSV_COLUMNS = [
     "event_type",
     "event_label",
     "event_scope",
+    "duty_start",
+    "duty_end",
     "start_time",
     "end_time",
     "duration_minutes",
@@ -73,8 +77,13 @@ CSV_COLUMNS = [
     "is_pullout",
     "is_pullback",
     "rest_valid",
+    "mandatory_rest_required",
+    "has_valid_mandatory_rest",
     "rule_code",
     "violation_code",
+    "issue_severity",
+    "issue_codes",
+    "issue_explanation",
     "explanation",
 ]
 
@@ -108,6 +117,10 @@ DRIVER_COLUMNS = [
     "schedule_id",
     "duty_id",
     "driver_id",
+    "driver_display_name",
+    "operator_not_assigned",
+    "duty_start",
+    "duty_end",
     "sequence",
     "event_type",
     "event_label",
@@ -127,8 +140,35 @@ DRIVER_COLUMNS = [
     "to_vehicle_id",
     "sequence_in_duty",
     "sequence_in_bundle",
+    "mandatory_rest_required",
+    "has_valid_mandatory_rest",
+    "issue_severity",
+    "issue_codes",
+    "issue_explanation",
     "explanation",
 ]
+
+
+def build_duty_export_context(duty: Dict[str, Any]) -> Dict[str, Any]:
+    duty_id = int(duty["duty_id"])
+    metadata = duty.get("metadata") or {}
+    report = duty.get("operational_time_report") or metadata.get("operational_time_report") or {}
+    violations = [str(code) for code in report.get("violations") or [] if code]
+    operator_not_assigned = bool(report.get("operator_not_assigned", True))
+    duty_start_raw = report.get("duty_start", metadata.get("start_time"))
+    duty_end_raw = report.get("duty_end", metadata.get("end_time"))
+    issue_explanation = str(report.get("suggestion") or report.get("user_explanation") or "").strip()
+    return {
+        "driver_display_name": f"Operador não atribuído (D{duty_id})" if operator_not_assigned else f"Jornada D{duty_id}",
+        "operator_not_assigned": operator_not_assigned,
+        "duty_start": min_to_hhmm(int(duty_start_raw)) if duty_start_raw not in (None, "") else "",
+        "duty_end": min_to_hhmm(int(duty_end_raw)) if duty_end_raw not in (None, "") else "",
+        "mandatory_rest_required": bool(report.get("mandatory_rest_required", False)),
+        "has_valid_mandatory_rest": bool(report.get("has_valid_mandatory_rest", False)),
+        "issue_severity": "soft" if violations else "",
+        "issue_codes": ";".join(violations),
+        "issue_explanation": issue_explanation,
+    }
 
 
 def min_to_hhmm(minutes: int) -> str:
@@ -426,15 +466,32 @@ def fetch_trip_details(
         raw_end = int(row[8])
         end_time = raw_end if raw_end >= start_time else raw_end + 1440
         block_detail = trip_block_details.get(source_trip_id, {})
+        raw_line_id = row[2]
+        line_code = row[3]
+        raw_trip_group_id = row[5]
+        pair_id = row[4]
+        resolved_line_id = raw_line_id
+        if resolved_line_id in (None, "") and line_code not in (None, ""):
+            try:
+                resolved_line_id = int(str(line_code))
+            except (TypeError, ValueError):
+                resolved_line_id = raw_line_id
+
+        resolved_trip_group_id = raw_trip_group_id
+        if resolved_trip_group_id in (None, "") and isinstance(pair_id, str) and pair_id.upper().startswith("P"):
+            suffix = pair_id[1:]
+            if suffix.isdigit():
+                resolved_trip_group_id = int(suffix)
+
         detail = {
             "id": source_trip_id,
             "source_trip_id": source_trip_id,
             "trip_id": public_trip_id,
             "public_trip_id": public_trip_id,
-            "line_id": row[2],
-            "line_code": row[3],
-            "pair_id": row[4],
-            "trip_group_id": row[5],
+            "line_id": resolved_line_id,
+            "line_code": line_code,
+            "pair_id": pair_id,
+            "trip_group_id": resolved_trip_group_id,
             "direction": row[6],
             "start_time": start_time,
             "end_time": end_time,
@@ -461,6 +518,7 @@ def build_rows_from_segments(
     """Build CSV rows from solver segments."""
     rows = []
     duty_id = duty["duty_id"]
+    duty_context = build_duty_export_context(duty)
 
     for idx, seg in enumerate(segments):
         base_event_type = seg.get("type", seg.get("event_type", "unknown"))
@@ -496,6 +554,7 @@ def build_rows_from_segments(
             "block_id": seg_block_id,
             "duty_id": duty_id,
             "driver_id": str(duty_id),
+            **duty_context,
             "vehicle_id": seg_block_id if event_scope == "driver_vehicle" else "",
             "from_vehicle_id": seg.get("from_vehicle_id", seg.get("from_block_id", "")),
             "to_vehicle_id": seg.get("to_vehicle_id", seg.get("to_block_id", "")),
@@ -537,6 +596,7 @@ def build_rows_fallback(
     duty_id = duty["duty_id"]
     trip_ids = duty["trip_ids"]
     fallback_explanation = "Classificação inferida pelo frontend por ausência de segmentos do solver"
+    duty_context = build_duty_export_context(duty)
 
     if not trip_ids:
         return rows
@@ -574,6 +634,7 @@ def build_rows_fallback(
             "block_id": block_id,
             "duty_id": duty_id,
             "driver_id": str(duty_id),
+            **duty_context,
             "vehicle_id": block_id,
             "from_vehicle_id": "",
             "to_vehicle_id": "",
@@ -615,6 +676,7 @@ def build_rows_fallback(
                     "block_id": block_id,
                     "duty_id": duty_id,
                     "driver_id": str(duty_id),
+                    **duty_context,
                     "vehicle_id": "",
                     "from_vehicle_id": "",
                     "to_vehicle_id": "",
@@ -689,6 +751,7 @@ def build_driver_rows(
 ) -> List[Dict[str, Any]]:
     duty_id = int(duty["duty_id"])
     rows: List[Dict[str, Any]] = []
+    duty_context = build_duty_export_context(duty)
     detailed_by_segment: Dict[int, List[Dict[str, Any]]] = {}
     for trip in detailed_trips:
         segment_sequence = trip.get("segment_sequence")
@@ -706,6 +769,7 @@ def build_driver_rows(
                         "schedule_id": schedule_id,
                         "duty_id": duty_id,
                         "driver_id": duty_id,
+                        **duty_context,
                         "sequence": sequence,
                         "event_type": "commercial_trip",
                         "event_label": OPERATIONAL_EVENT_LABELS["commercial_trip"],
@@ -736,6 +800,7 @@ def build_driver_rows(
             "schedule_id": schedule_id,
             "duty_id": duty_id,
             "driver_id": duty_id,
+            **duty_context,
             "sequence": sequence,
             "event_type": event_type,
             "event_label": OPERATIONAL_EVENT_LABELS.get(event_type, event_type),

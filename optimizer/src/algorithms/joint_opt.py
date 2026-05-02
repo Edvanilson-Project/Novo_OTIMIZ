@@ -377,11 +377,21 @@ def _compute_global_score(metrics: Dict[str, Any]) -> float:
     )
     return float(score)
 
-def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+def _is_better_post_opt_candidate(
+    current: Dict[str, Any],
+    candidate: Dict[str, Any],
+    *,
+    enforce_trip_group_integrity: bool = False,
+) -> bool:
     """Usa o Score Global Unificado para decidir se uma solução é melhor."""
     if candidate["unassigned_trips"] > current["unassigned_trips"]:
         return False
     if candidate["violations"] > current["violations"]:
+        return False
+    if (
+        enforce_trip_group_integrity
+        and candidate.get("trip_group_split_groups", 0) > current.get("trip_group_split_groups", 0)
+    ):
         return False
     if (
         candidate.get("trip_group_split_groups", 0) < current.get("trip_group_split_groups", 0)
@@ -1288,6 +1298,8 @@ def joint_duty_vehicle_swap(
                 "details": {"accepted_lns": lns_stats["accepted"], "improvements": lns_stats["improvements"]}
             })
 
+        enforce_trip_group_integrity = bool(vsp_params.get("hard_pairing_vehicle_level", False))
+
         for candidate in candidate_vsps:
             candidate_vsp = candidate["vsp"]
             signature = _vsp_signature(candidate_vsp)
@@ -1313,7 +1325,11 @@ def joint_duty_vehicle_swap(
             c_score = _compute_global_score(candidate_metrics)
             b_score = _compute_global_score(best_metrics)
             
-            if c_score < b_score:
+            if _is_better_post_opt_candidate(
+                best_metrics,
+                candidate_metrics,
+                enforce_trip_group_integrity=enforce_trip_group_integrity,
+            ):
                 logger.info(
                     "[POST-OPT] Melhoria encontrada via %s: Score %.0f -> %.0f (Veh: %d, Crew: %d, Viol: %d)",
                     candidate["phase"], b_score, c_score,
@@ -1344,7 +1360,11 @@ def joint_duty_vehicle_swap(
                 evaluated_signatures.add(fb_sig)
                 fb_csp = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(fb_vsp.blocks, trips)
                 fb_metrics = _build_post_opt_metrics(fb_csp, fb_vsp, min_work, trips, vsp_params)
-                if _is_better_post_opt_candidate(best_metrics, fb_metrics):
+                if _is_better_post_opt_candidate(
+                    best_metrics,
+                    fb_metrics,
+                    enforce_trip_group_integrity=enforce_trip_group_integrity,
+                ):
                     best_csp = fb_csp
                     best_vsp = fb_vsp
                     best_metrics = fb_metrics

@@ -146,6 +146,18 @@ class TestOptimizeRequestSchema:
         )
         assert req.cct_params.connection_tolerance_minutes == 5
 
+    def test_cct_params_preserve_pull_counts_flags(self):
+        req = OptimizeRequest(
+            trips=[TripInput(**make_trip_dict())],
+            algorithm="hybrid_pipeline",
+            cct_params=CctParamsInput(
+                pullout_counts_in_driver_shift=False,
+                pullback_counts_in_driver_shift=False,
+            ),
+        )
+        assert req.cct_params.pullout_counts_in_driver_shift is False
+        assert req.cct_params.pullback_counts_in_driver_shift is False
+
     def test_vsp_params_allow_multi_line(self):
         req = OptimizeRequest(
             trips=[TripInput(**make_trip_dict())],

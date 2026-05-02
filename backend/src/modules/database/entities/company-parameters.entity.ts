@@ -114,6 +114,12 @@ export class CompanyParameters extends TenantBaseEntity {
   pullback_minutes: number;
 
   @Column('boolean', { nullable: true })
+  pullout_counts_in_driver_shift: boolean;
+
+  @Column('boolean', { nullable: true })
+  pullback_counts_in_driver_shift: boolean;
+
+  @Column('boolean', { nullable: true })
   idle_time_is_paid: boolean;
 
   @Column('float', { nullable: true })

@@ -101,6 +101,26 @@ def test_normal_break_is_separate_from_mandatory_rest():
     assert report["mandatory_rest_time"] == 0
 
 
+def test_long_spread_with_low_work_does_not_require_mandatory_rest():
+    block_a = _block(1, _trip(1, 6 * 60, 7 * 60 + 40, origin=1, dest=2))
+    block_b = _block(2, _trip(2, 11 * 60, 12 * 60 + 40, origin=2, dest=3))
+    block_c = _block(3, _trip(3, 13 * 60, 13 * 60 + 20, origin=3, dest=1))
+    duty = _duty([block_a, block_b, block_c])
+
+    report = build_duty_operational_time_report(
+        duty,
+        min_break_minutes=30,
+        meal_break_minutes=30,
+        mandatory_break_after_minutes=240,
+    )
+
+    assert duty.spread_time > 360
+    assert report["work_time"] == 220
+    assert report["mandatory_rest_required"] is False
+    assert report["has_valid_mandatory_rest"] is False
+    assert "MANDATORY_REST_MISSING" not in report["violations"]
+
+
 def test_mandatory_rest_requires_mid_duty_gap_and_work_before_it():
     block_a = _block(1, _trip(1, 6 * 60, 9 * 60, origin=1, dest=2))
     block_b = _block(2, _trip(2, 10 * 60, 12 * 60, origin=2, dest=3))

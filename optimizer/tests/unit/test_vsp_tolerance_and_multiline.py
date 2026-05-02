@@ -14,6 +14,7 @@ from src.algorithms.vsp.assignment import AssignmentVSP
 from src.algorithms.vsp.mcnf import MCNFVSP
 from src.algorithms.vsp.greedy import build_preferred_pairs, pairing_stats
 from src.algorithms.joint_opt import _try_merge_vsp_blocks
+from src.algorithms.hybrid.pipeline import _vsp_hard_issue_count
 
 
 # ─── Helpers ─────────────────────────────────────────────
@@ -140,6 +141,56 @@ class TestMCNFVSPConnectionTolerance:
         solver = MCNFVSP(vsp_params={"min_layover_minutes": 5})
         sol = solver.solve(trips, [])
         assert len(sol.unassigned_trips) == 0
+
+    def test_hard_pairing_vehicle_level_forces_pair_when_soft_mode_splits(self):
+        trips = [
+            make_trip(1, 100, 130, 1, 2, deadheads={1: 0, 2: 0, 3: 0, 4: 0}, trip_group_id=701),
+            make_trip(2, 200, 230, 2, 1, deadheads={1: 0, 2: 0, 3: 0, 4: 0}, trip_group_id=701),
+            make_trip(3, 131, 160, 2, 3, deadheads={1: 0, 2: 0, 3: 0, 4: 0}),
+            make_trip(4, 171, 199, 4, 2, deadheads={1: 0, 2: 0, 3: 0, 4: 0}),
+        ]
+        preferred_pairs = build_preferred_pairs(trips, min_layover=1, max_pair_window=120)
+
+        soft = MCNFVSP(
+            vsp_params={
+                "min_layover_minutes": 1,
+                "fixed_vehicle_activation_cost": 800.0,
+                "preserve_preferred_pairs": True,
+                "preferred_pair_window_minutes": 120,
+                "pair_break_penalty": 100.0,
+            }
+        ).solve(trips, [])
+        hard = MCNFVSP(
+            vsp_params={
+                "min_layover_minutes": 1,
+                "fixed_vehicle_activation_cost": 800.0,
+                "preserve_preferred_pairs": True,
+                "preferred_pair_window_minutes": 120,
+                "pair_break_penalty": 100.0,
+                "hard_pairing_vehicle_level": True,
+                "hard_pairing_penalty": 10000.0,
+            }
+        ).solve(trips, [])
+
+        soft_stats = pairing_stats(soft.blocks, preferred_pairs)
+        hard_stats = pairing_stats(hard.blocks, preferred_pairs)
+
+        assert soft_stats["preferred_pair_breaks"] == 1
+        assert hard_stats["preferred_pair_breaks"] == 0
+        assert any([trip.id for trip in block.trips] == [1, 2] for block in hard.blocks)
+
+    def test_hard_pairing_split_counts_as_vsp_hard_issue(self):
+        trips = [
+            make_trip(1, 100, 130, 1, 2, deadheads={1: 0, 2: 0}, trip_group_id=701),
+            make_trip(2, 200, 230, 2, 1, deadheads={1: 0, 2: 0}, trip_group_id=701),
+        ]
+        solution = make_vsp_solution([
+            make_block(1, [trips[0]]),
+            make_block(2, [trips[1]]),
+        ])
+
+        assert _vsp_hard_issue_count(solution, {"hard_pairing_vehicle_level": False}) == 0
+        assert _vsp_hard_issue_count(solution, {"hard_pairing_vehicle_level": True}) == 1
 
 
 class TestPreferredPairPressureInBaselineVSP:

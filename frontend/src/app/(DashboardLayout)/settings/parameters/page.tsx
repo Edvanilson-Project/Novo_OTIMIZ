@@ -111,6 +111,8 @@ interface CompanyParameters {
   min_layover_minutes: number | null;
   pullout_minutes: number | null;
   pullback_minutes: number | null;
+  pullout_counts_in_driver_shift: boolean | null;
+  pullback_counts_in_driver_shift: boolean | null;
   idle_time_is_paid: boolean | null;
   waiting_time_pay_pct: number | null;
   min_guaranteed_work_minutes: number | null;
@@ -219,6 +221,8 @@ const DEFAULTS: CompanyParameters = {
   min_layover_minutes: null,
   pullout_minutes: null,
   pullback_minutes: null,
+  pullout_counts_in_driver_shift: true,
+  pullback_counts_in_driver_shift: true,
   idle_time_is_paid: null,
   waiting_time_pay_pct: null,
   min_guaranteed_work_minutes: null,
@@ -262,6 +266,8 @@ const BOOLEAN_DEFAULTS: Partial<Record<keyof CompanyParameters, boolean>> = {
   force_round_trip: true,
   allow_vehicle_swap: false,
   preserve_preferred_pairs: true,
+  pullout_counts_in_driver_shift: true,
+  pullback_counts_in_driver_shift: true,
   allow_relief_points: false,
   enforce_same_depot_start_end: false,
   operator_change_terminals_only: true,
@@ -723,6 +729,12 @@ export default function ParametersPage() {
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6, md: 4 }}>
                   {numField(params, setParams, "pullback_minutes", "Tempo Pull-back", "Tempo para retorno do veiculo a garagem", "min")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "pullout_counts_in_driver_shift", "Pull-out Conta na Jornada", "Inclui o tempo de pull-out no spread e no inicio efetivo da jornada do motorista")}
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6 }}>
+                  {boolField(params, setParams, "pullback_counts_in_driver_shift", "Pull-back Conta na Jornada", "Inclui o tempo de pull-back no spread e no fim efetivo da jornada do motorista")}
                 </Grid>
                 <Grid size={{ xs: 12, sm: 6 }}>
                   {boolField(params, setParams, "force_round_trip", "Forcar Viagem Ida e Volta", "Obriga que cada bloco tenha viagens de ida e volta")}

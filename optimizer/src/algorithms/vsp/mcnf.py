@@ -259,6 +259,12 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
         pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
         paired_trip_bonus = float(self._p("paired_trip_bonus", fixed_cost * 0.05))
+        hard_pairing_vehicle_level = bool(self._p("hard_pairing_vehicle_level", False))
+        hard_pairing_penalty = (
+            float(self._p("hard_pairing_penalty", max(pair_break_penalty * 10.0, fixed_cost * 25.0)))
+            if hard_pairing_vehicle_level
+            else 0.0
+        )
         idle_behavior = str(self._p("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")
         idle_threshold = self._p("vehicle_idle_gap_threshold_minutes", None)
         max_idle_gap: Optional[int] = None
@@ -329,7 +335,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     if int(trips_sorted[j].id) == pair_target:
                         cost -= paired_trip_bonus * 3.0
                     else:
-                        cost += pair_break_penalty
+                        cost += hard_pairing_penalty if hard_pairing_vehicle_level else pair_break_penalty
 
                 valid_X[(i, j)] = {
                     "cost": max(0.0, cost),
@@ -348,7 +354,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 dh_to_depot = int(trips_sorted[i].deadhead_times.get(did, 0))
                 pullin_costs[(i, did)] = dh_to_depot * deadhead_cost
                 if int(trips_sorted[i].id) in preferred_next:
-                    pullin_costs[(i, did)] += pair_break_penalty
+                    pullin_costs[(i, did)] += hard_pairing_penalty if hard_pairing_vehicle_level else pair_break_penalty
                 pullout_costs[(did, i)] = fixed_cost + (dh_to_depot * deadhead_cost)
 
         # If PuLP isn't available, fallback to greedy

@@ -314,7 +314,7 @@ export class OptimizationService implements OnModuleInit {
       if (attempts >= maxAttempts) {
         done = true;
         clearNextTimer();
-        void this.persistFailure(scheduleId, companyId, {
+        this.persistFailure(scheduleId, companyId, {
           error_type: 'timeout',
           error_code: 'OPTIMIZER_POLLING_TIMEOUT',
           message: 'Timeout controlado aguardando conclusão do Celery.',
@@ -326,6 +326,10 @@ export class OptimizationService implements OnModuleInit {
           },
           task_id: taskId,
           context,
+        }).catch((error) => {
+          this.logger.error(
+            `Erro ao persistir timeout do schedule ${scheduleId}: ${error.message}. Schedule pode estar em estado inconsistente.`,
+          );
         });
         this.gateway.notifyOptimizationStale(companyId, { scheduleId, taskId });
         this.gateway.notifyOptimizationFailed(companyId, 'Timeout controlado aguardando conclusão do Celery.');
@@ -446,64 +450,88 @@ export class OptimizationService implements OnModuleInit {
       task_id?: string;
       context?: Record<string, any>;
     },
-  ) {
-    const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId, companyId } });
-    let elapsedMs: number | null = null;
-    try {
-      const rows = await this.dataSource.query(
-        'SELECT EXTRACT(EPOCH FROM (now() - "createdAt")) * 1000 AS elapsed_ms FROM schedules WHERE id = $1 AND "companyId" = $2',
-        [scheduleId, companyId],
-      );
-      elapsedMs = rows?.[0]?.elapsed_ms !== undefined ? Number(rows[0].elapsed_ms) : null;
-    } catch {
-      elapsedMs = null;
-    }
-    const context = failure.context || {};
-    const details = failure.details || {};
-    const hardIssues = Array.isArray(details.issues)
-      ? details.issues
-      : Array.isArray(details.diagnostics?.issues)
-        ? details.diagnostics.issues
-        : [];
-    const metadata = {
-      ...(schedule?.metadata || {}),
-      status: 'failed',
-      error_type: failure.error_type || 'business',
-      error_code: failure.error_code || 'OPTIMIZER_FAILED',
-      error_message: failure.message || 'Erro no motor de otimização.',
-      error_details: details,
-      task_id: failure.task_id,
-      algorithm: context.algorithm ?? details.algorithm ?? null,
-      failed_at: new Date().toISOString(),
-      elapsed_ms: elapsedMs,
-      resolved_params: {
-        cct_params: context.cctParams ?? null,
-        vsp_params: context.vspParams ?? null,
-        optimization_params: context.optimizationParams ?? null,
-      },
-      hard_constraint_report: hardIssues.length
-        ? {
-            ok: false,
-            issues: hardIssues,
-          }
-        : (details.hard_constraint_report ?? null),
-      performance: {
-        ...(details.performance || {}),
-        backend_elapsed_ms: elapsedMs,
-      },
-      run_snapshot: details.run_snapshot ?? null,
-    };
+  ): Promise<void> {
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    await this.scheduleRepo.update(
-      { id: scheduleId, companyId },
-      {
-        status: ScheduleStatus.FAILED,
-        totalCost: 0,
-        cctViolations: hardIssues.length,
-        metadata: metadata as any,
-      },
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId, companyId } });
+        let elapsedMs: number | null = null;
+        try {
+          const rows = await this.dataSource.query(
+            'SELECT EXTRACT(EPOCH FROM (now() - "createdAt")) * 1000 AS elapsed_ms FROM schedules WHERE id = $1 AND "companyId" = $2',
+            [scheduleId, companyId],
+          );
+          elapsedMs = rows?.[0]?.elapsed_ms !== undefined ? Number(rows[0].elapsed_ms) : null;
+        } catch {
+          elapsedMs = null;
+        }
+        const context = failure.context || {};
+        const details = failure.details || {};
+        const hardIssues = Array.isArray(details.issues)
+          ? details.issues
+          : Array.isArray(details.diagnostics?.issues)
+            ? details.diagnostics.issues
+            : [];
+        const metadata = {
+          ...(schedule?.metadata || {}),
+          status: 'failed',
+          error_type: failure.error_type || 'business',
+          error_code: failure.error_code || 'OPTIMIZER_FAILED',
+          error_message: failure.message || 'Erro no motor de otimização.',
+          error_details: details,
+          task_id: failure.task_id,
+          algorithm: context.algorithm ?? details.algorithm ?? null,
+          failed_at: new Date().toISOString(),
+          elapsed_ms: elapsedMs,
+          resolved_params: {
+            cct_params: context.cctParams ?? null,
+            vsp_params: context.vspParams ?? null,
+            optimization_params: context.optimizationParams ?? null,
+          },
+          hard_constraint_report: hardIssues.length
+            ? {
+                ok: false,
+                issues: hardIssues,
+              }
+            : (details.hard_constraint_report ?? null),
+          performance: {
+            ...(details.performance || {}),
+            backend_elapsed_ms: elapsedMs,
+          },
+          run_snapshot: details.run_snapshot ?? null,
+        };
+
+        await this.scheduleRepo.update(
+          { id: scheduleId, companyId },
+          {
+            status: ScheduleStatus.FAILED,
+            totalCost: 0,
+            cctViolations: hardIssues.length,
+            metadata: metadata as any,
+          },
+        );
+        this.scheduleCache.delete(companyId);
+        this.logger.log(`✓ Falha persistida com sucesso para Schedule ${scheduleId} (tentativa ${attempt}/${maxRetries})`);
+        return; // Sucesso
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.warn(
+          `Erro ao persistir falha do schedule ${scheduleId} (tentativa ${attempt}/${maxRetries}): ${error.message}`,
+        );
+
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt)); // Backoff exponencial
+        }
+      }
+    }
+
+    // Se chegou aqui, esgotou todas as tentativas
+    this.logger.error(
+      `CRÍTICO: Falha permanente ao persistir erro do schedule ${scheduleId} após ${maxRetries} tentativas. ` +
+      `Último erro: ${lastError?.message}. Schedule pode estar em estado INCONSISTENTE.`,
     );
-    this.scheduleCache.delete(companyId);
   }
 
   private async persistResults(
@@ -883,6 +911,7 @@ export class OptimizationService implements OnModuleInit {
       'extended_daily_driving_limit_minutes', 'max_extended_driving_days_per_week',
       'weekly_driving_limit_minutes', 'fortnight_driving_limit_minutes',
       'min_layover_minutes', 'pullout_minutes', 'pullback_minutes',
+      'pullout_counts_in_driver_shift', 'pullback_counts_in_driver_shift',
       'idle_time_is_paid', 'waiting_time_pay_pct', 'min_guaranteed_work_minutes',
       'max_unpaid_break_minutes', 'max_total_unpaid_break_minutes',
       'long_unpaid_break_limit_minutes', 'long_unpaid_break_penalty_weight',
@@ -1194,6 +1223,9 @@ export class OptimizationService implements OnModuleInit {
       ? (meta.error_message ?? fallbackFailedMessage)
       : (meta.error_message ?? null);
     const operationalQuality = this.extractOperationalQualityMetadata(meta);
+    const hardIssueCount = meta.hard_issue_count ?? (((meta.solver_explanation || {}).issues || {}).hard || []).length;
+    const softIssueCount = meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length;
+    const tripGroupAudit = meta.trip_group_audit ?? null;
     const lightMetadata = {
       input: resolvedParams,
       solver_version: meta.solver_version ?? rawMeta.solver_version ?? null,
@@ -1215,14 +1247,15 @@ export class OptimizationService implements OnModuleInit {
       total_trips: meta.total_trips ?? uniqueTripIds.length,
       rosterCount: meta.roster_count ?? 0,
       unassigned_trips: meta.unassigned_trips ?? [],
-      hardIssueCount: meta.hard_issue_count ?? (((meta.solver_explanation || {}).issues || {}).hard || []).length,
-      softIssueCount: meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length,
-      hasHardViolations: (((meta.solver_explanation || {}).issues || {}).hard || []).length > 0,
+      hardIssueCount,
+      softIssueCount,
+      hasHardViolations: hardIssueCount > 0,
       solverStatus: (meta.solver_explanation || {}).status ?? null,
       costBreakdown: this.summarizeCostBreakdown(meta.cost_breakdown ?? null),
       solverExplanation: null, // meta.solver_explanation ?? null, // Removido do polling por ser muito pesado
       phaseSummary: null, // meta.phase_summary ?? null,
-      tripGroupAudit: null, // meta.trip_group_audit ?? null,
+      tripGroupAudit,
+      trip_group_audit: tripGroupAudit,
       reproducibility: null,
       performance: meta.performance ?? null,
       hardConstraintReport: meta.hard_constraint_report ?? null,
@@ -1281,6 +1314,8 @@ export class OptimizationService implements OnModuleInit {
       }),
     };
 
+    const hydratedDuties = resultSummary.duties;
+
     const finalResult = {
       id: schedule.id,
       companyId: schedule.companyId,
@@ -1294,9 +1329,23 @@ export class OptimizationService implements OnModuleInit {
       performance: meta.performance ?? null,
       partial_result: meta.partial_result ?? null,
       run_snapshot: meta.run_snapshot ?? null,
+      hardIssueCount,
+      hard_issue_count: hardIssueCount,
+      softIssueCount,
+      soft_issue_count: softIssueCount,
+      tripGroupAudit,
+      trip_group_audit: tripGroupAudit,
+      solver_explanation: meta.solver_explanation ?? null,
+      operational_quality_mode: operationalQuality.operational_quality_mode,
+      chosen_scenario: operationalQuality.chosen_scenario,
+      rejected_scenarios: operationalQuality.rejected_scenarios,
+      justification: operationalQuality.justification,
+      trade_offs: operationalQuality.trade_offs,
+      operational_quality_decision: operationalQuality.operational_quality_decision,
       createdAt: schedule.createdAt,
       updatedAt: schedule.updatedAt,
       blocks: hydratedBlocks,
+      duties: hydratedDuties,
       resultSummary,
       rosterCount: Number(meta.roster_count || 0),
       totalBlocks: blocks.length,

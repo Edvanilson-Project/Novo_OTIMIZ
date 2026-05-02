@@ -329,6 +329,46 @@ def test_post_opt_comparator_prefers_lower_trip_group_split_groups():
     assert _is_better_post_opt_candidate(baseline, candidate) is True
 
 
+def test_post_opt_comparator_rejects_trip_group_split_regression_when_integrity_is_hard():
+    current = {
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "vehicles": 2,
+        "crew": 2,
+        "violations": 0,
+        "preferred_pair_breaks": 0,
+        "fragmentation_score": 200,
+        "low_utilization_duties": 0,
+        "high_spread_duties": 0,
+        "fragmented_duties": 0,
+        "short_connection_total": 0,
+        "max_idle_time": 0,
+        "trip_group_split_groups": 0,
+    }
+    candidate = {
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "vehicles": 2,
+        "crew": 1,
+        "violations": 0,
+        "preferred_pair_breaks": 0,
+        "fragmentation_score": 50,
+        "low_utilization_duties": 0,
+        "high_spread_duties": 0,
+        "fragmented_duties": 0,
+        "short_connection_total": 0,
+        "max_idle_time": 0,
+        "trip_group_split_groups": 1,
+    }
+
+    assert _is_better_post_opt_candidate(current, candidate) is True
+    assert _is_better_post_opt_candidate(
+        current,
+        candidate,
+        enforce_trip_group_integrity=True,
+    ) is False
+
+
 def test_joint_post_opt_prefers_pair_repair_when_tail_move_is_too_long():
     trips = [
         _trip(1, 360, 60, origin=1, dest=2),
@@ -472,3 +512,148 @@ def test_greedy_csp_exposes_quality_summary_and_per_duty_metrics():
     assert "avg_utilization" in quality_summary
     assert "low_utilization_duties" in quality_summary
     assert all("quality_metrics" in duty.meta for duty in solution.duties)
+
+
+def test_soft_issue_postopt_can_move_internal_task_to_fix_mandatory_rest_missing():
+    solver = GreedyCSP(
+        apply_cct=True,
+        operator_change_terminals_only=False,
+        min_break_minutes=15,
+        meal_break_minutes=30,
+        mandatory_break_after_minutes=240,
+        min_layover_minutes=0,
+        max_shift_minutes=900,
+        max_work_minutes=480,
+        inter_shift_rest_minutes=660,
+    )
+
+    source_tasks = [
+        _block(1, [_trip(1, 360, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(2, [_trip(2, 440, 60, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(3, [_trip(3, 520, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(4, [_trip(4, 600, 42, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(5, [_trip(5, 673, 22, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(6, [_trip(6, 708, 66, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(7, [_trip(7, 800, 60, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+    ]
+    target_task = _block(8, [_trip(8, 790, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})])
+    source_duty, reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    target_duty, target_reason = solver._rebuild_duty_from_tasks([target_task], 2)
+
+    assert reason == ""
+    assert target_reason == ""
+
+    baseline_solution = solver.finalize_selected_duties(
+        [copy.deepcopy(source_duty), copy.deepcopy(target_duty)],
+        original_blocks=[*source_tasks, target_task],
+    )
+    baseline_metrics = solver._build_relief_reassignment_metrics(baseline_solution)
+    baseline_source_metrics = solver._build_operational_semantic_metrics(
+        source_duty.tasks,
+        projected_work=int(source_duty.work_time),
+        projected_spread=int(source_duty.spread_time),
+        duty_id=int(source_duty.id),
+    )
+
+    assert baseline_source_metrics["mandatory_rest_missing"] is True
+    assert baseline_metrics["mandatory_rest_missing"] == 1
+    assert baseline_metrics["crew"] == 2
+
+    repaired_duties, audit = solver._soft_issue_reassignment_postopt(
+        [source_duty, target_duty],
+        original_blocks=[*source_tasks, target_task],
+    )
+
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["mandatory_rest_missing"] == 1
+    assert audit["final_metrics"]["mandatory_rest_missing"] == 0
+    assert audit["final_metrics"]["crew"] == 2
+    assert audit["accepted"] == 1
+    assert "mandatory_rest_missing_repair" in audit["accepted_moves"][0]["reasons"]
+
+    repaired_by_id = {int(duty.id): duty for duty in repaired_duties}
+    source_after = repaired_by_id[1]
+    target_after = repaired_by_id[2]
+    source_after_metrics = solver._build_operational_semantic_metrics(
+        source_after.tasks,
+        projected_work=int(source_after.work_time),
+        projected_spread=int(source_after.spread_time),
+        duty_id=int(source_after.id),
+    )
+
+    assert source_after_metrics["mandatory_rest_missing"] is False
+    assert [trip.id for task in source_after.tasks for trip in task.trips] == [1, 2, 3, 4, 5, 7]
+    assert [trip.id for task in target_after.tasks for trip in task.trips] == [6, 8]
+    assert sorted(
+        trip.id
+        for duty in repaired_duties
+        for task in duty.tasks
+        for trip in task.trips
+    ) == [1, 2, 3, 4, 5, 6, 7, 8]
+
+
+def test_soft_issue_postopt_can_create_dedicated_duty_to_fix_mandatory_rest_missing():
+    solver = GreedyCSP(
+        apply_cct=True,
+        operator_change_terminals_only=False,
+        min_break_minutes=15,
+        meal_break_minutes=30,
+        mandatory_break_after_minutes=240,
+        min_layover_minutes=0,
+        max_shift_minutes=900,
+        max_work_minutes=480,
+        inter_shift_rest_minutes=660,
+        soft_issue_reassignment_max_passes=1,
+    )
+
+    source_tasks = [
+        _block(1, [_trip(1, 360, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(2, [_trip(2, 440, 60, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(3, [_trip(3, 520, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(4, [_trip(4, 600, 42, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(5, [_trip(5, 673, 22, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(6, [_trip(6, 708, 66, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+        _block(7, [_trip(7, 800, 60, origin=2, dest=1, extra_deadheads={1: 0, 2: 0, 3: 0})]),
+    ]
+    blocking_target = _block(8, [_trip(8, 720, 60, origin=1, dest=2, extra_deadheads={1: 0, 2: 0, 3: 0})])
+    source_duty, reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    target_duty, target_reason = solver._rebuild_duty_from_tasks([blocking_target], 2)
+
+    assert reason == ""
+    assert target_reason == ""
+
+    repaired_duties, audit = solver._soft_issue_reassignment_postopt(
+        [source_duty, target_duty],
+        original_blocks=[*source_tasks, blocking_target],
+    )
+
+    assert audit["accepted"] == 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["mandatory_rest_missing"] == 1
+    assert audit["final_metrics"]["mandatory_rest_missing"] == 0
+    assert audit["final_metrics"]["violations"] == 0
+    assert audit["final_metrics"]["crew"] == 3
+    assert audit["accepted_moves"][0]["mode"] == "dedicated"
+    assert "mandatory_rest_missing_repair" in audit["accepted_moves"][0]["reasons"]
+
+    repaired_by_id = {int(duty.id): duty for duty in repaired_duties}
+    source_after = repaired_by_id[1]
+    target_after = repaired_by_id[2]
+    dedicated_after = next(duty for duty in repaired_duties if int(duty.id) not in (1, 2))
+    source_after_metrics = solver._build_operational_semantic_metrics(
+        source_after.tasks,
+        projected_work=int(source_after.work_time),
+        projected_spread=int(source_after.spread_time),
+        duty_id=int(source_after.id),
+    )
+
+    assert source_after_metrics["mandatory_rest_missing"] is False
+    assert [trip.id for task in source_after.tasks for trip in task.trips] == [1, 2, 3, 4, 5, 7]
+    assert [trip.id for task in target_after.tasks for trip in task.trips] == [8]
+    assert [trip.id for task in dedicated_after.tasks for trip in task.trips] == [6]
+    assert sorted(
+        trip.id
+        for duty in repaired_duties
+        for task in duty.tasks
+        for trip in task.trips
+    ) == [1, 2, 3, 4, 5, 6, 7, 8]

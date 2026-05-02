@@ -75,7 +75,24 @@ export interface PlanGroup {
   workTime?: number;
   totalCost?: number;
   violations?: number;
+  driverDisplayName?: string;
+  operatorNotAssigned?: boolean;
+  issueCodes?: string[];
+  issueSeverity?: 'soft' | '';
+  issueExplanation?: string;
   events: PlanEvent[];
+}
+
+interface DutyAuditSummary {
+  dutyStart: number | null;
+  dutyEnd: number | null;
+  operatorNotAssigned: boolean;
+  driverDisplayName: string;
+  issueCodes: string[];
+  issueSeverity: 'soft' | '';
+  issueExplanation: string;
+  mandatoryRestRequired: boolean;
+  hasValidMandatoryRest: boolean | null;
 }
 
 // ─── Component Interfaces ─────────────────────────────────────────────────────
@@ -91,6 +108,138 @@ interface TripMetadata {
   lineId: number | null;
   lineCode: string | null;
   color: string;
+}
+
+function toMinuteValue(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatDutyReference(dutyId: number | null | undefined): string {
+  return dutyId != null ? `D${dutyId}` : '—';
+}
+
+function toCsvBoolean(value: boolean | null | undefined): string {
+  return value ? 'True' : 'False';
+}
+
+function minToHHMMExport(minutes: number): string {
+  const safeMinutes = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function buildDutyAuditSummary(duty: any): DutyAuditSummary {
+  const dutyId = Number(duty?.duty_id ?? duty?.id ?? 0);
+  const report = duty?.operational_time_report ?? {};
+  const issueCodes = Array.isArray(report?.violations)
+    ? report.violations.map((code: unknown) => String(code)).filter(Boolean)
+    : [];
+  const operatorNotAssigned = Boolean(report?.operator_not_assigned ?? true);
+  const dutyStart = toMinuteValue(report?.duty_start ?? duty?.start_time);
+  const dutyEnd = toMinuteValue(report?.duty_end ?? duty?.end_time);
+  const issueExplanation = String(report?.suggestion ?? report?.user_explanation ?? '').trim();
+
+  return {
+    dutyStart,
+    dutyEnd,
+    operatorNotAssigned,
+    driverDisplayName: operatorNotAssigned
+      ? `Operador não atribuído (${formatDutyReference(dutyId)})`
+      : `Jornada ${formatDutyReference(dutyId)}`,
+    issueCodes,
+    issueSeverity: issueCodes.length > 0 ? 'soft' : '',
+    issueExplanation,
+    mandatoryRestRequired: Boolean(report?.mandatory_rest_required ?? false),
+    hasValidMandatoryRest: report?.has_valid_mandatory_rest == null
+      ? null
+      : Boolean(report?.has_valid_mandatory_rest),
+  };
+}
+
+function buildDutyExportFields(duty: any) {
+  const audit = buildDutyAuditSummary(duty);
+  return {
+    driver_display_name: audit.driverDisplayName,
+    operator_not_assigned: toCsvBoolean(audit.operatorNotAssigned),
+    duty_start: audit.dutyStart != null ? minToHHMMExport(audit.dutyStart) : '',
+    duty_end: audit.dutyEnd != null ? minToHHMMExport(audit.dutyEnd) : '',
+    mandatory_rest_required: toCsvBoolean(audit.mandatoryRestRequired),
+    has_valid_mandatory_rest: audit.hasValidMandatoryRest == null ? '' : toCsvBoolean(audit.hasValidMandatoryRest),
+    issue_severity: audit.issueSeverity,
+    issue_codes: audit.issueCodes.join(';'),
+    issue_explanation: audit.issueExplanation,
+  };
+}
+
+function normalizeTripIds(rawTripIds: unknown): number[] {
+  if (!Array.isArray(rawTripIds)) {
+    return [];
+  }
+  const seen = new Set<number>();
+  const normalized: number[] = [];
+  rawTripIds.forEach((tripId) => {
+    const numeric = Number(tripId);
+    if (!Number.isFinite(numeric) || numeric <= 0 || seen.has(numeric)) {
+      return;
+    }
+    seen.add(numeric);
+    normalized.push(numeric);
+  });
+  return normalized;
+}
+
+function resolveSegmentBlockId(segment: Record<string, any>, tripDetails: any[]): number | null {
+  for (const key of ['block_id', 'from_block_id', 'to_block_id']) {
+    const value = Number(segment[key]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  for (const trip of tripDetails) {
+    const value = Number(trip?.block_id ?? trip?.vehicle_id ?? 0);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizeExportSegments(rawSegments: any[], tripById: Map<number, any>): Record<string, any>[] {
+  if (!Array.isArray(rawSegments) || rawSegments.length === 0) {
+    return [];
+  }
+
+  const baseSegments = rawSegments.map((segment) => {
+    const segType = String(segment?.type ?? segment?.event_type ?? 'unknown');
+    const tripIds = normalizeTripIds(segment?.trip_ids);
+    const tripDetails = sortOperationalTrips(tripIds.map((tripId) => tripById.get(tripId)).filter(Boolean));
+    const blockId = resolveSegmentBlockId(segment, tripDetails);
+    const tripCount = tripIds.length;
+    const bundleEventType = segType === 'commercial_trip' && tripCount > 1
+      ? 'commercial_trip_bundle'
+      : segType;
+    const eventScope = segment?.event_scope ?? (segType === 'commercial_trip' || segType === 'deadhead' ? 'driver_vehicle' : 'driver');
+    return {
+      ...segment,
+      type: segType,
+      event_type: segType,
+      event_scope: eventScope,
+      trip_ids: tripIds,
+      trip_count: tripCount,
+      block_id: blockId,
+      vehicle_id: blockId,
+      ...(bundleEventType !== segType
+        ? {
+            bundle_event_type: bundleEventType,
+            explanation: segment?.explanation ?? `Segmento operacional agrupado com ${tripCount} viagens reais.`,
+          }
+        : {}),
+    };
+  });
+
+  return baseSegments;
 }
 
 // ─── Event Kind Config ────────────────────────────────────────────────────────
@@ -529,6 +678,7 @@ function buildOperationalExportRows(
   duties: any[],
   effectiveBlocks: any[],
   scheduleId: number | string,
+  tripById: Map<number, any>,
 ): Record<string, unknown>[] {
   // tripId → blockId map
   const tripToBlock = new Map<number, number>();
@@ -544,8 +694,9 @@ function buildOperationalExportRows(
 
   duties.forEach((duty: any) => {
     const dutyId = duty.duty_id ?? duty.id;
-    const segments: any[] = duty.duty_time_segments ?? [];
+    const segments = normalizeExportSegments(duty.duty_time_segments ?? [], tripById);
     const dutyTripIds: number[] = duty.trip_ids ?? [];
+    const dutyExportFields = buildDutyExportFields(duty);
 
     if (segments.length > 0) {
       // ── Primary path: use solver segments ──
@@ -581,12 +732,25 @@ function buildOperationalExportRows(
             ? tripToBlock.get(Number(seg.trip_ids[0]))
             : null
         ) ?? '';
+        const {
+          driver_display_name,
+          operator_not_assigned,
+          duty_start,
+          duty_end,
+          mandatory_rest_required,
+          has_valid_mandatory_rest,
+          issue_severity,
+          issue_codes,
+          issue_explanation,
+        } = dutyExportFields;
 
         rows.push({
           schedule_id: scheduleId,
           block_id: segBlockId,
           duty_id: dutyId,
           driver_id: driverId,
+          driver_display_name,
+          operator_not_assigned,
           vehicle_id: eventScope === 'driver_vehicle' ? segBlockId : '',
           from_vehicle_id: seg.from_vehicle_id ?? seg.from_block_id ?? '',
           to_vehicle_id: seg.to_vehicle_id ?? seg.to_block_id ?? '',
@@ -594,23 +758,30 @@ function buildOperationalExportRows(
           event_type: eventType,
           event_label: eventLabel,
           event_scope: eventScope,
-          start_time: minToHHMM(startTime),
-          end_time: minToHHMM(endTime),
+          duty_start,
+          duty_end,
+          start_time: minToHHMMExport(startTime),
+          end_time: minToHHMMExport(endTime),
           duration_minutes: segDuration,
           origin_id: seg.location_start ?? seg.location ?? '',
           destination_id: seg.location_end ?? seg.location ?? '',
           trip_ids: tripIds,
           trip_count: tripCount,
-          is_work_time: isWorkTime,
-          is_driving_time: isDrivingTime,
-          is_idle_time: isIdleTime,
-          is_normal_break: isNormalBreak,
-          is_mandatory_rest: isMandatoryRest,
-          is_pullout: isPullout,
-          is_pullback: isPullback,
-          rest_valid: restValid,
+          is_work_time: toCsvBoolean(Boolean(isWorkTime)),
+          is_driving_time: toCsvBoolean(Boolean(isDrivingTime)),
+          is_idle_time: toCsvBoolean(Boolean(isIdleTime)),
+          is_normal_break: toCsvBoolean(Boolean(isNormalBreak)),
+          is_mandatory_rest: toCsvBoolean(Boolean(isMandatoryRest)),
+          is_pullout: toCsvBoolean(Boolean(isPullout)),
+          is_pullback: toCsvBoolean(Boolean(isPullback)),
+          rest_valid: toCsvBoolean(Boolean(restValid)),
+          mandatory_rest_required,
+          has_valid_mandatory_rest,
           rule_code: '',
           violation_code: durationMismatch ? 'EXPORT_DURATION_MISMATCH' : '',
+          issue_severity,
+          issue_codes,
+          issue_explanation,
           explanation: seg.explanation ?? (driverId ? 'Motorista real não disponível; usando identificador da duty' : ''),
         });
       });
@@ -640,32 +811,56 @@ function buildOperationalExportRows(
         const st = Number(trip.start_time ?? 0);
         const et = Number(trip.end_time ?? 0);
         const driverId = dutyId != null ? String(dutyId) : '';
+        const {
+          driver_display_name,
+          operator_not_assigned,
+          duty_start,
+          duty_end,
+          mandatory_rest_required,
+          has_valid_mandatory_rest,
+          issue_severity,
+          issue_codes,
+          issue_explanation,
+        } = dutyExportFields;
         seq++;
         rows.push({
           schedule_id: scheduleId,
           block_id: trip._blockId ?? '',
           duty_id: dutyId,
           driver_id: driverId,
+          driver_display_name,
+          operator_not_assigned,
           vehicle_id: trip._blockId ?? '',
+          from_vehicle_id: '',
+          to_vehicle_id: '',
           sequence: seq,
           event_type: 'commercial_trip',
           event_label: 'Viagem',
-          start_time: minToHHMM(st),
-          end_time: minToHHMM(et),
+          event_scope: 'driver_vehicle',
+          duty_start,
+          duty_end,
+          start_time: minToHHMMExport(st),
+          end_time: minToHHMMExport(et),
           duration_minutes: et - st,
           origin_id: trip.origin_id ?? '',
           destination_id: trip.destination_id ?? '',
           trip_ids: String(tid),
-          is_work_time: true,
-          is_driving_time: true,
-          is_idle_time: false,
-          is_normal_break: false,
-          is_mandatory_rest: false,
-          is_pullout: false,
-          is_pullback: false,
-          rest_valid: false,
+          trip_count: 1,
+          is_work_time: 'True',
+          is_driving_time: 'True',
+          is_idle_time: 'False',
+          is_normal_break: 'False',
+          is_mandatory_rest: 'False',
+          is_pullout: 'False',
+          is_pullback: 'False',
+          rest_valid: 'False',
+          mandatory_rest_required,
+          has_valid_mandatory_rest,
           rule_code: '',
           violation_code: '',
+          issue_severity,
+          issue_codes,
+          issue_explanation,
           explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
         });
 
@@ -683,26 +878,39 @@ function buildOperationalExportRows(
               block_id: trip._blockId ?? '',
               duty_id: dutyId,
               driver_id: driverId,
-              vehicle_id: trip._blockId ?? '',
+              driver_display_name: dutyExportFields.driver_display_name,
+              operator_not_assigned: dutyExportFields.operator_not_assigned,
+              vehicle_id: '',
+              from_vehicle_id: '',
+              to_vehicle_id: '',
               sequence: seq,
               event_type: gapType,
               event_label: OPERATIONAL_EVENT_LABELS[gapType] ?? gapType,
-              start_time: minToHHMM(gapStart),
-              end_time: minToHHMM(gapEnd),
+              event_scope: 'driver',
+              duty_start: dutyExportFields.duty_start,
+              duty_end: dutyExportFields.duty_end,
+              start_time: minToHHMMExport(gapStart),
+              end_time: minToHHMMExport(gapEnd),
               duration_minutes: gap,
               origin_id: trip.destination_id ?? '',
               destination_id: nextTrip.origin_id ?? '',
               trip_ids: '',
-              is_work_time: false,
-              is_driving_time: false,
-              is_idle_time: gapType === 'idle',
-              is_normal_break: gapType === 'normal_break',
-              is_mandatory_rest: false,
-              is_pullout: false,
-              is_pullback: false,
-              rest_valid: false,
+              trip_count: 0,
+              is_work_time: 'False',
+              is_driving_time: 'False',
+              is_idle_time: toCsvBoolean(gapType === 'idle'),
+              is_normal_break: toCsvBoolean(gapType === 'normal_break'),
+              is_mandatory_rest: 'False',
+              is_pullout: 'False',
+              is_pullback: 'False',
+              rest_valid: 'False',
+              mandatory_rest_required: dutyExportFields.mandatory_rest_required,
+              has_valid_mandatory_rest: dutyExportFields.has_valid_mandatory_rest,
               rule_code: '',
               violation_code: '',
+              issue_severity: dutyExportFields.issue_severity,
+              issue_codes: dutyExportFields.issue_codes,
+              issue_explanation: dutyExportFields.issue_explanation,
               explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
             });
           }
@@ -712,6 +920,171 @@ function buildOperationalExportRows(
   });
 
   return rows;
+}
+
+function buildDetailedTripExportRows(
+  duties: any[],
+  tripById: Map<number, any>,
+  scheduleId: number | string,
+): Record<string, unknown>[] {
+  return duties.flatMap((duty: any) => {
+    const dutyId = duty.duty_id ?? duty.id;
+    return resolveDutyDetailedTrips(duty, tripById).map((trip: any) => {
+      const sourceTripId = Number(trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? 0);
+      const publicTripId = trip.trip_id ?? trip.public_trip_id ?? sourceTripId;
+      const startTime = Number(trip.start_time ?? trip.startTime ?? 0);
+      const endTime = Number(trip.end_time ?? trip.endTime ?? 0);
+      return {
+        schedule_id: scheduleId,
+        duty_id: dutyId,
+        driver_id: dutyId,
+        sequence_in_duty: trip.sequence_in_duty ?? '',
+        segment_sequence: trip.segment_sequence ?? '',
+        sequence_in_bundle: trip.sequence_in_bundle ?? 1,
+        bundle_trip_count: trip.bundle_trip_count ?? 1,
+        bundle_event_type: trip.bundle_event_type ?? 'commercial_trip',
+        source_trip_id: sourceTripId,
+        public_trip_id: publicTripId,
+        line_id: trip.line_id ?? trip.lineId ?? '',
+        line_code: trip.line_code ?? trip.lineCode ?? '',
+        direction: trip.direction ?? trip.sentido ?? '',
+        start_time: minToHHMMExport(startTime),
+        end_time: minToHHMMExport(endTime),
+        duration_minutes: Number(trip.duration ?? trip.duracao ?? (endTime - startTime)),
+        origin_id: trip.origin_id ?? trip.originId ?? '',
+        destination_id: trip.destination_id ?? trip.destinationId ?? '',
+        block_id: trip.block_id ?? '',
+        vehicle_id: trip.vehicle_id ?? trip.block_id ?? '',
+        sequence_in_block: trip.sequence_in_block ?? '',
+        trip_group_id: trip.trip_group_id ?? '',
+        pair_id: trip.pair_id ?? '',
+      };
+    });
+  });
+}
+
+function buildDriverExportRows(
+  duties: any[],
+  tripById: Map<number, any>,
+  scheduleId: number | string,
+): Record<string, unknown>[] {
+  return duties.flatMap((duty: any) => {
+    const dutyId = duty.duty_id ?? duty.id;
+    const dutyExportFields = buildDutyExportFields(duty);
+    const normalizedSegments = normalizeExportSegments(duty.duty_time_segments ?? [], tripById);
+    const detailedTrips = resolveDutyDetailedTrips(duty, tripById);
+    const detailedBySegment = new Map<number, any[]>();
+
+    detailedTrips.forEach((trip: any) => {
+      const segmentSequence = Number(trip.segment_sequence ?? 0);
+      if (!Number.isFinite(segmentSequence) || segmentSequence <= 0) {
+        return;
+      }
+      const currentTrips = detailedBySegment.get(segmentSequence) ?? [];
+      currentTrips.push(trip);
+      detailedBySegment.set(segmentSequence, currentTrips);
+    });
+
+    return normalizedSegments.flatMap((segment: any, sequence: number) => {
+      const segType = String(segment.type ?? segment.event_type ?? 'unknown');
+      const {
+        driver_display_name,
+        operator_not_assigned,
+        duty_start,
+        duty_end,
+        mandatory_rest_required,
+        has_valid_mandatory_rest,
+        issue_severity,
+        issue_codes,
+        issue_explanation,
+      } = dutyExportFields;
+      if (segType === 'commercial_trip') {
+        const segmentTrips = sortOperationalTrips(detailedBySegment.get(sequence + 1) ?? []);
+        if (segmentTrips.length > 0) {
+          return segmentTrips.map((trip: any) => {
+            const sourceTripId = trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? '';
+            const startTime = Number(trip.start_time ?? trip.startTime ?? 0);
+            const endTime = Number(trip.end_time ?? trip.endTime ?? 0);
+            return {
+              schedule_id: scheduleId,
+              duty_id: dutyId,
+              driver_id: dutyId,
+              driver_display_name,
+              operator_not_assigned,
+              duty_start,
+              duty_end,
+              sequence: sequence + 1,
+              event_type: 'commercial_trip',
+              event_label: OPERATIONAL_EVENT_LABELS.commercial_trip,
+              event_scope: 'trip',
+              line_code: trip.line_code ?? trip.lineCode ?? '',
+              direction: trip.direction ?? trip.sentido ?? '',
+              start_time: minToHHMMExport(startTime),
+              end_time: minToHHMMExport(endTime),
+              duration_minutes: Number(trip.duration ?? trip.duracao ?? (endTime - startTime)),
+              trip_id: sourceTripId,
+              trip_ids: String(sourceTripId),
+              trip_count: 1,
+              origin_id: trip.origin_id ?? trip.originId ?? '',
+              destination_id: trip.destination_id ?? trip.destinationId ?? '',
+              vehicle_id: trip.vehicle_id ?? trip.block_id ?? '',
+              from_vehicle_id: '',
+              to_vehicle_id: '',
+              sequence_in_duty: trip.sequence_in_duty ?? '',
+              sequence_in_bundle: trip.sequence_in_bundle ?? 1,
+              mandatory_rest_required,
+              has_valid_mandatory_rest,
+              issue_severity,
+              issue_codes,
+              issue_explanation,
+              explanation: segment.explanation ?? '',
+            };
+          });
+        }
+      }
+
+      const tripCount = Number(segment.trip_count ?? (Array.isArray(segment.trip_ids) ? segment.trip_ids.length : 0) ?? 0);
+      const eventType = segType === 'commercial_trip' && tripCount > 1 ? 'commercial_trip_bundle' : segType;
+      const startTime = Number(segment.start ?? 0);
+      const endTime = Number(segment.end ?? startTime);
+      const eventScope = segment.event_scope ?? 'driver';
+
+      return [{
+        schedule_id: scheduleId,
+        duty_id: dutyId,
+        driver_id: dutyId,
+        driver_display_name,
+        operator_not_assigned,
+        duty_start,
+        duty_end,
+        sequence: sequence + 1,
+        event_type: eventType,
+        event_label: OPERATIONAL_EVENT_LABELS[eventType] ?? eventType,
+        event_scope: eventScope,
+        line_code: '',
+        direction: '',
+        start_time: minToHHMMExport(startTime),
+        end_time: minToHHMMExport(endTime),
+        duration_minutes: Number(segment.duration ?? (endTime - startTime)),
+        trip_id: '',
+        trip_ids: Array.isArray(segment.trip_ids) ? segment.trip_ids.join(';') : '',
+        trip_count: tripCount,
+        origin_id: segment.location_start ?? segment.location ?? '',
+        destination_id: segment.location_end ?? segment.location ?? '',
+        vehicle_id: eventScope === 'driver_vehicle' ? (segment.vehicle_id ?? segment.block_id ?? '') : '',
+        from_vehicle_id: segment.from_vehicle_id ?? segment.from_block_id ?? '',
+        to_vehicle_id: segment.to_vehicle_id ?? segment.to_block_id ?? '',
+        sequence_in_duty: '',
+        sequence_in_bundle: '',
+        mandatory_rest_required,
+        has_valid_mandatory_rest,
+        issue_severity,
+        issue_codes,
+        issue_explanation,
+        explanation: segment.explanation ?? '',
+      }];
+    });
+  });
 }
 
 // ─── EventKindChip ────────────────────────────────────────────────────────────
@@ -780,7 +1153,14 @@ function CollapsibleGroupRow({ group, showCost = false, defaultOpen = false }: C
         <TableCell sx={{ width: 40, p: 0.5 }}>
           <IconButton size="small">{open ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}</IconButton>
         </TableCell>
-        <TableCell sx={{ fontWeight: 800, color: 'primary.main' }}>{group.label}</TableCell>
+        <TableCell sx={{ fontWeight: 800, color: 'primary.main' }}>
+          <Stack spacing={0.25}>
+            <Typography variant="body2" sx={{ fontWeight: 800, color: 'primary.main' }}>{group.label}</Typography>
+            {group.driverDisplayName && (
+              <Typography variant="caption" color="text.secondary">{group.driverDisplayName}</Typography>
+            )}
+          </Stack>
+        </TableCell>
         <TableCell align="center">{group.tripCount} viagens</TableCell>
         <TableCell>{minToHHMM(group.startTime)}</TableCell>
         <TableCell>{minToHHMM(group.endTime)}</TableCell>
@@ -789,16 +1169,45 @@ function CollapsibleGroupRow({ group, showCost = false, defaultOpen = false }: C
         )}
         <TableCell align="right">{group.totalKm.toFixed(1)} km</TableCell>
         {showCost && <TableCell align="right">{fmtCurrency(group.totalCost ?? 0)}</TableCell>}
-        {(group.violations ?? 0) > 0
-          ? <TableCell><Chip size="small" label={`${group.violations} violação(ões)`} color="error" /></TableCell>
-          : <TableCell />
-        }
+        <TableCell>
+          <Stack direction="row" spacing={0.75} sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            {group.operatorNotAssigned && (
+              <Chip size="small" label="Sem operador" variant="outlined" />
+            )}
+            {(group.issueCodes?.length ?? 0) > 0 ? (
+              <Chip size="small" label={`Soft issue: ${group.issueCodes?.join(', ')}`} color="warning" />
+            ) : (group.violations ?? 0) > 0 ? (
+              <Chip size="small" label={`${group.violations} violação(ões)`} color="error" />
+            ) : null}
+          </Stack>
+        </TableCell>
       </TableRow>
 
       <TableRow>
         <TableCell colSpan={cols + 2} sx={{ p: 0, border: 0 }}>
           <Collapse in={open} unmountOnExit>
             <Box sx={{ bgcolor: alpha(theme.palette.background.default, 0.6), px: 3, py: 1 }}>
+              {(group.operatorNotAssigned || (group.issueCodes?.length ?? 0) > 0) && (
+                <Stack spacing={1} sx={{ mb: 1.5 }}>
+                  {(group.issueCodes?.length ?? 0) > 0 && (
+                    <Alert severity={group.issueSeverity === 'soft' ? 'warning' : 'error'}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {group.issueCodes?.join(', ')}
+                      </Typography>
+                      {group.issueExplanation && (
+                        <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                          {group.issueExplanation}
+                        </Typography>
+                      )}
+                    </Alert>
+                  )}
+                  {group.operatorNotAssigned && (
+                    <Alert severity="info">
+                      Operador real não atribuído. A jornada está sendo identificada por {formatDutyReference(group.id)} apenas para rastreabilidade.
+                    </Alert>
+                  )}
+                </Stack>
+              )}
               <Table size="small">
                 <TableHead>
                   <TableRow sx={{ bgcolor: 'background.default' }}>
@@ -1117,6 +1526,20 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     return (res as any).resultSummary?.duties || (res as any).duties || [];
   }, [res]);
 
+  const scheduleId = useMemo(
+    () => (res as any)?.id ?? (res as any)?.scheduleId ?? '',
+    [res],
+  );
+
+  const dutyAuditById = useMemo(() => {
+    const auditMap = new Map<number, DutyAuditSummary>();
+    duties.forEach((duty: any) => {
+      const dutyId = Number(duty.duty_id ?? duty.id ?? 0);
+      auditMap.set(dutyId, buildDutyAuditSummary(duty));
+    });
+    return auditMap;
+  }, [duties]);
+
   // ─── PlanGroups for Veículos tab ───
   const vehicleGroups = useMemo((): PlanGroup[] => {
     return effectiveBlocks.map((block) => {
@@ -1200,6 +1623,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       }
 
       const violations = (duty.shift_violations ?? 0) + (duty.rest_violations ?? 0);
+      const audit = dutyAuditById.get(Number(dutyId)) ?? buildDutyAuditSummary(duty);
 
       // Jornada inclui soltura e recolhimento se configurados
       const solturaEvt = events.find(e => e.kind === 'soltura');
@@ -1209,7 +1633,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
       return {
         id: dutyId,
-        label: `Motorista ${dutyId}`,
+        label: `Jornada ${formatDutyReference(dutyId)}`,
         tripCount: dutyTrips.length,
         totalKm: events.reduce((s, e) => s + (e.km ?? 0), 0),
         startTime: jornStart,
@@ -1217,10 +1641,15 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         workTime: duty.work_time ?? duty.operational_time_report?.work_time ?? (jornEnd - jornStart),
         totalCost: duty.total_cost ?? 0,
         violations,
+        driverDisplayName: audit.driverDisplayName,
+        operatorNotAssigned: audit.operatorNotAssigned,
+        issueCodes: audit.issueCodes,
+        issueSeverity: audit.issueSeverity,
+        issueExplanation: audit.issueExplanation,
         events,
       };
     });
-  }, [duties, tripById, terminalMap, lineByCode, intervalPolicy, blockFirstLastTrip]);
+  }, [duties, tripById, terminalMap, lineByCode, intervalPolicy, blockFirstLastTrip, dutyAuditById]);
 
   // ─── Flat events for Viagens tab (all vehicle events sorted chronologically) ───
   const allEventsSorted = useMemo((): PlanEvent[] => {
@@ -1254,77 +1683,19 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         Origem: ev.origemName || '—',
         Destino: ev.destinoName || '—',
         'KM Evento': ev.kind === 'descanso' ? '—' : (ev.km || 0).toFixed(2),
-        'Motorista': ev.dutyId != null ? `M${ev.dutyId}` : '—',
+        Jornada: formatDutyReference(ev.dutyId),
       }))
     ), [vehicleGroups]);
 
-  const motoristasExportRows = useMemo(() =>
-    dutyGroups.flatMap((g) =>
-      g.events.map((ev) => ({
-        'ID Jornada': g.id,
-        Motorista: g.label,
-        'Início Jornada': minToHHMM(g.startTime),
-        'Fim Jornada': minToHHMM(g.endTime),
-        'Duração Total (min)': g.workTime || 0,
-        'Duração Formatada': minToDuration(g.workTime ?? 0),
-        'Num Viagens': g.tripCount,
-        'Km Total': g.totalKm.toFixed(2),
-        'Custo': g.totalCost ? Number(g.totalCost) : 0,
-        'Custo Formatado': fmtCurrency(g.totalCost ?? 0),
-        'Violações': g.violations ?? 0,
-        Evento: eventDisplayLabel(ev),
-        Linha: ev.linha || '—',
-        Sentido: ev.sentido || '—',
-        'Início Evento': minToHHMM(ev.inicio),
-        'Chegada Evento': minToHHMM(ev.chegada),
-        'Duração Evento (min)': ev.duracao || 0,
-        'Escopo Evento': ev.eventScope || 'driver',
-        'ID Viagem': ev.tripId || '—',
-        'Trip IDs': ev.tripIds?.join(';') || '—',
-        'Qtd Trips no Bundle': ev.tripCount || (ev.tripId ? 1 : 0),
-        Origem: ev.origemName || '—',
-        Destino: ev.destinoName || '—',
-        'Veículo': ev.vehicleId != null ? `V${ev.vehicleId}` : '—',
-        'Veículo Origem': ev.vehicleFromId != null ? `V${ev.vehicleFromId}` : '—',
-        'Veículo Destino': ev.vehicleToId != null ? `V${ev.vehicleToId}` : '—',
-        'Explicação': ev.explanation || '—',
-      }))
-    ), [dutyGroups]);
+  const motoristasExportRows = useMemo(
+    () => buildDriverExportRows(duties, tripById, scheduleId),
+    [duties, tripById, scheduleId],
+  );
 
-  const viagensDetalhadasExportRows = useMemo(() =>
-    duties.flatMap((duty: any) => {
-      const dutyId = duty.duty_id ?? duty.id;
-      return resolveDutyDetailedTrips(duty, tripById).map((trip: any) => {
-        const sourceTripId = trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id;
-        const lineCode = trip.lineCode ?? trip.line_code ?? '—';
-        const lineId = trip.lineId ?? trip.line_id ?? null;
-        const vehicleId = trip.vehicle_id ?? trip.block_id ?? null;
-        return {
-          'ID Jornada': dutyId,
-          'Seq. na Jornada': trip.sequence_in_duty ?? '—',
-          'Seq. no Bundle': trip.sequence_in_bundle ?? 1,
-          'Qtd Trips no Bundle': trip.bundle_trip_count ?? 1,
-          'Tipo Bundle': trip.bundle_event_type ?? 'commercial_trip',
-          'ID Viagem': sourceTripId,
-          'ID Público Viagem': trip.trip_id ?? trip.public_trip_id ?? sourceTripId,
-          Linha: lineCode !== '—' ? lineCode : String(lineId ?? '—'),
-          Sentido: trip.direction ?? trip.sentido ?? '—',
-          'Início': minToHHMM(Number(trip.start_time ?? trip.startTime ?? 0)),
-          'Início (min)': Number(trip.start_time ?? trip.startTime ?? 0),
-          'Chegada': minToHHMM(Number(trip.end_time ?? trip.endTime ?? 0)),
-          'Chegada (min)': Number(trip.end_time ?? trip.endTime ?? 0),
-          'Duração (min)': Number(trip.duration ?? ((trip.end_time ?? trip.endTime ?? 0) - (trip.start_time ?? trip.startTime ?? 0))),
-          Origem: trip.origin_id ?? trip.originId ?? '—',
-          Destino: trip.destination_id ?? trip.destinationId ?? '—',
-          'Block ID': trip.block_id ?? '—',
-          Veículo: vehicleId != null ? `V${vehicleId}` : '—',
-          Motorista: `M${dutyId}`,
-          'Trip Group': trip.trip_group_id ?? '—',
-          'Pair ID': trip.pair_id ?? '—',
-        };
-      });
-    }),
-  [duties, tripById]);
+  const viagensDetalhadasExportRows = useMemo(
+    () => buildDetailedTripExportRows(duties, tripById, scheduleId),
+    [duties, tripById, scheduleId],
+  );
 
   // ─── Drag-and-drop ───
   const handleDragStart = useCallback((e: React.DragEvent, item: any) => {
@@ -1678,8 +2049,8 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       {activeTab === 2 && (
         <Box>
           <Stack direction="row" sx={{ p: 2, justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${theme.palette.divider}` }}>
-            <Typography variant="caption" color="text.secondary">Clique em um motorista para expandir sua jornada</Typography>
-            <ExportButtons rows={motoristasExportRows} filename="motoristas_corrigido" sheet="MotoristasCorrigido" />
+            <Typography variant="caption" color="text.secondary">Clique em uma jornada para expandir sua representação operacional</Typography>
+            <ExportButtons rows={motoristasExportRows} filename="motoristas" sheet="motoristas" />
           </Stack>
           {dutyGroups.length === 0 ? (
             <Box sx={{ p: 4 }}><Alert severity="info">Nenhuma escala de motorista gerada neste schedule.</Alert></Box>
@@ -1689,7 +2060,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ width: 40 }} />
-                    <TableCell sx={{ fontWeight: 700 }}>Motorista</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Jornada / Operador</TableCell>
                     <TableCell sx={{ fontWeight: 700 }} align="center">Viagens</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Início</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>Fim</TableCell>
@@ -1722,13 +2093,12 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                 <Button size="small" variant="contained" color="primary"
                   startIcon={<IconClipboardData size={15} />}
                   onClick={() => {
-                    const scheduleId = (res as any)?.id ?? (res as any)?.scheduleId ?? '';
-                    const opRows = buildOperationalExportRows(duties, effectiveBlocks, scheduleId);
-                    exportCsv(opRows, 'programacao_operacional_corrigida.csv');
+                    const opRows = buildOperationalExportRows(duties, effectiveBlocks, scheduleId, tripById);
+                    exportCsv(opRows, 'programacao_operacional.csv');
                   }}
                 >Programação Operacional</Button>
               </Tooltip>
-              <ExportButtons rows={viagensDetalhadasExportRows} filename="viagens_detalhadas" sheet="ViagensDetalhadas" />
+              <ExportButtons rows={viagensDetalhadasExportRows} filename="viagens_detalhadas" sheet="viagens_detalhadas" />
             </Stack>
           </Stack>
           <TableContainer sx={{ maxHeight: fullscreen ? 'calc(100vh - 160px)' : 600, overflowY: 'auto' }}>
@@ -1739,7 +2109,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                     <TableCell key={col} sx={{ fontWeight: 700 }}>{col}</TableCell>
                   ))}
                   <TableCell sx={{ fontWeight: 700 }}>Veículo</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Motorista</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Jornada</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1771,7 +2141,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                       <Typography variant="caption">{ev.kind === 'descanso' ? minToDuration(ev.duracao) : ev.km}</Typography>
                     </TableCell>
                     <TableCell><Typography variant="caption">{ev.vehicleId != null ? `V${ev.vehicleId}` : '—'}</Typography></TableCell>
-                    <TableCell><Typography variant="caption">{ev.dutyId != null ? `M${ev.dutyId}` : '—'}</Typography></TableCell>
+                    <TableCell><Typography variant="caption">{formatDutyReference(ev.dutyId)}</Typography></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

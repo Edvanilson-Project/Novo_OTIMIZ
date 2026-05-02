@@ -2568,6 +2568,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         seen: set[Tuple[int, int]] = set()
 
         for duty in sorted((item for item in duties if item.tasks), key=lambda item: (item.start_time, item.id)):
+            mandatory_rest_repair_indexes = self._mandatory_rest_repairable_task_indexes(duty)
             needs_meal_fix = self._duty_needs_meal_break(
                 duty,
                 projected_spread=int(duty.spread_time),
@@ -2587,6 +2588,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 task_group_ids = self._task_group_ids(task)
                 if task_group_ids & split_group_ids:
                     reasons.append("trip_group_split")
+                if task_index in mandatory_rest_repair_indexes:
+                    reasons.append("mandatory_rest_missing_repair")
                 if needs_meal_fix and len(duty.tasks) > 1 and task_index in (0, len(duty.tasks) - 1):
                     reasons.append("meal_break_missing")
                 if len(duty.tasks) > 1 and task_index in (0, len(duty.tasks) - 1):
@@ -2613,6 +2616,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         "reasons": reasons,
                         "priority": (
                             0 if "trip_group_split" in reasons else 1,
+                            0 if "mandatory_rest_missing_repair" in reasons else 1,
                             0 if "meal_break_missing" in reasons else 1,
                             0 if "low_utilization" in reasons else 1,
                             0 if "high_spread" in reasons else 1,
@@ -2628,6 +2632,55 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         candidates.sort(key=lambda item: item["priority"])
         return candidates
+
+    def _mandatory_rest_repairable_task_indexes(self, duty: Duty) -> set[int]:
+        if len(duty.tasks) < 3:
+            return set()
+
+        semantic_metrics = self._build_operational_semantic_metrics(
+            duty.tasks,
+            projected_work=int(duty.work_time),
+            projected_spread=int(duty.spread_time),
+            duty_id=int(duty.id),
+        )
+        if not bool(semantic_metrics.get("mandatory_rest_missing")):
+            return set()
+
+        repairable: set[int] = set()
+        for task_index in range(1, len(duty.tasks) - 1):
+            source_remaining = [
+                candidate_task
+                for index, candidate_task in enumerate(duty.tasks)
+                if index != task_index
+            ]
+            source_rebuilt, _ = self._rebuild_duty_from_tasks(source_remaining, int(duty.id))
+            if source_rebuilt is None:
+                continue
+
+            source_metrics = self._build_operational_semantic_metrics(
+                source_rebuilt.tasks,
+                projected_work=int(source_rebuilt.work_time),
+                projected_spread=int(source_rebuilt.spread_time),
+                duty_id=int(source_rebuilt.id),
+            )
+            if bool(source_metrics.get("mandatory_rest_missing")):
+                continue
+
+            extracted_duty, _ = self._rebuild_duty_from_tasks([duty.tasks[task_index]], -10_000 - int(task_index))
+            if extracted_duty is None:
+                continue
+            extracted_metrics = self._build_operational_semantic_metrics(
+                extracted_duty.tasks,
+                projected_work=int(extracted_duty.work_time),
+                projected_spread=int(extracted_duty.spread_time),
+                duty_id=int(extracted_duty.id),
+            )
+            if bool(extracted_metrics.get("mandatory_rest_missing")):
+                continue
+
+            repairable.add(task_index)
+
+        return repairable
 
     def _soft_issue_target_duties(
         self,
@@ -3318,56 +3371,56 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         },
                     )
 
-                if int(source_duty.id) in reconstructed_source_ids:
-                    continue
-                if "extreme_low_utilization_spread" not in reasons:
-                    continue
-                reconstructed_source_ids.add(int(source_duty.id))
-                audit["considered"] = int(audit.get("considered", 0)) + 1
-                audit["evaluated"] = int(audit.get("evaluated", 0)) + 1
-                reconstruction_candidate, candidate_metrics, candidate_rank = self._soft_issue_extreme_reconstruction_candidate(
-                    current_duties=current_duties,
-                    source_duty=source_duty,
-                    current_metrics=current_metrics,
-                    current_rank=current_rank,
-                    original_blocks=original_blocks,
-                )
-                if reconstruction_candidate is not None:
-                    audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
-                    if best_candidate is None or (candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)):
-                        best_candidate = reconstruction_candidate
-                        best_rank = candidate_rank
-                    continue
+                if "extreme_low_utilization_spread" in reasons and int(source_duty.id) not in reconstructed_source_ids:
+                    reconstructed_source_ids.add(int(source_duty.id))
+                    audit["considered"] = int(audit.get("considered", 0)) + 1
+                    audit["evaluated"] = int(audit.get("evaluated", 0)) + 1
+                    reconstruction_candidate, candidate_metrics, candidate_rank = self._soft_issue_extreme_reconstruction_candidate(
+                        current_duties=current_duties,
+                        source_duty=source_duty,
+                        current_metrics=current_metrics,
+                        current_rank=current_rank,
+                        original_blocks=original_blocks,
+                    )
+                    if reconstruction_candidate is not None:
+                        audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
+                        if best_candidate is None or (candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)):
+                            best_candidate = reconstruction_candidate
+                            best_rank = candidate_rank
+                        continue
 
-                trimmed_candidate, trimmed_metrics, trimmed_rank = self._soft_issue_trimmed_reconstruction_candidate(
-                    current_duties=current_duties,
-                    source_duty=source_duty,
-                    current_metrics=current_metrics,
-                    current_rank=current_rank,
-                    original_blocks=original_blocks,
-                )
-                if trimmed_candidate is not None:
-                    audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
-                    if best_candidate is None or (trimmed_rank is not None and trimmed_rank < (best_rank or trimmed_rank)):
-                        best_candidate = trimmed_candidate
-                        best_rank = trimmed_rank
-                    continue
+                    trimmed_candidate, trimmed_metrics, trimmed_rank = self._soft_issue_trimmed_reconstruction_candidate(
+                        current_duties=current_duties,
+                        source_duty=source_duty,
+                        current_metrics=current_metrics,
+                        current_rank=current_rank,
+                        original_blocks=original_blocks,
+                    )
+                    if trimmed_candidate is not None:
+                        audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
+                        if best_candidate is None or (trimmed_rank is not None and trimmed_rank < (best_rank or trimmed_rank)):
+                            best_candidate = trimmed_candidate
+                            best_rank = trimmed_rank
+                        continue
 
-                record_rejection(
-                    "reconstruction_not_better",
-                    {
-                        "reason": "reconstruction_not_better",
-                        "source_duty_id": int(source_duty.id),
-                        "target_duty_id": None,
-                        "mode": "local_reconstruction",
-                        "reasons": reasons,
-                        "task": self._task_summary(task),
-                        "metrics_before": current_metrics,
-                        "metrics_after": trimmed_metrics or candidate_metrics,
-                    },
-                )
+                    record_rejection(
+                        "reconstruction_not_better",
+                        {
+                            "reason": "reconstruction_not_better",
+                            "source_duty_id": int(source_duty.id),
+                            "target_duty_id": None,
+                            "mode": "local_reconstruction",
+                            "reasons": reasons,
+                            "task": self._task_summary(task),
+                            "metrics_before": current_metrics,
+                            "metrics_after": trimmed_metrics or candidate_metrics,
+                        },
+                    )
 
-                if "extreme_low_utilization_spread" not in reasons or source_rebuilt is None:
+                if (
+                    "extreme_low_utilization_spread" not in reasons
+                    and "mandatory_rest_missing_repair" not in reasons
+                ) or source_rebuilt is None:
                     continue
 
                 dedicated_duty_id = max(int(duty.id) for duty in current_duties) + 1
