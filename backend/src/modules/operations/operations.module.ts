@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
 import { ConfigModule } from '@nestjs/config';
 import { OperationsController } from './operations.controller';
+import { SolutionValidatorService } from './solution-validator.service';
+import { SolutionValidatorController } from './solution-validator.controller';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
 import { OptimizationGateway } from './optimization.gateway';
@@ -31,8 +33,9 @@ import { JwtModule } from '@nestjs/jwt';
     }),
     JwtModule.register({}),
   ],
-  controllers: [OperationsController],
+  controllers: [OperationsController, SolutionValidatorController],
   providers: [
+    SolutionValidatorService,
     OperationsService,
     OptimizationService,
     OptimizationGateway,
@@ -40,6 +43,6 @@ import { JwtModule } from '@nestjs/jwt';
     DriverRepository,
     TenantContext,
   ],
-  exports: [OperationsService, OptimizationService],
+  exports: [OperationsService, OptimizationService, SolutionValidatorService],
 })
 export class OperationsModule {}

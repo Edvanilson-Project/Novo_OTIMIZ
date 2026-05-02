@@ -159,3 +159,118 @@ class SolutionValidator:
             "total_operator_hours": round(total_operator_hours, 2),
             "avg_duty_hours": round(total_operator_hours / len(duties), 2) if len(duties) > 0 else 0
         }
+
+
+class UncoveredTripExplainer:
+    """Explica por quê cada viagem não foi coberta"""
+    
+    def __init__(self):
+        self.reasons = {}
+    
+    def explain_uncovered_trips(
+        self,
+        all_trips: Sequence[Dict[str, Any]],
+        allocated_trip_ids: set,
+        blocks: Sequence[Dict[str, Any]],
+        params: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Retorna lista de viagens não cobertas com explicações detalhadas
+        
+        Tenta entender POR QUÊ cada viagem não foi alocada a um veículo
+        """
+        explanations = []
+        unallocated = [t for t in all_trips if t.get("id") not in allocated_trip_ids]
+        
+        for trip in unallocated:
+            trip_id = trip.get("id")
+            reasons = self._find_why_uncovered(trip, blocks, all_trips, params)
+            
+            explanations.append({
+                "trip_id": trip_id,
+                "uncovered": True,
+                "reasons": reasons,
+                "priority": "HIGH" if not reasons else "MEDIUM"
+            })
+        
+        return explanations
+    
+    def _find_why_uncovered(
+        self,
+        trip: Dict[str, Any],
+        blocks: Sequence[Dict[str, Any]],
+        all_trips: Sequence[Dict[str, Any]],
+        params: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Encontra razões por que uma viagem não foi alocada"""
+        reasons = []
+        
+        trip_start = trip.get("start_time")
+        trip_end = trip.get("end_time")
+        trip_origin = trip.get("origin_id")
+        trip_dest = trip.get("destination_id")
+        
+        # Razão 1: Nenhum veículo disponível no terminal de origem
+        vehicles_at_origin = []
+        for block in blocks:
+            # Se temos items, verificar posição final do último item
+            items = block.get("items") or block.get("trips") or []
+            if items:
+                last_item = items[-1]
+                last_dest = last_item.get("destination_id")
+                if last_dest == trip_origin:
+                    vehicles_at_origin.append(block.get("block_id"))
+        
+        if not vehicles_at_origin:
+            reasons.append({
+                "reason": "NO_VEHICLE_AT_ORIGIN",
+                "detail": f"No vehicle at terminal {trip_origin}",
+                "severity": "CRITICAL"
+            })
+        
+        # Razão 2: Tempo insuficiente para deadhead
+        max_shift = params.get("max_shift_minutes", 600)
+        tolerance = 5  # minutos
+        
+        for block in blocks:
+            items = block.get("items") or block.get("trips") or []
+            if not items:
+                continue
+            
+            last_item = items[-1]
+            last_end = last_item.get("end_time")
+            
+            if last_end and trip_start:
+                gap = trip_start - last_end
+                if gap < tolerance:
+                    reasons.append({
+                        "reason": "INSUFFICIENT_DEADHEAD",
+                        "detail": f"Last vehicle trip ends at {last_end}, next trip starts at {trip_start} (gap {gap}min < {tolerance}min)",
+                        "severity": "HIGH"
+                    })
+        
+        # Razão 3: Jornada seria excedida
+        for block in blocks:
+            items = block.get("items") or block.get("trips") or []
+            if items:
+                first_start = items[0].get("start_time")
+                last_end = items[-1].get("end_time")
+                
+                if first_start and trip_end:
+                    potential_spread = trip_end - first_start
+                    if potential_spread > max_shift:
+                        reasons.append({
+                            "reason": "MAX_SHIFT_WOULD_EXCEED",
+                            "detail": f"Adding trip would make shift {potential_spread}min > max {max_shift}min",
+                            "severity": "HIGH"
+                        })
+        
+        # Se não encontrou razão específica
+        if not reasons:
+            reasons.append({
+                "reason": "UNKNOWN_REASON",
+                "detail": "Could not determine specific reason (may be combination of factors)",
+                "severity": "MEDIUM"
+            })
+        
+        return reasons
