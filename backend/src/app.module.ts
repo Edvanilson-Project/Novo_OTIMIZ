@@ -35,6 +35,8 @@ import { Line } from './modules/database/entities/line.entity';
 import { Terminal } from './modules/database/entities/terminal.entity';
 import { VehicleType } from './modules/database/entities/vehicle-type.entity';
 import { Vehicle } from './modules/database/entities/vehicle.entity';
+import { VehicleMaintenance } from './modules/database/entities/vehicle-maintenance.entity';
+import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-availability-window.entity';
 
 @Module({
   imports: [
@@ -49,12 +51,12 @@ import { Vehicle } from './modules/database/entities/vehicle.entity';
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle],
+        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow],
         synchronize: true, 
         logging: false,
       }),
     }),
-    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle]),
+    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow]),
     AuthModule,
     ParametersModule,
     OperationsModule,

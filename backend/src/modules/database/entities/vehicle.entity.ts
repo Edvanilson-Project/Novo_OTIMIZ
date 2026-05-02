@@ -3,6 +3,8 @@ import { TenantBaseEntity } from '../../../common/entities/base.entity';
 import { VehicleType } from './vehicle-type.entity';
 import { Terminal } from './terminal.entity';
 import { BlockAssignment } from './block-assignment.entity';
+import { VehicleMaintenance } from './vehicle-maintenance.entity';
+import { VehicleAvailabilityWindow } from './vehicle-availability-window.entity';
 
 /**
  * Vehicle: Representa um veículo individual na frota
@@ -44,4 +46,13 @@ export class Vehicle extends TenantBaseEntity {
 
   @OneToMany(() => BlockAssignment, (block) => block.vehicle)
   blocks: BlockAssignment[];
+
+  @OneToMany(() => VehicleMaintenance, (maintenance) => maintenance.vehicle)
+  maintenance: VehicleMaintenance[];
+
+  @OneToMany(
+    () => VehicleAvailabilityWindow,
+    (window) => window.vehicle,
+  )
+  availabilityWindows: VehicleAvailabilityWindow[];
 }
