@@ -10,6 +10,8 @@ import { Driver } from '../database/entities/driver.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
+import { VehicleType } from '../database/entities/vehicle-type.entity';
+import { Vehicle } from '../database/entities/vehicle.entity';
 import { normalizeLegacyCompanyParameters } from '../parameters/parameter-normalization';
 import { OptimizationGateway } from './optimization.gateway';
 
@@ -27,6 +29,8 @@ export class OptimizationService implements OnModuleInit {
     @InjectRepository(Driver) private driverRepo: Repository<Driver>,
     @InjectRepository(CompanyParameters) private paramRepo: Repository<CompanyParameters>,
     @InjectRepository(Schedule) private scheduleRepo: Repository<Schedule>,
+    @InjectRepository(VehicleType) private vehicleTypeRepo: Repository<VehicleType>,
+    @InjectRepository(Vehicle) private vehicleRepo: Repository<Vehicle>,
     private dataSource: DataSource,
     private gateway: OptimizationGateway,
     private configService: ConfigService,
@@ -83,10 +87,12 @@ export class OptimizationService implements OnModuleInit {
 
     try {
       // 2. Coletar Dados para o Solver
-      const [trips, drivers, params] = await Promise.all([
+      const [trips, drivers, params, vehicleTypes, vehicles] = await Promise.all([
         this.tripRepo.find({ where: { companyId }, order: { startTime: 'ASC', tripId: 'ASC', id: 'ASC' } }),
         this.driverRepo.find({ where: { companyId } }),
         this.paramRepo.findOne({ where: { companyId } }),
+        this.vehicleTypeRepo.find({ where: { companyId } }),
+        this.vehicleRepo.find({ where: { companyId }, relations: ['type'] }),
       ]);
 
       if (!trips.length) throw new Error('Nenhuma viagem encontrada para otimização.');
@@ -145,16 +151,7 @@ export class OptimizationService implements OnModuleInit {
             distance_km: Number(t.distanceKm ?? 0),
           };
         }),
-        vehicle_types: [
-          {
-            id: 1,
-            name: 'Padrao',
-            passenger_capacity: 40,
-            cost_per_km: 1.0,
-            cost_per_hour: 10.0,
-            fixed_cost: Number(params?.vehicle_fixed_cost || 800),
-          },
-        ],
+        vehicle_types: this.buildVehicleTypesPayload(vehicleTypes, params),
         cct_params: cctParams,
         optimization_params: {
           cost_vehicle: params?.cost_vehicle ?? 1000.0,
@@ -1057,6 +1054,42 @@ export class OptimizationService implements OnModuleInit {
     }
 
     return result;
+  }
+
+  private buildVehicleTypesPayload(vehicleTypes: VehicleType[], params: CompanyParameters | null): any[] {
+    // If we have vehicle types in the database, use them
+    if (vehicleTypes && vehicleTypes.length > 0) {
+      return vehicleTypes.map((vt) => ({
+        id: vt.id,
+        name: vt.name,
+        passenger_capacity: vt.capacity,
+        cost_per_km: 1.0, // Default, can be enhanced
+        cost_per_hour: 10.0, // Default, can be enhanced
+        fixed_cost: vt.costPerDay || Number(params?.vehicle_fixed_cost || 800),
+        is_electric: false, // Default
+        battery_capacity_kwh: 0.0,
+        minimum_soc: 0.15,
+        charge_rate_kw: 0.0,
+        energy_cost_per_kwh: 0.0,
+      }));
+    }
+
+    // Fallback to default vehicle type if none exist in database
+    return [
+      {
+        id: 1,
+        name: 'Padrao',
+        passenger_capacity: 40,
+        cost_per_km: 1.0,
+        cost_per_hour: 10.0,
+        fixed_cost: Number(params?.vehicle_fixed_cost || 800),
+        is_electric: false,
+        battery_capacity_kwh: 0.0,
+        minimum_soc: 0.15,
+        charge_rate_kw: 0.0,
+        energy_cost_per_kwh: 0.0,
+      },
+    ];
   }
 
   private extractInvalidResultMessage(result: any): string {

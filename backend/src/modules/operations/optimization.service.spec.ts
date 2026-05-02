@@ -22,8 +22,8 @@ describe('OptimizationService polling', () => {
     jest.clearAllMocks();
 
     const noopRepo = {
-      find: jest.fn(),
-      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
       save: jest.fn(),
       update: jest.fn(),
     };
@@ -41,14 +41,16 @@ describe('OptimizationService polling', () => {
     };
 
     service = new OptimizationService(
-      noopRepo as any,
-      noopRepo as any,
-      noopRepo as any,
-      scheduleRepo as any,
-      {} as any,
-      gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
-      { getCompanyId: jest.fn() } as any,
+      noopRepo as any, // TripRepo
+      noopRepo as any, // DriverRepo
+      noopRepo as any, // CompanyParametersRepo
+      scheduleRepo as any, // ScheduleRepo
+      noopRepo as any, // VehicleTypeRepo
+      noopRepo as any, // VehicleRepo
+      {} as any, // DataSource
+      gateway as any, // OptimizationGateway
+      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { getCompanyId: jest.fn() } as any, // TenantContext
     );
 
     (service as any).logger = {
@@ -276,6 +278,8 @@ describe('OptimizationService polling', () => {
       driverRepo as any,
       paramRepo as any,
       scheduleRepoLocal as any,
+      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
+      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
       {} as any,
       gateway as any,
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
@@ -327,14 +331,16 @@ describe('OptimizationService polling', () => {
       update: jest.fn().mockResolvedValue(undefined),
     };
     const localService = new OptimizationService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      { transaction: async (cb: any) => cb(manager) } as any,
-      gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
-      { getCompanyId: jest.fn() } as any,
+      {} as any, // TripRepo
+      {} as any, // DriverRepo
+      {} as any, // CompanyParametersRepo
+      {} as any, // ScheduleRepo
+      {} as any, // VehicleTypeRepo
+      {} as any, // VehicleRepo
+      { transaction: async (cb: any) => cb(manager) } as any, // DataSource
+      gateway as any, // OptimizationGateway
+      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
       warn: jest.fn(),
@@ -407,14 +413,16 @@ describe('OptimizationService polling', () => {
       update: jest.fn().mockResolvedValue(undefined),
     };
     const localService = new OptimizationService(
-      {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
-      { transaction: async (cb: any) => cb(manager) } as any,
-      gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
-      { getCompanyId: jest.fn() } as any,
+      {} as any, // TripRepo
+      {} as any, // DriverRepo
+      {} as any, // CompanyParametersRepo
+      {} as any, // ScheduleRepo
+      {} as any, // VehicleTypeRepo
+      {} as any, // VehicleRepo
+      { transaction: async (cb: any) => cb(manager) } as any, // DataSource
+      gateway as any, // OptimizationGateway
+      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
       warn: jest.fn(),
@@ -529,18 +537,20 @@ describe('OptimizationService polling', () => {
       ]),
     };
     const localService = new OptimizationService(
-      { find: jest.fn() } as any,
-      {} as any,
-      {} as any,
-      scheduleRepoLocal as any,
+      { find: jest.fn() } as any, // TripRepo
+      {} as any, // DriverRepo
+      {} as any, // CompanyParametersRepo
+      scheduleRepoLocal as any, // ScheduleRepo
+      {} as any, // VehicleTypeRepo
+      {} as any, // VehicleRepo
       {
         getRepository: jest.fn()
           .mockReturnValueOnce(mockedBlockRepo)
           .mockReturnValueOnce(mockedDutyRepo),
-      } as any,
-      gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
-      { getCompanyId: jest.fn() } as any,
+      } as any, // DataSource
+      gateway as any, // OptimizationGateway
+      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
       warn: jest.fn(),
@@ -626,20 +636,22 @@ describe('OptimizationService polling', () => {
       update: jest.fn().mockResolvedValue(undefined),
     };
     const localService = new OptimizationService(
-      tripRepo as any,
-      { find: jest.fn().mockResolvedValue([]) } as any,
+      tripRepo as any, // TripRepo
+      { find: jest.fn().mockResolvedValue([]) } as any, // DriverRepo
       {
         findOne: jest.fn().mockResolvedValue({
           force_round_trip: true,
           allow_vehicle_swap: true,
           random_seed: 42,
         }),
-      } as any,
-      scheduleRepoLocal as any,
-      {} as any,
-      gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
-      { getCompanyId: jest.fn() } as any,
+      } as any, // CompanyParametersRepo
+      scheduleRepoLocal as any, // ScheduleRepo
+      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
+      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
+      {} as any, // DataSource
+      gateway as any, // OptimizationGateway
+      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).pollOptimizerTask = jest.fn();
     (localService as any).logger = {
@@ -701,11 +713,17 @@ describe('OptimizationService polling', () => {
           operational_quality_mode: null,
         }),
     };
+    const noopMock = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
     const localService = new OptimizationService(
       tripRepo as any,
       { find: jest.fn().mockResolvedValue([]) } as any,
       paramRepo as any,
       scheduleRepoLocal as any,
+      noopMock as any, // VehicleTypeRepo
+      noopMock as any, // VehicleRepo
       {} as any,
       gateway as any,
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
