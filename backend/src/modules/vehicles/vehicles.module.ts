@@ -8,6 +8,8 @@ import { VehiclesController } from './vehicles.controller';
 import { VehiclesService } from './vehicles.service';
 import { VehicleMaintenanceController } from './vehicle-maintenance.controller';
 import { VehicleMaintenanceService } from './vehicle-maintenance.service';
+import { VehicleMetricsService } from './vehicle-metrics.service';
+import { VehicleMetricsController } from './vehicle-metrics.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { TenantContext } from '../../common/context/tenant-context';
 
@@ -16,8 +18,8 @@ import { TenantContext } from '../../common/context/tenant-context';
     TypeOrmModule.forFeature([Vehicle, VehicleType, VehicleMaintenance, VehicleAvailabilityWindow]),
     JwtModule.register({}),
   ],
-  controllers: [VehiclesController, VehicleMaintenanceController],
-  providers: [VehiclesService, VehicleMaintenanceService, TenantContext],
-  exports: [VehiclesService, VehicleMaintenanceService],
+  controllers: [VehiclesController, VehicleMaintenanceController, VehicleMetricsController],
+  providers: [VehiclesService, VehicleMaintenanceService, VehicleMetricsService, TenantContext],
+  exports: [VehiclesService, VehicleMaintenanceService, VehicleMetricsService],
 })
 export class VehiclesModule {}
