@@ -51,6 +51,7 @@ export class ParametersService {
     const sanitizedData = this.validateAndSanitizeParameters(validData);
 
     Object.assign(params, sanitizedData);
+    this.validateParameterRanges(params);
     this.validateCrossFieldRelations(params);
     return this.parametersRepository.save(params);
   }
@@ -61,6 +62,56 @@ export class ParametersService {
       Object.assign(params, normalized);
     }
     return changed;
+  }
+
+  private validateParameterRanges(params: CompanyParameters) {
+    const ranges: Record<string, { min: number; max: number }> = {
+      min_break_minutes: { min: 5, max: 60 },
+      meal_break_minutes: { min: 15, max: 180 },
+      max_shift_minutes: { min: 240, max: 1440 },
+      max_driving_time_minutes: { min: 120, max: 960 },
+      min_shift_minutes: { min: 60, max: 960 },
+      max_work_minutes: { min: 60, max: 960 },
+      min_work_minutes: { min: 30, max: 480 },
+      mandatory_break_after_minutes: { min: 60, max: 600 },
+      min_layover_minutes: { min: 5, max: 120 },
+      connection_tolerance_minutes: { min: 0, max: 60 },
+      pullout_minutes: { min: 0, max: 120 },
+      pullback_minutes: { min: 0, max: 120 },
+      inter_shift_rest_minutes: { min: 30, max: 720 },
+      weekly_rest_minutes: { min: 480, max: 2880 },
+      daily_driving_limit_minutes: { min: 120, max: 600 },
+      weekly_driving_limit_minutes: { min: 300, max: 3600 },
+      fortnight_driving_limit_minutes: { min: 600, max: 7200 },
+      max_driving_minutes: { min: 60, max: 960 },
+      min_guaranteed_work_minutes: { min: 60, max: 600 },
+      max_unpaid_break_minutes: { min: 5, max: 120 },
+      long_unpaid_break_limit_minutes: { min: 30, max: 300 },
+      vehicle_idle_gap_threshold_minutes: { min: 0, max: 120 },
+      preferred_pair_window_minutes: { min: 0, max: 600 },
+      min_workpiece_minutes: { min: 30, max: 480 },
+      max_workpiece_minutes: { min: 60, max: 960 },
+      min_trips_per_piece: { min: 1, max: 20 },
+      max_trips_per_piece: { min: 1, max: 100 },
+      ilp_timeout_seconds: { min: 1, max: 3600 },
+      max_vehicles: { min: 1, max: 10000 },
+      max_extended_driving_days_per_week: { min: 1, max: 7 },
+      split_shift_min_gap_minutes: { min: 30, max: 300 },
+      split_shift_max_gap_minutes: { min: 60, max: 600 },
+      split_break_first_minutes: { min: 5, max: 180 },
+      split_break_second_minutes: { min: 5, max: 180 },
+    };
+
+    for (const [key, range] of Object.entries(ranges)) {
+      const value = (params as any)[key];
+      if (value !== null && value !== undefined) {
+        if (value < range.min || value > range.max) {
+          throw new BadRequestException(
+            `${key} deve estar entre ${range.min} e ${range.max}, recebido: ${value}`,
+          );
+        }
+      }
+    }
   }
 
   private validateCrossFieldRelations(params: CompanyParameters) {
