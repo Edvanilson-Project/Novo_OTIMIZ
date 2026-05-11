@@ -77,23 +77,31 @@ const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ scheduleId })
         .then((r) => r.data);
 
       if (result) {
+        // Backend novo retorna `completedAt` (timestamp da run) — mapeamos para `generatedAt`
+        // que o resto da UI usa. Mantém retro-compat caso server ainda envie `generatedAt`.
         setData({
           ...result,
           period: {
             startDate: new Date(result.period.startDate),
             endDate: new Date(result.period.endDate),
           },
-          bestDay: {
-            ...result.bestDay,
-            generatedAt: new Date(result.bestDay.generatedAt),
-          },
-          worstDay: {
-            ...result.worstDay,
-            generatedAt: new Date(result.worstDay.generatedAt),
-          },
+          bestDay: result.bestDay
+            ? {
+                ...result.bestDay,
+                generatedAt: new Date(result.bestDay.completedAt ?? result.bestDay.generatedAt ?? Date.now()),
+              }
+            : null,
+          worstDay: result.worstDay
+            ? {
+                ...result.worstDay,
+                generatedAt: new Date(result.worstDay.completedAt ?? result.worstDay.generatedAt ?? Date.now()),
+              }
+            : null,
         });
       } else {
-        setError('Sem dados disponíveis para análise');
+        setError(
+          'Nenhuma run de otimização registrada nos últimos 30 dias. Execute cenários em "Otimização Avançada" para popular esta análise.',
+        );
       }
     } catch (err: any) {
       if (err?.response?.status === 404) {

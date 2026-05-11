@@ -199,7 +199,11 @@ export const operationReportingApi = {
 
 // ─── Scenarios & Advanced Optimization ───────────────────────────────────────
 export const scenariosApi = {
+  // POST = trigger inicial (pode enfileirar runs); GET = polling idempotente (não cria, só lê).
   generate: (scheduleId: ID) => apiClient.post(`/operations/optimization-advanced/scenarios/${scheduleId}`).then((r) => r.data),
+  list: (scheduleId: ID) => apiClient.get(`/operations/optimization-advanced/scenarios/${scheduleId}`).then((r) => r.data),
+  getScenarioRun: (scheduleId: ID, scenarioId: string) =>
+    apiClient.get(`/operations/optimization-advanced/scenarios/${scheduleId}/run/${scenarioId}`).then((r) => r.data),
   compare: (scheduleId: ID, scenario1Id: string, scenario2Id: string) =>
     apiClient.post(`/operations/optimization-advanced/scenarios/${scheduleId}/compare`, { scenario1Id, scenario2Id }).then((r) => r.data),
   whatIfVehicleType: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/vehicle-type-change', body).then((r) => r.data),

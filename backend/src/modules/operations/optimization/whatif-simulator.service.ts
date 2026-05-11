@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Schedule } from '../../database/entities/schedule.entity';
+import { OptimizationService } from '../optimization.service';
+import { TenantContext } from '../../../common/context/tenant-context';
 
 export interface WhatIfScenario {
   type: 'vehicle_type_change' | 'time_shift' | 'trip_removal' | 'trip_addition' | 'parameter_change';
@@ -15,10 +20,35 @@ export interface WhatIfResult {
   feasible: boolean;
   warnings: string[];
   recommendations: string[];
+  /**
+   * Quando true, o resultado foi calculado por fórmula escalar (sem chamar o motor
+   * de otimização). Útil pra estimativas rápidas — não substitui reotimização real.
+   * Frontend deve sinalizar visualmente (banner amarelo) quando isHeuristic=true.
+   */
+  isHeuristic: boolean;
+}
+
+/**
+ * Resultado de reotimização real (não-heurística). Retorna a OptimizationRun
+ * enfileirada — frontend deve pollear via /optimization-advanced/scenarios/:id/run/:scenarioId
+ * (ou listScenarios) até status=completed.
+ */
+export interface WhatIfRunResult {
+  optimizationRunId: number;
+  scheduleId: number;
+  scenarioId: string;
+  status: string;
+  inputFingerprint: string;
+  algorithm: string;
 }
 
 @Injectable()
 export class WhatIfSimulatorService {
+  constructor(
+    @InjectRepository(Schedule) private scheduleRepo: Repository<Schedule>,
+    private optimizationService: OptimizationService,
+    private tenantContext: TenantContext,
+  ) {}
   simulateVehicleTypeChange(
     originalCost: number,
     fromTypeId: number,
@@ -50,6 +80,7 @@ export class WhatIfSimulatorService {
         percent > 0
           ? [`Considere revisar utilização do veículo mais caro`]
           : [`Mudança resultará em economias de R$ ${Math.abs(costDifference).toFixed(2)}`],
+      isHeuristic: true, // cálculo escalar; reotimização real exige refator de payload de trips
     };
   }
 
@@ -82,6 +113,7 @@ export class WhatIfSimulatorService {
         shiftMinutes < 0
           ? [`Antecipação pode reduzir custos de idle`]
           : [`Adiamento deve ser coordenado com próximas viagens`],
+      isHeuristic: true,
     };
   }
 
@@ -108,6 +140,7 @@ export class WhatIfSimulatorService {
       feasible: false, // Trip removal is not feasible for operational schedules
       warnings: [`Remoção de viagem não é recomendada`],
       recommendations: [`Avaliar se viagem é essencial antes de remover`],
+      isHeuristic: true,
     };
   }
 
@@ -138,6 +171,7 @@ export class WhatIfSimulatorService {
       feasible: true,
       warnings: willNeedNewVehicle ? [`Requer novo veículo`] : [],
       recommendations: [`Viagem adicionada aumentará custo em R$ ${additionalCost.toFixed(2)}`],
+      isHeuristic: true,
     };
   }
 
@@ -179,6 +213,52 @@ export class WhatIfSimulatorService {
       recommendations: [
         `Parâmetro será alterado em todas as futuras otimizações`,
       ],
+      isHeuristic: true,
+    };
+  }
+
+  /**
+   * What-If REAL: enfileira uma OptimizationRun chamando o motor de otimização
+   * com overrides em optimization_params/cct_params/vsp_params. Diferente dos
+   * `simulate*` heurísticos, este caminho mede o impacto reotimizando o problema
+   * inteiro. Retorna a run em status running — frontend deve pollear até completed.
+   *
+   * Limitação atual: não modifica o conjunto de trips (remoção/adição/shift exigem
+   * refator do payload de trips no OptimizationService). Use para mudanças que
+   * o optimizer já entende: time_budget_s, cct_violation_penalty, force_round_trip,
+   * preferred_pair_window_minutes, paired_trip_bonus, cost_vehicle, cost_km, etc.
+   */
+  async runParameterChangeReal(
+    baselineScheduleId: number,
+    paramsOverride: Record<string, any>,
+    label?: string,
+    algorithm?: string,
+  ): Promise<WhatIfRunResult> {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new NotFoundException('Empresa não identificada.');
+    const baseline = await this.scheduleRepo.findOne({ where: { id: baselineScheduleId, companyId } });
+    if (!baseline) throw new NotFoundException(`Schedule ${baselineScheduleId} não encontrado.`);
+
+    const scenarioId = `whatif-${label || 'param-change'}-${Date.now()}`;
+    const submission: any = await this.optimizationService.runOptimization(
+      companyId,
+      algorithm,
+      undefined,
+      {
+        scenarioId,
+        baselineScheduleId,
+        optimizationParamsOverride: paramsOverride,
+        skipTenantLock: true,
+      },
+    );
+
+    return {
+      optimizationRunId: submission.optimizationRunId,
+      scheduleId: submission.scheduleId,
+      scenarioId: submission.scenarioId ?? scenarioId,
+      status: 'running',
+      inputFingerprint: submission.inputFingerprint,
+      algorithm: algorithm ?? 'hybrid_pipeline',
     };
   }
 }

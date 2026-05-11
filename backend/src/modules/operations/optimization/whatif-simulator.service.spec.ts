@@ -4,7 +4,11 @@ describe('WhatIfSimulatorService', () => {
   let service: WhatIfSimulatorService;
 
   beforeEach(() => {
-    service = new WhatIfSimulatorService();
+    service = new WhatIfSimulatorService(
+      { findOne: jest.fn() } as any, // scheduleRepo
+      { runOptimization: jest.fn() } as any, // optimizationService
+      { getCompanyId: jest.fn().mockReturnValue(16) } as any, // tenantContext
+    );
   });
 
   it('should be defined', () => {

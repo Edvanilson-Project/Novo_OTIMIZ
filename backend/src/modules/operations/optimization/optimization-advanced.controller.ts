@@ -26,6 +26,34 @@ export class OptimizationAdvancedController {
     return this.scenarioEvaluator.generateScenarios(scheduleId);
   }
 
+  // GET = leitura idempotente para polling. POST acima é o trigger inicial que pode enfileirar.
+  @Get('scenarios/:scheduleId')
+  async listScenarios(@Param('scheduleId', ParseIntPipe) scheduleId: number) {
+    return this.scenarioEvaluator.generateScenarios(scheduleId);
+  }
+
+  @Get('scenarios/:scheduleId/run/:scenarioId')
+  async getScenarioRun(
+    @Param('scheduleId', ParseIntPipe) scheduleId: number,
+    @Param('scenarioId') scenarioId: string,
+  ) {
+    const run = await this.scenarioEvaluator.getScenarioRun(scheduleId, scenarioId);
+    if (!run) return null;
+    return {
+      id: run.id,
+      scenarioId: run.scenarioId,
+      status: run.status,
+      algorithm: run.algorithm,
+      metrics: run.metrics,
+      errorMessage: run.errorMessage,
+      durationMs: run.durationMs,
+      resultScheduleId: run.resultScheduleId,
+      inputFingerprint: run.inputFingerprint,
+      createdAt: run.createdAt,
+      completedAt: run.completedAt,
+    };
+  }
+
   @Post('scenarios/:scheduleId/compare')
   async compareScenarios(
     @Param('scheduleId', ParseIntPipe) scheduleId: number,
@@ -124,6 +152,30 @@ export class OptimizationAdvancedController {
       body.parameter,
       body.oldValue,
       body.newValue,
+    );
+  }
+
+  /**
+   * What-If REAL: enfileira uma reotimização chamando o motor real com overrides.
+   * Cobre mudanças que o optimizer entende nativamente (time_budget_s,
+   * cct_violation_penalty, cost_vehicle, force_round_trip, etc.). Retorna run em status
+   * running — frontend pode pollear via GET /scenarios/:scheduleId/run/:scenarioId.
+   */
+  @Post('whatif/run-real/:scheduleId')
+  async runWhatIfReal(
+    @Param('scheduleId', ParseIntPipe) scheduleId: number,
+    @Body()
+    body: {
+      paramsOverride: Record<string, any>;
+      label?: string;
+      algorithm?: string;
+    },
+  ) {
+    return this.whatIfSimulator.runParameterChangeReal(
+      scheduleId,
+      body.paramsOverride || {},
+      body.label,
+      body.algorithm,
     );
   }
 }

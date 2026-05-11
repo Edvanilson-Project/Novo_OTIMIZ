@@ -100,6 +100,15 @@ const KPITrendAnalytics: React.FC<KPITrendAnalyticsProps> = ({ scheduleId, days 
     return <Alert severity="error">{error}</Alert>;
   }
 
+  if (trends.length === 0) {
+    return (
+      <Alert severity="info">
+        Nenhum histórico de otimização encontrado nos últimos {days} dias para este schedule.
+        Execute novos cenários em <strong>Otimização Avançada</strong> para popular o histórico.
+      </Alert>
+    );
+  }
+
   const TrendCard = ({
     title,
     value,

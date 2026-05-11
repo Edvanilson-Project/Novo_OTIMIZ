@@ -22,6 +22,7 @@ import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
 import { Vehicle } from '../database/entities/vehicle.entity';
 import { VehicleType } from '../database/entities/vehicle-type.entity';
+import { OptimizationRun } from '../database/entities/optimization-run.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 import { JwtModule } from '@nestjs/jwt';
 
@@ -36,6 +37,8 @@ import { JwtModule } from '@nestjs/jwt';
       DutyAssignment,
       Vehicle,
       VehicleType,
+      OptimizationRun,
+      // OptimizationRun é importado acima e usado em reporting + scenario evaluator
     ]),
     MulterModule.register({
       limits: { fileSize: 10 * 1024 * 1024 },

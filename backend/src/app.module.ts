@@ -38,6 +38,7 @@ import { VehicleType } from './modules/database/entities/vehicle-type.entity';
 import { Vehicle } from './modules/database/entities/vehicle.entity';
 import { VehicleMaintenance } from './modules/database/entities/vehicle-maintenance.entity';
 import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-availability-window.entity';
+import { OptimizationRun } from './modules/database/entities/optimization-run.entity';
 
 @Module({
   imports: [
@@ -52,14 +53,14 @@ import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-a
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow],
+        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun],
         // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
         // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
         logging: false,
       }),
     }),
-    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow]),
+    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun]),
     AuthModule,
     ParametersModule,
     OperationsModule,

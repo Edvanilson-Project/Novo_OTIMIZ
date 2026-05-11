@@ -2,12 +2,14 @@ import { BadRequestException, ConflictException, Injectable, InternalServerError
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
+import * as crypto from 'crypto';
 import { DataSource, In, Repository } from 'typeorm';
 import { TenantContext } from '../../common/context/tenant-context';
 import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { CompanyParameters } from '../database/entities/company-parameters.entity';
 import { Driver } from '../database/entities/driver.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
+import { OptimizationRun, OptimizationRunStatus } from '../database/entities/optimization-run.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
 import { VehicleType } from '../database/entities/vehicle-type.entity';
@@ -41,6 +43,7 @@ export class OptimizationService implements OnModuleInit {
     @InjectRepository(Schedule) private scheduleRepo: Repository<Schedule>,
     @InjectRepository(VehicleType) private vehicleTypeRepo: Repository<VehicleType>,
     @InjectRepository(Vehicle) private vehicleRepo: Repository<Vehicle>,
+    @InjectRepository(OptimizationRun) private optimizationRunRepo: Repository<OptimizationRun>,
     private dataSource: DataSource,
     private gateway: OptimizationGateway,
     private configService: ConfigService,
@@ -77,25 +80,41 @@ export class OptimizationService implements OnModuleInit {
     }
   }
 
-  async runOptimization(companyId: number, algorithm?: string, operationalQualityMode?: string) {
-    // 0. Tenant Lock: Verificar se já existe uma otimização em andamento
-    const activeSchedule = await this.scheduleRepo.findOne({
-      where: { companyId, status: ScheduleStatus.PROCESSING },
-      order: { createdAt: 'DESC' },
-    });
+  async runOptimization(
+    companyId: number,
+    algorithm?: string,
+    operationalQualityMode?: string,
+    options?: {
+      scenarioId?: string;
+      baselineScheduleId?: number | null;
+      optimizationParamsOverride?: Record<string, any>;
+      vspParamsOverride?: Record<string, any>;
+      cctParamsOverride?: Record<string, any>;
+      skipTenantLock?: boolean;
+    },
+  ) {
+    // 0. Tenant Lock: Verificar se já existe uma otimização em andamento.
+    // Cenários paralelos (FASE 3) podem opt-out via skipTenantLock para enfileirar
+    // várias runs ao mesmo tempo — a fila Celery serializa execução.
+    if (!options?.skipTenantLock) {
+      const activeSchedule = await this.scheduleRepo.findOne({
+        where: { companyId, status: ScheduleStatus.PROCESSING },
+        order: { createdAt: 'DESC' },
+      });
 
-    if (activeSchedule) {
-      const oneHourAgo = new Date();
-      oneHourAgo.setHours(oneHourAgo.getHours() - 1);
+      if (activeSchedule) {
+        const oneHourAgo = new Date();
+        oneHourAgo.setHours(oneHourAgo.getHours() - 1);
 
-      if (activeSchedule.createdAt > oneHourAgo) {
-        throw new ConflictException(
-          'Otimização já em andamento para sua empresa. Por favor, aguarde a conclusão do processo atual.',
+        if (activeSchedule.createdAt > oneHourAgo) {
+          throw new ConflictException(
+            'Otimização já em andamento para sua empresa. Por favor, aguarde a conclusão do processo atual.',
+          );
+        }
+        this.logger.warn(
+          `Schedule ${activeSchedule.id} preso em PROCESSING desde ${activeSchedule.createdAt}. Ignorando trava por timeout (1h).`,
         );
       }
-      this.logger.warn(
-        `Schedule ${activeSchedule.id} preso em PROCESSING desde ${activeSchedule.createdAt}. Ignorando trava por timeout (1h).`,
-      );
     }
 
     // 1. Criar registro inicial do Schedule
@@ -116,8 +135,8 @@ export class OptimizationService implements OnModuleInit {
 
       if (!trips.length) throw new Error('Nenhuma viagem encontrada para otimização.');
 
-      const cctParams = this.buildCctParams(params);
-      const vspParams = this.buildVspParams(params, cctParams);
+      const cctParams = { ...this.buildCctParams(params), ...(options?.cctParamsOverride || {}) };
+      const vspParams = { ...this.buildVspParams(params, cctParams), ...(options?.vspParamsOverride || {}) };
       const forceRoundTrip =
         Boolean(params?.force_round_trip) ||
         Boolean(cctParams.enforce_trip_groups_hard) ||
@@ -223,9 +242,10 @@ export class OptimizationService implements OnModuleInit {
           vehicle_idle_gap_behavior: vspParams.vehicle_idle_gap_behavior,
           vehicle_idle_gap_threshold_minutes: vspParams.vehicle_idle_gap_threshold_minutes,
           operational_quality_mode: resolvedOperationalQualityMode,
+          ...(options?.optimizationParamsOverride || {}),
         },
         vsp_params: vspParams,
-        time_budget_s: params?.time_budget_s ?? null,
+        time_budget_s: options?.optimizationParamsOverride?.time_budget_s ?? params?.time_budget_s ?? null,
         algorithm: algorithm || params?.algorithm_preference || 'hybrid_pipeline',
         company_id: companyId,
         run_id: schedule.id,
@@ -233,14 +253,49 @@ export class OptimizationService implements OnModuleInit {
           trip_group_inference_mode: 'optimizer_only',
           backend_trip_group_stats: backendTripGroupStats,
           company_id: companyId,
-          scenario_id: `schedule-${schedule.id}`,
+          scenario_id: options?.scenarioId ?? `schedule-${schedule.id}`,
           run_id: schedule.id,
+          baseline_schedule_id: options?.baselineScheduleId ?? null,
           requested_operational_quality_mode: requestedOperationalQualityMode,
           persisted_operational_quality_mode: persistedOperationalQualityMode,
           effective_operational_quality_mode: resolvedOperationalQualityMode,
           operational_quality_mode: resolvedOperationalQualityMode,
         },
       };
+
+      // 3b. Persistir OptimizationRun (link cenário → schedule resultante).
+      // Cria em RUNNING porque já vamos enfileirar no optimizer. inputFingerprint
+      // permite reconhecer mesma combinação (companyId, scenario, params, trips) em chamadas futuras.
+      const inputFingerprint = this.computeInputFingerprint({
+        companyId,
+        scenarioId: options?.scenarioId ?? 'default',
+        baselineScheduleId: options?.baselineScheduleId ?? null,
+        algorithm: payload.algorithm,
+        optimizationParams: payload.optimization_params,
+        cctParams,
+        vspParams,
+        tripIds: validTrips.map((t) => t.id),
+      });
+      const optimizationRun = await this.optimizationRunRepo.save({
+        companyId,
+        scenarioId: options?.scenarioId ?? 'default',
+        baselineScheduleId: options?.baselineScheduleId ?? null,
+        resultScheduleId: schedule.id,
+        inputFingerprint,
+        params: {
+          algorithm: payload.algorithm,
+          optimization_params: payload.optimization_params,
+          cct_params: cctParams,
+          vsp_params: vspParams,
+          operational_quality_mode: resolvedOperationalQualityMode,
+        },
+        algorithm: payload.algorithm,
+        randomSeed:
+          typeof payload.optimization_params?.random_seed === 'number'
+            ? payload.optimization_params.random_seed
+            : null,
+        status: OptimizationRunStatus.RUNNING,
+      });
 
       this.logger.log(
         `Enviando otimização para o motor: company_id=${payload.company_id}, enforce_min_interval=${payload.cct_params?.enforce_min_interval}, min_break=${payload.cct_params?.min_break_minutes}, strict_hard_validation=${payload.cct_params?.strict_hard_validation}, strict_zero_gap_validation=${payload.cct_params?.strict_zero_gap_validation}, strict_operational_mode=${payload.cct_params?.strict_operational_mode}, strict_hard_constraints=${payload.cct_params?.strict_hard_constraints}, group_infeasibility_mode=${payload.cct_params?.group_infeasibility_mode}, random_seed=${payload.optimization_params?.random_seed}, trip_groups=${backendTripGroupStats.group_count}, grouped_trips=${backendTripGroupStats.grouped_trip_count}`,
@@ -271,14 +326,105 @@ export class OptimizationService implements OnModuleInit {
         optimizationParams: payload.optimization_params,
         request_metadata: payload.request_metadata,
         submittedAt: new Date().toISOString(),
+        optimizationRunId: optimizationRun.id,
+        scenarioId: options?.scenarioId ?? null,
       });
 
-      return { scheduleId: schedule.id, taskId };
+      return {
+        scheduleId: schedule.id,
+        taskId,
+        optimizationRunId: optimizationRun.id,
+        scenarioId: optimizationRun.scenarioId,
+        inputFingerprint,
+      };
     } catch (error) {
       this.logger.error(`Falha ao iniciar otimização: ${error.message}`);
       await this.scheduleRepo.update(schedule.id, { status: ScheduleStatus.FAILED });
       throw new InternalServerErrorException(error.message);
     }
+  }
+
+  /** Hash determinístico dos inputs que afetam o resultado da otimização. */
+  private computeInputFingerprint(parts: {
+    companyId: number;
+    scenarioId: string;
+    baselineScheduleId: number | null;
+    algorithm: string;
+    optimizationParams: Record<string, any>;
+    cctParams: Record<string, any>;
+    vspParams: Record<string, any>;
+    tripIds: number[];
+  }): string {
+    // Sort por estabilidade — ordem do hash não pode depender da ordem de inserção.
+    const stableStringify = (obj: any): string => {
+      if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+      if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(',')}]`;
+      const keys = Object.keys(obj).sort();
+      return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+    };
+    const payload = stableStringify({
+      c: parts.companyId,
+      s: parts.scenarioId,
+      b: parts.baselineScheduleId,
+      a: parts.algorithm,
+      op: parts.optimizationParams,
+      cct: parts.cctParams,
+      vsp: parts.vspParams,
+      t: [...parts.tripIds].sort((a, b) => a - b),
+    });
+    return crypto.createHash('sha256').update(payload).digest('hex');
+  }
+
+  /**
+   * Marca OptimizationRun como concluída (COMPLETED ou FAILED). Idempotente: ignora
+   * se o context não trouxer runId (chamada pré-FASE 3 sem rastreio de cenário).
+   */
+  private async finalizeOptimizationRun(
+    context: Record<string, any>,
+    update: {
+      status: OptimizationRunStatus;
+      metrics?: Record<string, any> | null;
+      errorMessage?: string | null;
+    },
+  ): Promise<void> {
+    const runId = context?.optimizationRunId;
+    if (!runId) return;
+    try {
+      const run = await this.optimizationRunRepo.findOne({ where: { id: Number(runId) } });
+      if (!run) return;
+      const submittedAt = context?.submittedAt ? new Date(context.submittedAt).getTime() : null;
+      const durationMs = submittedAt ? Date.now() - submittedAt : null;
+      await this.optimizationRunRepo.update(run.id, {
+        status: update.status,
+        metrics: update.metrics ?? null,
+        errorMessage: update.errorMessage ?? null,
+        durationMs,
+        completedAt: new Date(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `[OPT-RUN-FINALIZE-FAIL] runId=${runId} status=${update.status} error=${(err as Error).message}`,
+      );
+    }
+  }
+
+  /** Sumarização das métricas que importam para comparação de cenários. */
+  private extractRunMetrics(result: any): Record<string, any> {
+    if (!result || typeof result !== 'object') return {};
+    const fairness = result.cost_breakdown?.csp?.fairness ?? null;
+    return {
+      totalCost: Number(result.total_cost ?? 0),
+      numVehicles: Number(result.vehicles ?? 0),
+      numDuties: Number(result.crew ?? result.meta?.roster_count ?? 0),
+      totalTrips: Number(result.total_trips ?? 0),
+      unassignedTrips: Number(result.unassigned_trips ?? 0),
+      cctViolations: Number(result.cct_violations ?? 0),
+      hardIssueCount: Number(result.solver_explanation?.issues?.hard_count ?? 0),
+      softIssueCount: Number(result.solver_explanation?.issues?.soft_count ?? 0),
+      algorithm: result.vsp_algorithm ?? null,
+      fairnessGini: fairness?.work_time?.gini ?? null,
+      fairnessCv: fairness?.work_time?.cv ?? null,
+    };
   }
 
   async aiChat(metrics: any, question: string) {
@@ -396,6 +542,14 @@ export class OptimizationService implements OnModuleInit {
           const persistedStatus = await this.persistResults(scheduleId, companyId, data.result, context);
           // Invalidar cache para que o usuário veja o novo resultado imediatamente
           this.scheduleCache.delete(companyId);
+          // Atualizar OptimizationRun (FASE 3 scenario tracking) — fire-and-forget
+          // para não atrasar a notificação Socket.io e não introduzir microtasks extras
+          // que quebram timing de testes existentes.
+          void this.finalizeOptimizationRun(context, {
+            status: persistedStatus === 'failed' ? OptimizationRunStatus.FAILED : OptimizationRunStatus.COMPLETED,
+            metrics: this.extractRunMetrics(data.result),
+            errorMessage: persistedStatus === 'failed' ? this.extractInvalidResultMessage(data.result) : null,
+          });
           // Enviamos apenas um sinal de conclusão leve via Socket.io para evitar OOM no envio.
           // O Frontend buscará os dados completos via API (fetchData).
           if (persistedStatus === 'failed') {
@@ -555,6 +709,12 @@ export class OptimizationService implements OnModuleInit {
           },
         );
         this.scheduleCache.delete(companyId);
+        // Sincroniza OptimizationRun (FASE 3 scenario tracking) com a falha — fire-and-forget
+        void this.finalizeOptimizationRun(context, {
+          status: OptimizationRunStatus.FAILED,
+          errorMessage: failure.message ?? failure.error_code ?? 'Falha na otimização',
+          metrics: null,
+        });
         this.logger.log(`✓ Falha persistida com sucesso para Schedule ${scheduleId} (tentativa ${attempt}/${maxRetries})`);
         return; // Sucesso
       } catch (error) {

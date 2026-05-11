@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Box, Container, Tabs, Tab, Typography, Button, Stack } from '@mui/material';
-import { IconRefresh } from '@tabler/icons-react';
+import { Alert, AlertTitle, Box, Container, Tabs, Tab, Typography, Button, Stack } from '@mui/material';
+import { IconRefresh, IconFlask } from '@tabler/icons-react';
 import OperationReportViewer from '../../../components/shared/OperationReportViewer';
 import KPITrendAnalytics from '../../../components/shared/KPITrendAnalytics';
 import CostBenefitAnalysis from '../../../components/shared/CostBenefitAnalysis';
@@ -72,6 +72,14 @@ export default function ReportingPage() {
           Atualizar Dados
         </Button>
       </Stack>
+
+      {/* Banner — dados reais agora vêm da tabela optimization_runs */}
+      <Alert severity="info" icon={<IconFlask size={18} />} sx={{ mb: 3 }}>
+        <AlertTitle>Dados reais</AlertTitle>
+        Histórico, tendências e best/worst day agora leem de <code>optimization_runs</code> persistidas
+        no banco. Dias sem otimização não aparecem (não há valores fabricados). Execute novos cenários
+        em <strong>Otimização Avançada</strong> para popular o histórico.
+      </Alert>
 
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>

@@ -47,6 +47,7 @@ describe('OptimizationService polling', () => {
       scheduleRepo as any, // ScheduleRepo
       noopRepo as any, // VehicleTypeRepo
       noopRepo as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
@@ -280,6 +281,7 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any,
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
@@ -294,7 +296,7 @@ describe('OptimizationService polling', () => {
 
     await localService.runOptimization(16, 'hybrid_pipeline');
 
-    const payload = mockedAxios.post.mock.calls[0][1];
+    const payload = mockedAxios.post.mock.calls[0][1] as any;
     expect(payload.trips).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 1, trip_group_id: null }),
@@ -311,6 +313,7 @@ describe('OptimizationService polling', () => {
       company_id: 16,
       scenario_id: 'schedule-91',
       run_id: 91,
+      baseline_schedule_id: null,
       requested_operational_quality_mode: null,
       persisted_operational_quality_mode: null,
       effective_operational_quality_mode: 'balanced',
@@ -337,6 +340,7 @@ describe('OptimizationService polling', () => {
       {} as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       { transaction: async (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
@@ -419,6 +423,7 @@ describe('OptimizationService polling', () => {
       {} as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       { transaction: async (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
@@ -543,6 +548,7 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {
         getRepository: jest.fn()
           .mockReturnValueOnce(mockedBlockRepo)
@@ -648,6 +654,7 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any, // ScheduleRepo
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
@@ -662,7 +669,7 @@ describe('OptimizationService polling', () => {
 
     await localService.runOptimization(16, 'hybrid_pipeline', mode);
 
-    const payload = mockedAxios.post.mock.calls[0][1];
+    const payload = mockedAxios.post.mock.calls[0][1] as any;
     const pollingContext = ((localService as any).pollOptimizerTask as jest.Mock).mock.calls[0][3];
     expect(payload.optimization_params.operational_quality_mode).toBe(mode);
     expect(payload.request_metadata.operational_quality_mode).toBe(mode);
@@ -724,6 +731,7 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any,
       noopMock as any, // VehicleTypeRepo
       noopMock as any, // VehicleRepo
+      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
       { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
@@ -739,8 +747,8 @@ describe('OptimizationService polling', () => {
     await localService.runOptimization(16, 'hybrid_pipeline');
     await localService.runOptimization(16, 'hybrid_pipeline');
 
-    const payloadWithPersisted = mockedAxios.post.mock.calls[0][1];
-    const payloadWithFallback = mockedAxios.post.mock.calls[1][1];
+    const payloadWithPersisted = mockedAxios.post.mock.calls[0][1] as any;
+    const payloadWithFallback = mockedAxios.post.mock.calls[1][1] as any;
 
     expect(payloadWithPersisted.optimization_params.operational_quality_mode).toBe('optimized');
     expect(payloadWithFallback.optimization_params.operational_quality_mode).toBe('balanced');

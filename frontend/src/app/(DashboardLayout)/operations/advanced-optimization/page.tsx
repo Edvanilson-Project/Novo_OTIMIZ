@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Box, Container, Grid, Tabs, Tab, Typography, Button, Stack } from '@mui/material';
-import { IconRefresh } from '@tabler/icons-react';
+import { Alert, AlertTitle, Box, Container, Grid, Tabs, Tab, Typography, Button, Stack } from '@mui/material';
+import { IconRefresh, IconFlask } from '@tabler/icons-react';
 import { operationsApi, operationReportingApi } from '@/lib/api';
 import ScenarioComparison from '../../../components/shared/ScenarioComparison';
 import WhatIfPanel from '../../../components/shared/WhatIfPanel';
@@ -70,13 +70,13 @@ export default function AdvancedOptimizationPage() {
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       {/* Header */}
-      <Stack sx={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+      <Stack sx={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
             Otimização Avançada
           </Typography>
           <Typography variant="body2" color="textSecondary">
-            Explore cenários, simule mudanças e acompanhe a otimização em tempo real
+            Explore cenários reais, simule mudanças e acompanhe a otimização em tempo real
           </Typography>
         </Box>
         <Button
@@ -88,6 +88,17 @@ export default function AdvancedOptimizationPage() {
           {isOptimizing ? 'Otimizando...' : 'Executar Otimização'}
         </Button>
       </Stack>
+
+      {/* Banner BETA — what-if e o "explicador" ainda têm partes não-conectadas ao optimizer */}
+      <Alert
+        severity="info"
+        icon={<IconFlask size={18} />}
+        sx={{ mb: 3 }}
+      >
+        <AlertTitle>BETA — Cenários reais ativos, What-If em desenvolvimento</AlertTitle>
+        A aba <strong>Cenários</strong> agora chama o motor de otimização real (VCSP, MCNF, Hybrid) — pode levar 30–120s por cenário.
+        As abas <strong>What-If Simulator</strong> e <strong>Explicador</strong> ainda usam heurísticas escalares; uma reotimização real está em desenvolvimento.
+      </Alert>
 
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
