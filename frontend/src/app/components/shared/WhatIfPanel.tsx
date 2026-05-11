@@ -20,7 +20,7 @@ import {
   Divider,
   Chip,
 } from '@mui/material';
-import { IconWand, IconAlertTriangle, IconCheck } from '@tabler/icons-react';
+import { IconWand, IconAlertTriangle, IconCheck, IconBolt, IconRefresh } from '@tabler/icons-react';
 import { scenariosApi } from '@/lib/api';
 
 interface WhatIfScenario {
@@ -50,6 +50,58 @@ const WhatIfPanel: React.FC<WhatIfPanelProps> = ({ scheduleId, originalCost }) =
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<WhatIfResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Reotimização REAL — chama POST /whatif/run-real e polla o resultado.
+  const [realAlgorithm, setRealAlgorithm] = useState<string>('hybrid_pipeline');
+  const [realTimeBudget, setRealTimeBudget] = useState<string>('60');
+  const [realCctPenalty, setRealCctPenalty] = useState<string>('500');
+  const [realCostVehicle, setRealCostVehicle] = useState<string>('1000');
+  const [realCostKm, setRealCostKm] = useState<string>('1.0');
+  const [realLoading, setRealLoading] = useState(false);
+  const [realError, setRealError] = useState<string | null>(null);
+  const [realRun, setRealRun] = useState<any | null>(null);
+  const [realScenarioId, setRealScenarioId] = useState<string | null>(null);
+
+  // Polling enquanto run real está running/pending
+  React.useEffect(() => {
+    if (!realScenarioId || !realRun) return;
+    if (realRun.status !== 'running' && realRun.status !== 'pending') return;
+    const t = setInterval(async () => {
+      try {
+        const updated = await scenariosApi.getScenarioRun(scheduleId, realScenarioId);
+        if (updated) setRealRun(updated);
+      } catch {
+        // ignore — silencioso para polling
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [realScenarioId, realRun, scheduleId]);
+
+  const handleRunReal = async () => {
+    setRealLoading(true);
+    setRealError(null);
+    setRealRun(null);
+    setRealScenarioId(null);
+    try {
+      const paramsOverride: Record<string, any> = {
+        time_budget_s: Number(realTimeBudget) || 60,
+        cct_violation_penalty: Number(realCctPenalty) || 500,
+        cost_vehicle: Number(realCostVehicle) || 1000,
+        cost_km: Number(realCostKm) || 1,
+      };
+      const submission = await scenariosApi.whatIfRunReal(scheduleId, {
+        paramsOverride,
+        label: 'panel',
+        algorithm: realAlgorithm,
+      });
+      setRealScenarioId(submission.scenarioId);
+      setRealRun(submission);
+    } catch (err: any) {
+      setRealError(err?.response?.data?.message || 'Falha ao enfileirar reotimização real.');
+    } finally {
+      setRealLoading(false);
+    }
+  };
 
   // Vehicle type change parameters
   const [fromTypeId, setFromTypeId] = useState('1');
@@ -139,11 +191,193 @@ const WhatIfPanel: React.FC<WhatIfPanelProps> = ({ scheduleId, originalCost }) =
 
   return (
     <Box>
+      {/* Reotimização Real — chama o motor de otimização Python com overrides. Não é heurística. */}
+      <Card sx={{ mb: 3, border: '2px solid #1976d2' }}>
+        <CardHeader
+          title="Reotimização Real (chama o motor)"
+          avatar={<IconBolt size={20} />}
+          subheader="Enfileira uma nova execução completa do solver com os parâmetros abaixo. Tempo: 30–120s."
+        />
+        <CardContent>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Algoritmo</InputLabel>
+                <Select
+                  label="Algoritmo"
+                  value={realAlgorithm}
+                  onChange={(e) => setRealAlgorithm(e.target.value)}
+                >
+                  <MenuItem value="hybrid_pipeline">hybrid_pipeline (recomendado)</MenuItem>
+                  <MenuItem value="mcnf">mcnf (rápido, VSP puro)</MenuItem>
+                  <MenuItem value="vcsp_pulp">vcsp_pulp (ILP exato)</MenuItem>
+                  <MenuItem value="sa">sa (simulated annealing)</MenuItem>
+                  <MenuItem value="ts">ts (tabu search)</MenuItem>
+                  <MenuItem value="genetic">genetic (GA)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid size={{ xs: 6, sm: 3, md: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Time budget (s)"
+                type="number"
+                value={realTimeBudget}
+                onChange={(e) => setRealTimeBudget(e.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 3, md: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Penalty CCT"
+                type="number"
+                value={realCctPenalty}
+                onChange={(e) => setRealCctPenalty(e.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 3, md: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Custo veículo R$"
+                type="number"
+                value={realCostVehicle}
+                onChange={(e) => setRealCostVehicle(e.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 6, sm: 3, md: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Custo/km R$"
+                type="number"
+                value={realCostKm}
+                onChange={(e) => setRealCostKm(e.target.value)}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, md: 1 }}>
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={realLoading ? <CircularProgress size={14} /> : <IconBolt size={18} />}
+                onClick={handleRunReal}
+                disabled={realLoading || (realRun && (realRun.status === 'running' || realRun.status === 'pending'))}
+              >
+                {realLoading ? '...' : 'Rodar'}
+              </Button>
+            </Grid>
+          </Grid>
+
+          {realError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {realError}
+            </Alert>
+          )}
+
+          {realRun && (
+            <Box sx={{ mt: 3 }}>
+              <Stack spacing={1}>
+                <Stack sx={{ flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+                  <Chip
+                    label={realRun.status}
+                    size="small"
+                    color={
+                      realRun.status === 'completed'
+                        ? 'success'
+                        : realRun.status === 'failed'
+                          ? 'error'
+                          : 'warning'
+                    }
+                    icon={
+                      realRun.status === 'completed' ? (
+                        <IconCheck size={14} />
+                      ) : realRun.status === 'failed' ? (
+                        <IconAlertTriangle size={14} />
+                      ) : (
+                        <IconRefresh size={14} />
+                      )
+                    }
+                  />
+                  <Typography variant="caption" color="textSecondary" sx={{ fontFamily: 'monospace' }}>
+                    run #{realRun.optimizationRunId ?? realRun.id} · {realRun.algorithm ?? realAlgorithm}
+                  </Typography>
+                  {realRun.inputFingerprint && (
+                    <Typography variant="caption" color="textSecondary" sx={{ fontFamily: 'monospace' }}>
+                      fp: {String(realRun.inputFingerprint).slice(0, 12)}
+                    </Typography>
+                  )}
+                </Stack>
+
+                {realRun.status === 'completed' && realRun.metrics && (
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 6, sm: 3 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        Custo total
+                      </Typography>
+                      <Typography variant="h6">
+                        R$ {Number(realRun.metrics.totalCost ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                      </Typography>
+                      {originalCost > 0 && (
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            color:
+                              Number(realRun.metrics.totalCost ?? 0) < originalCost ? 'success.main' : 'error.main',
+                          }}
+                        >
+                          {Number(realRun.metrics.totalCost ?? 0) < originalCost ? '−' : '+'}R${' '}
+                          {Math.abs(Number(realRun.metrics.totalCost ?? 0) - originalCost).toLocaleString('pt-BR', {
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          vs baseline
+                        </Typography>
+                      )}
+                    </Grid>
+                    <Grid size={{ xs: 6, sm: 3 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        Veículos
+                      </Typography>
+                      <Typography variant="h6">{realRun.metrics.numVehicles ?? '—'}</Typography>
+                    </Grid>
+                    <Grid size={{ xs: 6, sm: 3 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        Duties / órfãs
+                      </Typography>
+                      <Typography variant="h6">
+                        {realRun.metrics.numDuties ?? '—'} / {realRun.metrics.unassignedTrips ?? 0}
+                      </Typography>
+                    </Grid>
+                    <Grid size={{ xs: 6, sm: 3 }}>
+                      <Typography variant="caption" color="textSecondary">
+                        Gini / Violações CCT
+                      </Typography>
+                      <Typography variant="h6">
+                        {realRun.metrics.fairnessGini ?? '—'} / {realRun.metrics.cctViolations ?? 0}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                )}
+                {realRun.status === 'failed' && (
+                  <Alert severity="error">{realRun.errorMessage || 'Falha desconhecida.'}</Alert>
+                )}
+                {(realRun.status === 'running' || realRun.status === 'pending') && (
+                  <Alert severity="info" icon={<IconRefresh size={18} />}>
+                    Otimizador Python rodando… polling a cada 5s.
+                  </Alert>
+                )}
+              </Stack>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
       <Card sx={{ mb: 3 }}>
         <CardHeader
-          title="What-If Simulator"
+          title="What-If Simulator (heurística rápida)"
           avatar={<IconWand size={20} />}
-          subheader="Simule mudanças e veja o impacto nos custos"
+          subheader="Estimativa escalar — NÃO chama o solver. Use para sentir o impacto. Para resultado real, use o card acima."
         />
         <CardContent>
           <Stack spacing={3}>

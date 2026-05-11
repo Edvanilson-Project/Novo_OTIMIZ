@@ -9,6 +9,8 @@ import {
 } from '@nestjs/common';
 import { ScenarioEvaluatorService } from './scenario-evaluator.service';
 import { WhatIfSimulatorService } from './whatif-simulator.service';
+import { OptimizationService } from '../optimization.service';
+import { TenantContext } from '../../../common/context/tenant-context';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 
 @Controller('operations/optimization-advanced')
@@ -17,6 +19,8 @@ export class OptimizationAdvancedController {
   constructor(
     private scenarioEvaluator: ScenarioEvaluatorService,
     private whatIfSimulator: WhatIfSimulatorService,
+    private optimizationService: OptimizationService,
+    private tenantContext: TenantContext,
   ) {}
 
   @Post('scenarios/:scheduleId')
@@ -177,5 +181,20 @@ export class OptimizationAdvancedController {
       body.label,
       body.algorithm,
     );
+  }
+
+  /**
+   * Replay reproduzível: re-roda exatamente a mesma configuração de uma OptimizationRun
+   * anterior. Útil para validar determinismo e regressão entre versões do solver.
+   * Retorna a NOVA run enfileirada (com scenarioId distinto). Frontend deve pollear até
+   * completed e então comparar métricas com a run original.
+   */
+  @Post('replay/:fingerprint')
+  async replayRun(@Param('fingerprint') fingerprint: string) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) {
+      throw new Error('Empresa não identificada.');
+    }
+    return this.optimizationService.replayRun(companyId, fingerprint);
   }
 }

@@ -408,6 +408,48 @@ export class OptimizationService implements OnModuleInit {
     }
   }
 
+  /**
+   * Replay reproduzível: dado um inputFingerprint, busca a OptimizationRun original
+   * e dispara nova run com os MESMOS params/algorithm. Útil para validar:
+   *   (a) o motor é determinístico (seed fixa → mesmo resultado);
+   *   (b) reproduzir bug em ambiente diferente;
+   *   (c) regressão após upgrade do solver.
+   *
+   * O scenarioId da nova run vira `replay-of-<fingerprint12chars>` para distinguir.
+   */
+  async replayRun(companyId: number, inputFingerprint: string): Promise<any> {
+    const original = await this.optimizationRunRepo.findOne({
+      where: { companyId, inputFingerprint },
+      order: { createdAt: 'DESC' },
+    });
+    if (!original) {
+      throw new BadRequestException(
+        `Nenhuma OptimizationRun com inputFingerprint=${inputFingerprint} para esta empresa.`,
+      );
+    }
+    const params = original.params || {};
+    const algorithm = original.algorithm || params.algorithm || 'hybrid_pipeline';
+    const optimizationParamsOverride = params.optimization_params || {};
+    // Garantir seed determinística — se a original tinha randomSeed null, fixamos em 42
+    // (não há reproduzibilidade real sem seed). Caso contrário, replicamos a original.
+    if (original.randomSeed != null) {
+      optimizationParamsOverride.random_seed = original.randomSeed;
+    } else if (optimizationParamsOverride.random_seed == null) {
+      optimizationParamsOverride.random_seed = 42;
+    }
+    const cctParamsOverride = params.cct_params || {};
+    const vspParamsOverride = params.vsp_params || {};
+
+    return this.runOptimization(companyId, algorithm, undefined, {
+      scenarioId: `replay-of-${inputFingerprint.slice(0, 12)}`,
+      baselineScheduleId: original.baselineScheduleId,
+      optimizationParamsOverride,
+      cctParamsOverride,
+      vspParamsOverride,
+      skipTenantLock: true,
+    });
+  }
+
   /** Sumarização das métricas que importam para comparação de cenários. */
   private extractRunMetrics(result: any): Record<string, any> {
     if (!result || typeof result !== 'object') return {};

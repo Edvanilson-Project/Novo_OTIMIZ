@@ -89,15 +89,15 @@ export default function AdvancedOptimizationPage() {
         </Button>
       </Stack>
 
-      {/* Banner BETA — what-if e o "explicador" ainda têm partes não-conectadas ao optimizer */}
+      {/* Banner — informa o que é real vs heurística */}
       <Alert
         severity="info"
         icon={<IconFlask size={18} />}
         sx={{ mb: 3 }}
       >
-        <AlertTitle>BETA — Cenários reais ativos, What-If em desenvolvimento</AlertTitle>
-        A aba <strong>Cenários</strong> agora chama o motor de otimização real (VCSP, MCNF, Hybrid) — pode levar 30–120s por cenário.
-        As abas <strong>What-If Simulator</strong> e <strong>Explicador</strong> ainda usam heurísticas escalares; uma reotimização real está em desenvolvimento.
+        <AlertTitle>Cenários e What-If chamam o motor real</AlertTitle>
+        <strong>Cenários</strong> (VCSP, MCNF, Hybrid) e <strong>What-If → Reotimização Real</strong> chamam o motor de otimização Python.
+        Tempo típico: 30–120s. O modo <em>heurístico escalar</em> do What-If continua disponível para estimativas rápidas (marcado claramente).
       </Alert>
 
       {/* Tabs */}

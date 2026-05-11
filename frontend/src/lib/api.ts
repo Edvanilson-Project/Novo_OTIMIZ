@@ -211,4 +211,12 @@ export const scenariosApi = {
   whatIfTripRemoval: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/trip-removal', body).then((r) => r.data),
   whatIfTripAddition: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/trip-addition', body).then((r) => r.data),
   whatIfParameterChange: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/parameter-change', body).then((r) => r.data),
+  // Reotimização REAL — enfileira nova run via solver Python com paramsOverride.
+  // Frontend deve pollear getScenarioRun(scheduleId, scenarioId) até status=completed.
+  whatIfRunReal: (
+    scheduleId: ID,
+    body: { paramsOverride: Record<string, any>; label?: string; algorithm?: string },
+  ) => apiClient.post(`/operations/optimization-advanced/whatif/run-real/${scheduleId}`, body).then((r) => r.data),
+  replayByFingerprint: (fingerprint: string) =>
+    apiClient.post(`/operations/optimization-advanced/replay/${fingerprint}`).then((r) => r.data),
 };
