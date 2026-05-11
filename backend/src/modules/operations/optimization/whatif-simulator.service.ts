@@ -29,7 +29,7 @@ export class WhatIfSimulatorService {
   ): WhatIfResult {
     const costDifference = (toTypeCost - fromTypeCost) * tripCount;
     const newCost = originalCost + costDifference;
-    const percent = (costDifference / originalCost) * 100;
+    const percent = originalCost > 0 ? (costDifference / originalCost) * 100 : 0;
 
     return {
       scenario: {
@@ -41,7 +41,7 @@ export class WhatIfSimulatorService {
       newCost,
       costDifference,
       costDifferencePercent: percent,
-      feasible: newCost <= originalCost * 1.2, // Allow 20% cost increase
+      feasible: originalCost > 0 ? newCost <= originalCost * 1.2 : costDifference <= 0,
       warnings:
         percent > 10
           ? [`Custo aumentará em ${Math.abs(percent).toFixed(1)}%`]
@@ -49,7 +49,7 @@ export class WhatIfSimulatorService {
       recommendations:
         percent > 0
           ? [`Considere revisar utilização do veículo mais caro`]
-          : [`Mudança resultará em economias de ${Math.abs(percent).toFixed(1)}%`],
+          : [`Mudança resultará em economias de R$ ${Math.abs(costDifference).toFixed(2)}`],
     };
   }
 
@@ -72,7 +72,7 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference,
-      costDifferencePercent: (costDifference / originalCost) * 100,
+      costDifferencePercent: originalCost > 0 ? (costDifference / originalCost) * 100 : 0,
       feasible: shiftMinutes >= -120 && shiftMinutes <= 120, // ±2 hours
       warnings:
         Math.abs(shiftMinutes) > 60
@@ -104,7 +104,7 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference: -costSavings,
-      costDifferencePercent: (-costSavings / originalCost) * 100,
+      costDifferencePercent: originalCost > 0 ? (-costSavings / originalCost) * 100 : 0,
       feasible: false, // Trip removal is not feasible for operational schedules
       warnings: [`Remoção de viagem não é recomendada`],
       recommendations: [`Avaliar se viagem é essencial antes de remover`],
@@ -134,7 +134,7 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference: additionalCost,
-      costDifferencePercent: (additionalCost / originalCost) * 100,
+      costDifferencePercent: originalCost > 0 ? (additionalCost / originalCost) * 100 : 0,
       feasible: true,
       warnings: willNeedNewVehicle ? [`Requer novo veículo`] : [],
       recommendations: [`Viagem adicionada aumentará custo em R$ ${additionalCost.toFixed(2)}`],

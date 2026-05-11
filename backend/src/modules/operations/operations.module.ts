@@ -8,6 +8,11 @@ import { SolutionValidatorController } from './solution-validator.controller';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
 import { OptimizationGateway } from './optimization.gateway';
+import { OptimizationAdvancedController } from './optimization/optimization-advanced.controller';
+import { ScenarioEvaluatorService } from './optimization/scenario-evaluator.service';
+import { WhatIfSimulatorService } from './optimization/whatif-simulator.service';
+import { OperationReportController } from './reporting/operation-report.controller';
+import { OperationReportGeneratorService } from './reporting/operation-report-generator.service';
 import { TripRepository, DriverRepository } from '../database/repositories/operations.repository';
 import { Trip } from '../database/entities/trip.entity';
 import { Driver } from '../database/entities/driver.entity';
@@ -15,6 +20,8 @@ import { CompanyParameters } from '../database/entities/company-parameters.entit
 import { Schedule } from '../database/entities/schedule.entity';
 import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
+import { Vehicle } from '../database/entities/vehicle.entity';
+import { VehicleType } from '../database/entities/vehicle-type.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 import { JwtModule } from '@nestjs/jwt';
 
@@ -27,18 +34,28 @@ import { JwtModule } from '@nestjs/jwt';
       Schedule,
       BlockAssignment,
       DutyAssignment,
+      Vehicle,
+      VehicleType,
     ]),
     MulterModule.register({
       limits: { fileSize: 10 * 1024 * 1024 },
     }),
     JwtModule.register({}),
   ],
-  controllers: [OperationsController, SolutionValidatorController],
+  controllers: [
+    OperationsController,
+    SolutionValidatorController,
+    OptimizationAdvancedController,
+    OperationReportController,
+  ],
   providers: [
     SolutionValidatorService,
     OperationsService,
     OptimizationService,
     OptimizationGateway,
+    ScenarioEvaluatorService,
+    WhatIfSimulatorService,
+    OperationReportGeneratorService,
     TripRepository,
     DriverRepository,
     TenantContext,

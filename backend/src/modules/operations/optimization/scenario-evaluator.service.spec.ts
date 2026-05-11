@@ -53,8 +53,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should generate 4 scenarios', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [
+        totalCost: 1000,
+        blocks: [
           { id: 1 },
           { id: 2 },
           { id: 3 },
@@ -75,8 +75,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should include cost information', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -90,8 +90,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should mark scenarios as feasible', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -104,8 +104,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should include maintenance warnings', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -120,8 +120,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should compare two scenarios', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -137,8 +137,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should calculate savings correctly', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -151,8 +151,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should throw error for non-existent scenario', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -167,8 +167,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should have required fields in scenario', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);
@@ -188,8 +188,8 @@ describe('ScenarioEvaluatorService', () => {
     it('should have cost-optimized scenario cheaper than current', async () => {
       const mockSchedule = {
         id: 1,
-        cost_per_km: 1000,
-        blockAssignments: [],
+        totalCost: 1000,
+        blocks: [],
       };
 
       scheduleRepo.findOne.mockResolvedValue(mockSchedule);

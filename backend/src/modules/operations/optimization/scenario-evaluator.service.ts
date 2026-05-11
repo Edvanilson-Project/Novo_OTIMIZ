@@ -31,7 +31,7 @@ export class ScenarioEvaluatorService {
 
     const schedule = await this.scheduleRepo.findOne({
       where: { id: scheduleId, companyId },
-      relations: ['blockAssignments'],
+      relations: ['blocks'],
     });
 
     if (!schedule) {
@@ -48,8 +48,8 @@ export class ScenarioEvaluatorService {
       id: 'cost-optimized',
       name: 'Otimizado para Custo',
       description: 'Minimizar custo total de operação',
-      totalCost: schedule.cost_per_km * 0.92, // 8% reduction
-      vehiclesUsed: Math.ceil((schedule.blockAssignments?.length || 0) * 0.95),
+      totalCost: (schedule.totalCost || 0) * 0.92, // 8% reduction
+      vehiclesUsed: Math.ceil((schedule.blocks?.length || 0) * 0.95),
       tripsUnassigned: 0,
       feasible: true,
       maintenanceWarnings: [],
@@ -60,8 +60,8 @@ export class ScenarioEvaluatorService {
       id: 'service-optimized',
       name: 'Otimizado para Serviço',
       description: 'Minimizar mudanças de veículos',
-      totalCost: schedule.cost_per_km * 1.05,
-      vehiclesUsed: (schedule.blockAssignments?.length || 0),
+      totalCost: (schedule.totalCost || 0) * 1.05,
+      vehiclesUsed: (schedule.blocks?.length || 0),
       tripsUnassigned: 0,
       feasible: true,
       maintenanceWarnings: ['Próxima manutenção recomendada em 2 veículos'],
@@ -72,8 +72,8 @@ export class ScenarioEvaluatorService {
       id: 'maintenance-aware',
       name: 'Consciente de Manutenção',
       description: 'Evitar conflitos de manutenção programada',
-      totalCost: schedule.cost_per_km * 1.03,
-      vehiclesUsed: Math.ceil((schedule.blockAssignments?.length || 0) * 1.02),
+      totalCost: (schedule.totalCost || 0) * 1.03,
+      vehiclesUsed: Math.ceil((schedule.blocks?.length || 0) * 1.02),
       tripsUnassigned: 0,
       feasible: true,
       maintenanceWarnings: [],
@@ -110,8 +110,10 @@ export class ScenarioEvaluatorService {
     }
 
     if (s1.totalCost !== s2.totalCost) {
-      const percent = ((s2.totalCost - s1.totalCost) / s1.totalCost * 100).toFixed(1);
-      differences.push(`Custo: R$ ${Math.abs(savings).toFixed(2)} (${percent}%)`);
+      const percent = s1.totalCost === 0
+        ? 'n/a'
+        : `${((s2.totalCost - s1.totalCost) / s1.totalCost * 100).toFixed(1)}%`;
+      differences.push(`Custo: R$ ${Math.abs(savings).toFixed(2)} (${percent})`);
     }
 
     return { scenario1: s1, scenario2: s2, savings, differences };
@@ -122,8 +124,8 @@ export class ScenarioEvaluatorService {
       id: 'current',
       name: 'Cenário Atual',
       description: 'Horário atualmente em operação',
-      totalCost: schedule.cost_per_km || 0,
-      vehiclesUsed: schedule.blockAssignments?.length || 0,
+      totalCost: schedule.totalCost || 0,
+      vehiclesUsed: schedule.blocks?.length || 0,
       tripsUnassigned: 0,
       feasible: true,
       maintenanceWarnings: [],
