@@ -14,15 +14,25 @@ import { VehicleType } from '../database/entities/vehicle-type.entity';
 import { Vehicle } from '../database/entities/vehicle.entity';
 import { normalizeLegacyCompanyParameters } from '../parameters/parameter-normalization';
 import { OptimizationGateway } from './optimization.gateway';
+import {
+  DEFAULT_VEHICLE_FIXED_COST,
+  DEFAULT_COST_VEHICLE,
+  DEFAULT_COST_KM,
+  DEFAULT_COST_DUTY,
+  DEFAULT_CCT_VIOLATION_PENALTY,
+  DEFAULT_ILP_TIMEOUT_SECONDS,
+  SCHEDULE_CACHE_TTL_MS,
+  REPORT_DETAIL_LIMIT,
+} from '../../constants/optimization-defaults';
 
 @Injectable()
 export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
   private scheduleCache = new Map<number, { data: any; timestamp: number }>();
-  private readonly CACHE_TTL_MS = 15000;
+  private readonly CACHE_TTL_MS = SCHEDULE_CACHE_TTL_MS;
   private readonly OPTIMIZER_URL = process.env.OPTIMIZER_URL || 'http://localhost:8000';
   private readonly INTERNAL_KEY: string;
-  private readonly DETAIL_LIMIT = 10;
+  private readonly DETAIL_LIMIT = REPORT_DETAIL_LIMIT;
 
   constructor(
     @InjectRepository(Trip) private tripRepo: Repository<Trip>,
@@ -40,6 +50,15 @@ export class OptimizationService implements OnModuleInit {
   }
 
   async onModuleInit() {
+    if (!process.env.OPTIMIZER_URL) {
+      const fallbackMsg = `OPTIMIZER_URL não definido em env — usando fallback ${this.OPTIMIZER_URL}`;
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.error(fallbackMsg + '. Em produção isso é incorreto e otimizações podem falhar silenciosamente.');
+      } else {
+        this.logger.warn(fallbackMsg);
+      }
+    }
+
     const stale = await this.scheduleRepo.update(
       { status: ScheduleStatus.PROCESSING },
       {
@@ -129,8 +148,17 @@ export class OptimizationService implements OnModuleInit {
       );
 
       // 3. Chamar API Python (FastAPI/Celery)
+      const invalidLoopTrips = trips.filter(t => Number(t.originId) === Number(t.destinationId));
+      if (invalidLoopTrips.length > 0) {
+        this.logger.warn(
+          `[PRE-FLIGHT] ${invalidLoopTrips.length} trip(s) com origin==destination ignoradas: ${invalidLoopTrips.map(t => t.id).join(', ')}`,
+        );
+      }
+      const validTrips = trips.filter(t => Number(t.originId) !== Number(t.destinationId));
+      if (!validTrips.length) throw new Error('Nenhuma viagem válida para otimização após filtro de terminal loop.');
+
       const payload = {
-        trips: trips.map((t) => {
+        trips: validTrips.map((t) => {
           const st = Number(t.startTime);
           // Normaliza virada de meia-noite: se end < start, soma 1440
           const et = Number(t.endTime) < st ? Number(t.endTime) + 1440 : Number(t.endTime);
@@ -149,18 +177,25 @@ export class OptimizationService implements OnModuleInit {
             destination_longitude: t.destinationLongitude ?? null,
             duration: Number(t.duration ?? 0),
             distance_km: Number(t.distanceKm ?? 0),
+            relief_point_id: t.reliefPointId ?? null,
+            is_relief_point: t.isReliefPoint ?? false,
+            mid_trip_relief_point_id: t.midTripReliefPointId ?? null,
+            mid_trip_relief_offset_minutes: t.midTripReliefOffsetMinutes ?? null,
+            mid_trip_relief_distance_ratio: t.midTripReliefDistanceRatio ?? null,
+            mid_trip_relief_elevation_ratio: t.midTripReliefElevationRatio ?? null,
           };
         }),
         vehicle_types: this.buildVehicleTypesPayload(vehicleTypes, params),
         cct_params: cctParams,
         optimization_params: {
-          cost_vehicle: params?.cost_vehicle ?? 1000.0,
-          cost_km: params?.cost_km ?? 1.0,
-          cost_duty: params?.cost_duty ?? 500.0,
+          cost_vehicle: params?.cost_vehicle ?? DEFAULT_COST_VEHICLE,
+          vehicle_fixed_cost: params?.vehicle_fixed_cost ?? null,
+          cost_km: params?.cost_km ?? DEFAULT_COST_KM,
+          cost_duty: params?.cost_duty ?? DEFAULT_COST_DUTY,
           driver_cost_per_minute: params?.driver_cost_per_minute ?? 0.0,
           collector_cost_per_minute: params?.collector_cost_per_minute ?? 0.0,
-          cct_violation_penalty: params?.cct_violation_penalty ?? 500.0,
-          ilp_timeout_seconds: params?.ilp_timeout_seconds ?? 120,
+          cct_violation_penalty: params?.cct_violation_penalty ?? DEFAULT_CCT_VIOLATION_PENALTY,
+          ilp_timeout_seconds: params?.ilp_timeout_seconds ?? DEFAULT_ILP_TIMEOUT_SECONDS,
           time_budget_s: params?.time_budget_s ?? null,
           random_seed: params?.random_seed ?? null,
           force_round_trip: forceRoundTrip,
@@ -334,7 +369,13 @@ export class OptimizationService implements OnModuleInit {
       }
 
       nextTimer = setTimeout(() => {
-        void runPoll();
+        // Fire-and-forget: capturamos qualquer erro inesperado para evitar
+        // unhandledPromiseRejection (mata o processo Node em --unhandled-rejections=strict).
+        runPoll().catch((err) => {
+          this.logger.error(
+            `[OPT-POLL-UNHANDLED] scheduleId=${scheduleId} taskId=${taskId} error=${(err as Error).message}`,
+          );
+        });
       }, pollIntervalMs);
     };
 
@@ -433,7 +474,11 @@ export class OptimizationService implements OnModuleInit {
       }
     };
 
-    void runPoll();
+    runPoll().catch((err) => {
+      this.logger.error(
+        `[OPT-POLL-UNHANDLED-INIT] scheduleId=${scheduleId} taskId=${taskId} error=${(err as Error).message}`,
+      );
+    });
   }
 
   private async persistFailure(
@@ -624,8 +669,14 @@ export class OptimizationService implements OnModuleInit {
                 start_time: d.start_time,
                 end_time: d.end_time,
                 work_cost: d.work_cost,
+                guaranteed_cost: d.guaranteed_cost,
+                waiting_cost: d.waiting_cost,
                 overtime_cost: d.overtime_cost,
                 overtime_minutes: d.overtime_minutes,
+                long_unpaid_break_penalty: d.long_unpaid_break_penalty,
+                nocturnal_extra: d.nocturnal_extra_cost ?? d.nocturnal_extra,
+                holiday_extra: d.holiday_extra_cost ?? d.holiday_extra,
+                cct_penalties: d.cct_penalties_cost ?? d.cct_penalties,
                 shift_violations: d.shift_violations,
                 rest_violations: d.rest_violations,
                 duty_time_segments: d.meta?.duty_time_segments ?? d.segments ?? null,
@@ -733,9 +784,10 @@ export class OptimizationService implements OnModuleInit {
         trip_ids: [tripId],
         target_index: 0, // O motor resolve o sort cronológico internamente
         optimization_params: {
-          cost_vehicle: companyParams?.cost_vehicle ?? 1000.0,
-          cost_km: companyParams?.cost_km ?? 1.0,
-          cost_duty: companyParams?.cost_duty ?? 500.0,
+          cost_vehicle: companyParams?.cost_vehicle ?? DEFAULT_COST_VEHICLE,
+          vehicle_fixed_cost: companyParams?.vehicle_fixed_cost ?? null,
+          cost_km: companyParams?.cost_km ?? DEFAULT_COST_KM,
+          cost_duty: companyParams?.cost_duty ?? DEFAULT_COST_DUTY,
           driver_cost_per_minute: companyParams?.driver_cost_per_minute ?? 0.0,
           collector_cost_per_minute: companyParams?.collector_cost_per_minute ?? 0.0,
         },
@@ -1001,7 +1053,7 @@ export class OptimizationService implements OnModuleInit {
     const result: Record<string, any> = {
       force_round_trip: params.force_round_trip ?? true,
       allow_vehicle_swap: params.allow_vehicle_swap ?? true,
-      fixed_vehicle_activation_cost: params.vehicle_fixed_cost ?? 800.0,
+      fixed_vehicle_activation_cost: params.vehicle_fixed_cost ?? DEFAULT_VEHICLE_FIXED_COST,
       preferred_pair_window_minutes: params.preferred_pair_window_minutes ?? 30,
       preserve_preferred_pairs: params.preserve_preferred_pairs ?? true,
       vehicle_idle_gap_behavior: params.vehicle_idle_gap_behavior ?? 'solver_decides',
@@ -1065,7 +1117,7 @@ export class OptimizationService implements OnModuleInit {
         passenger_capacity: vt.capacity,
         cost_per_km: 1.0, // Default, can be enhanced
         cost_per_hour: 10.0, // Default, can be enhanced
-        fixed_cost: vt.costPerDay || Number(params?.vehicle_fixed_cost || 800),
+        fixed_cost: vt.costPerDay || Number(params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST),
         is_electric: false, // Default
         battery_capacity_kwh: 0.0,
         minimum_soc: 0.15,
@@ -1082,7 +1134,7 @@ export class OptimizationService implements OnModuleInit {
         passenger_capacity: 40,
         cost_per_km: 1.0,
         cost_per_hour: 10.0,
-        fixed_cost: Number(params?.vehicle_fixed_cost || 800),
+        fixed_cost: Number(params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST),
         is_electric: false,
         battery_capacity_kwh: 0.0,
         minimum_soc: 0.15,
@@ -1214,6 +1266,8 @@ export class OptimizationService implements OnModuleInit {
           idle_minutes: meta.idle_minutes,
           start_depot_id: meta.start_depot_id,
           end_depot_id: meta.end_depot_id,
+          start_buffer_minutes: meta.start_buffer_minutes ?? 0,
+          end_buffer_minutes: meta.end_buffer_minutes ?? 0,
           // ...meta // Comentado para evitar carregar dumps pesados do solver no Gantt
         },
       };
@@ -1447,6 +1501,13 @@ export class OptimizationService implements OnModuleInit {
       return normalizedSegment;
     });
 
+    // Gap/boundary types already have driver_vehicle_change emitted by the Python solver before them.
+    // Only non-gap commercial segments could ever need a synthetic insertion as a safety net.
+    const GAP_SEGMENT_TYPES = new Set([
+      'driver_idle', 'idle', 'normal_break', 'mandatory_rest',
+      'duty_start', 'duty_end', 'pullout', 'pullback',
+    ]);
+
     const normalizedSegments: Record<string, any>[] = [];
     segments.forEach((segment, index) => {
       const segmentType = String(segment.type ?? segment.event_type ?? 'unknown');
@@ -1457,6 +1518,7 @@ export class OptimizationService implements OnModuleInit {
         && toBlockId != null
         && fromBlockId !== toBlockId
         && segmentType !== 'driver_vehicle_change'
+        && !GAP_SEGMENT_TYPES.has(segmentType)
       ) {
         normalizedSegments.push(this.buildDriverVehicleChangeSegment(segment, fromBlockId, toBlockId));
       }

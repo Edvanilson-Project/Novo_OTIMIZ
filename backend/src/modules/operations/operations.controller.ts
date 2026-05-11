@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Patch, Delete, Param, ParseIntPipe, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException, Logger } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
@@ -17,6 +18,9 @@ export class OperationsController {
   ) {}
 
   @Post('optimize')
+  // Otimização é cara em CPU (60-300s por run). Limitamos a 5 runs/5min por tenant
+  // (não por IP, mas no nível controller — throttle global de 30 req/s ainda aplica).
+  @Throttle({ medium: { ttl: 300_000, limit: 5 } })
   async runOptimization(
     @Body() body: Record<string, any>,
     @Body('algorithm') algorithm?: string,

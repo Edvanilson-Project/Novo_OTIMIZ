@@ -22,6 +22,7 @@ import {
   IconTruck,
   IconCurrencyDollar,
 } from "@tabler/icons-react";
+import { vehiclesApi } from "@/lib/api";
 
 interface VehicleType {
   id: number;
@@ -56,15 +57,10 @@ const FleetCostAnalysis: React.FC<FleetCostAnalysisProps> = ({ companyId }) => {
       setLoading(true);
       setError(null);
 
-      // Fetch vehicle types
-      const typesRes = await fetch("/api/vehicles/types");
-      if (!typesRes.ok) throw new Error("Erro ao carregar tipos de veículos");
-      const types: VehicleType[] = await typesRes.json();
-
-      // Fetch active vehicles
-      const vehiclesRes = await fetch("/api/vehicles/active");
-      if (!vehiclesRes.ok) throw new Error("Erro ao carregar veículos");
-      const vehicles = await vehiclesRes.json();
+      const [types, vehicles] = await Promise.all([
+        vehiclesApi.getTypes() as Promise<VehicleType[]>,
+        vehiclesApi.getActive(),
+      ]);
 
       // Calculate statistics
       const totalVehicles = vehicles.length;

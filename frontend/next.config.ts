@@ -1,15 +1,24 @@
 import type { NextConfig } from "next";
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://localhost:3001';
+
 const nextConfig: NextConfig = {
   reactStrictMode: false,
-  
-  // Otimiza pacotes pesados para evitar erros de MODULE_NOT_FOUND em chunks numerados
+
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${BACKEND_URL}/api/v1/:path*`,
+      },
+    ];
+  },
+
   experimental: {
     optimizePackageImports: ['@mui/material', '@tabler/icons-react'],
   },
 
   webpack: (config) => {
-    // Garante IDs de módulos consistentes entre builds
     config.optimization.moduleIds = 'deterministic';
     return config;
   },

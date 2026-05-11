@@ -305,6 +305,14 @@ export class OperationsService {
       distanceKm: safeFloat(data.distanceKm),
       duration,
       direction: data.direction || 'IDA',
+      // Relief points (rendição) — opcional. Marca terminal como ponto de troca de motorista
+      // (`isReliefPoint`) e/ou define ponto intermediário no meio da viagem para split em 2.
+      isReliefPoint: data.isReliefPoint === true || data.isReliefPoint === 'true',
+      reliefPointId: data.reliefPointId !== undefined && data.reliefPointId !== null && data.reliefPointId !== '' ? safeInt(data.reliefPointId) : null,
+      midTripReliefPointId: data.midTripReliefPointId !== undefined && data.midTripReliefPointId !== null && data.midTripReliefPointId !== '' ? safeInt(data.midTripReliefPointId) : null,
+      midTripReliefOffsetMinutes: data.midTripReliefOffsetMinutes !== undefined && data.midTripReliefOffsetMinutes !== null && data.midTripReliefOffsetMinutes !== '' ? safeInt(data.midTripReliefOffsetMinutes) : null,
+      midTripReliefDistanceRatio: data.midTripReliefDistanceRatio !== undefined && data.midTripReliefDistanceRatio !== null && data.midTripReliefDistanceRatio !== '' ? safeFloat(data.midTripReliefDistanceRatio) : null,
+      midTripReliefElevationRatio: data.midTripReliefElevationRatio !== undefined && data.midTripReliefElevationRatio !== null && data.midTripReliefElevationRatio !== '' ? safeFloat(data.midTripReliefElevationRatio) : null,
     });
     const saved = await this.tripRepository.save(trip);
 
@@ -352,6 +360,9 @@ export class OperationsService {
       throw new BadRequestException(`Hora de fim não pode ser anterior à hora de início`);
     }
 
+    const numOrNull = (v: any): number | null => (v === undefined || v === null || v === '' ? null : safeInt(v));
+    const floatOrNull = (v: any): number | null => (v === undefined || v === null || v === '' ? null : safeFloat(v));
+
     Object.assign(trip, {
       lineId: data.lineId !== undefined ? (data.lineId ? safeInt(data.lineId) : null) : trip.lineId,
       lineCode: data.lineCode !== undefined ? data.lineCode : trip.lineCode,
@@ -362,6 +373,12 @@ export class OperationsService {
       distanceKm: data.distanceKm !== undefined ? safeFloat(data.distanceKm) : trip.distanceKm,
       duration: data.duration !== undefined ? safeInt(data.duration) : trip.duration,
       direction: data.direction !== undefined ? data.direction : trip.direction,
+      isReliefPoint: data.isReliefPoint !== undefined ? (data.isReliefPoint === true || data.isReliefPoint === 'true') : trip.isReliefPoint,
+      reliefPointId: data.reliefPointId !== undefined ? numOrNull(data.reliefPointId) : trip.reliefPointId,
+      midTripReliefPointId: data.midTripReliefPointId !== undefined ? numOrNull(data.midTripReliefPointId) : trip.midTripReliefPointId,
+      midTripReliefOffsetMinutes: data.midTripReliefOffsetMinutes !== undefined ? numOrNull(data.midTripReliefOffsetMinutes) : trip.midTripReliefOffsetMinutes,
+      midTripReliefDistanceRatio: data.midTripReliefDistanceRatio !== undefined ? floatOrNull(data.midTripReliefDistanceRatio) : trip.midTripReliefDistanceRatio,
+      midTripReliefElevationRatio: data.midTripReliefElevationRatio !== undefined ? floatOrNull(data.midTripReliefElevationRatio) : trip.midTripReliefElevationRatio,
     });
     return this.tripRepository.save(trip);
   }

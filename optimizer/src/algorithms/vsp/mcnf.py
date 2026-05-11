@@ -311,7 +311,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 if gap < 0:
                     continue  # Sobreposição temporal (trip j começa antes de i terminar)
                 if max_idle_gap is not None and gap > max_idle_gap:
-                    continue
+                    break  # gap é monotonicamente não-decrescente; todos os j seguintes também excedem
                 if not allow_multi and trips_sorted[i].line_id != trips_sorted[j].line_id:
                     continue
 

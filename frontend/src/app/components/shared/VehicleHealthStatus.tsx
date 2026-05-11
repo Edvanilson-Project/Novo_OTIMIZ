@@ -15,6 +15,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { IconHeartHandshake, IconAlertCircle, IconCheck } from '@tabler/icons-react';
+import { vehiclesApi } from '@/lib/api';
 
 interface VehicleHealth {
   vehicleId: string;
@@ -43,14 +44,9 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
   const fetchVehicleHealth = async () => {
     try {
       setLoading(true);
-      // For now, calculate health based on available data
-      // In a real system, this would come from a dedicated endpoint
-      const response = await fetch(`/api/vehicles/${vehicleId}`);
-      if (response.ok) {
-        const vehicle = await response.json();
-        const calculatedHealth = calculateHealth(vehicle);
-        setHealth(calculatedHealth);
-      }
+      const vehicle = await vehiclesApi.getById(vehicleId);
+      const calculatedHealth = calculateHealth(vehicle);
+      setHealth(calculatedHealth);
     } catch (err) {
       setError('Erro ao carregar saúde do veículo');
     } finally {
@@ -105,7 +101,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
     return '#f44336'; // red
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status: string): React.ReactElement | undefined => {
     switch (status) {
       case 'good':
         return <IconCheck size={20} color="#4caf50" />;
@@ -114,7 +110,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
       case 'critical':
         return <IconAlertCircle size={20} color="#f44336" />;
       default:
-        return null;
+        return undefined;
     }
   };
 
@@ -173,7 +169,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
 
           {/* Status Chips */}
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <Stack spacing={1}>
                 <Typography variant="caption" color="textSecondary">
                   Status de Manutenção
@@ -199,7 +195,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
               </Stack>
             </Grid>
 
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <Stack spacing={1}>
                 <Typography variant="caption" color="textSecondary">
                   Taxa de Utilização
@@ -232,7 +228,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
           {/* Maintenance Info */}
           <Box sx={{ p: 1.5, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
             <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <Typography variant="caption" color="textSecondary">
                   Última Manutenção
                 </Typography>
@@ -242,7 +238,7 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
                     : 'Não registrada'}
                 </Typography>
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid size={{ xs: 12, sm: 6 }}>
                 <Typography variant="caption" color="textSecondary">
                   Quilometragem
                 </Typography>

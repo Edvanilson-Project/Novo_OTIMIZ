@@ -9,6 +9,10 @@ import {
   IconHelp,
   IconMapPin,
   IconShieldCheck,
+  IconChartBar,
+  IconWand,
+  IconTruck,
+  IconCalendarTime,
 } from "@tabler/icons-react";
 import { uniqueId } from "lodash";
 
@@ -42,7 +46,7 @@ const Menuitems: MenuitemsType[] = [
   },
   {
     id: uniqueId(),
-    title: "Ingestão de Dados",
+    title: "Importar Viagens (CSV)",
     icon: IconUpload,
     href: "/operations/data",
   },
@@ -60,9 +64,21 @@ const Menuitems: MenuitemsType[] = [
   },
   {
     id: uniqueId(),
-    title: "Gantt Planner",
-    icon: IconRoute,
+    title: "Planejador (Gantt)",
+    icon: IconCalendarTime,
     href: "/operations/planner",
+  },
+  {
+    id: uniqueId(),
+    title: "Análises What-If",
+    icon: IconWand,
+    href: "/operations/advanced-optimization",
+  },
+  {
+    id: uniqueId(),
+    title: "Analytics & Relatórios",
+    icon: IconChartBar,
+    href: "/operations/reporting",
   },
   {
     navlabel: true,
@@ -73,6 +89,12 @@ const Menuitems: MenuitemsType[] = [
     title: "Parâmetros CCT",
     icon: IconAdjustmentsHorizontal,
     href: "/settings/parameters",
+  },
+  {
+    id: uniqueId(),
+    title: "Frota & Manutenção",
+    icon: IconTruck,
+    href: "/settings/fleet",
   },
   {
     id: uniqueId(),

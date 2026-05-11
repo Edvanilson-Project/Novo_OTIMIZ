@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import MaintenanceScheduler from '@/app/components/shared/MaintenanceScheduler';
 import VehicleHealthStatus from '@/app/components/shared/VehicleHealthStatus';
+import { vehiclesApi } from '@/lib/api';
 
 interface Vehicle {
   id: number;
@@ -58,13 +59,8 @@ export default function VehicleMaintenancePage() {
   const fetchVehicles = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/vehicles/active');
-      if (response.ok) {
-        const data = await response.json();
-        setVehicles(data);
-      } else {
-        setError('Erro ao carregar veículos');
-      }
+      const data = await vehiclesApi.getActive();
+      setVehicles(data);
     } catch (err) {
       setError('Erro ao carregar veículos');
     } finally {
@@ -132,12 +128,12 @@ export default function VehicleMaintenancePage() {
       {selectedVehicle && (
         <Grid container spacing={3}>
           {/* Health Status */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <VehicleHealthStatus vehicleId={selectedVehicle.id} />
           </Grid>
 
           {/* Maintenance Scheduler */}
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <MaintenanceScheduler
               vehicleId={selectedVehicle.id}
               vehicleLabel={selectedVehicle.vehicleId}

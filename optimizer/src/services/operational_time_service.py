@@ -74,7 +74,10 @@ def build_duty_operational_time_report(
         }
     )
 
-    if start_buffer > 0 and pullout_counts_in_driver_shift:
+    is_block_start = bool(tasks[0].meta.get("is_source_block_start", False))
+    is_block_end = bool(tasks[-1].meta.get("is_source_block_end", False))
+
+    if is_block_start and start_buffer > 0 and pullout_counts_in_driver_shift:
         segments.append(
             {
                 "type": "pullout",
@@ -83,6 +86,24 @@ def build_duty_operational_time_report(
                 "end": tasks[0].start_time,
                 "duration": start_buffer,
                 "location": tasks[0].trips[0].origin_id,
+            }
+        )
+    elif not is_block_start:
+        first_block_id = int(tasks[0].meta.get("source_block_id", tasks[0].id))
+        segments.append(
+            {
+                "type": "driver_change",
+                "event_scope": "driver",
+                "start": int(tasks[0].start_time),
+                "end": int(tasks[0].start_time),
+                "duration": 0,
+                "location": tasks[0].trips[0].origin_id,
+                "from_block_id": first_block_id,
+                "to_block_id": first_block_id,
+                "from_vehicle_id": first_block_id,
+                "to_vehicle_id": first_block_id,
+                "explanation": "Motorista assume veículo em operação (rendição no início da jornada).",
+                "relief_role": "incoming",
             }
         )
 
@@ -152,6 +173,7 @@ def build_duty_operational_time_report(
         if qualifies_as_mandatory_rest:
             segment_type = "mandatory_rest"
             mandatory_rest_time += gap
+            cumulative_work_before_gap = 0  # Motorista reinicia o contador após descanso obrigatório
         elif gap >= max(0, int(min_break_minutes)):
             segment_type = "normal_break"
             normal_break_time += gap
@@ -174,7 +196,7 @@ def build_duty_operational_time_report(
             }
         )
 
-    if end_buffer > 0 and pullback_counts_in_driver_shift:
+    if is_block_end and end_buffer > 0 and pullback_counts_in_driver_shift:
         segments.append(
             {
                 "type": "pullback",
@@ -183,6 +205,24 @@ def build_duty_operational_time_report(
                 "end": tasks[-1].end_time + end_buffer,
                 "duration": end_buffer,
                 "location": tasks[-1].trips[-1].destination_id,
+            }
+        )
+    elif not is_block_end:
+        last_block_id = int(tasks[-1].meta.get("source_block_id", tasks[-1].id))
+        segments.append(
+            {
+                "type": "driver_change",
+                "event_scope": "driver",
+                "start": int(tasks[-1].end_time),
+                "end": int(tasks[-1].end_time),
+                "duration": 0,
+                "location": tasks[-1].trips[-1].destination_id,
+                "from_block_id": last_block_id,
+                "to_block_id": last_block_id,
+                "from_vehicle_id": last_block_id,
+                "to_vehicle_id": last_block_id,
+                "explanation": "Motorista entrega veículo para rendição (rendição no fim da jornada).",
+                "relief_role": "outgoing",
             }
         )
 
@@ -201,11 +241,17 @@ def build_duty_operational_time_report(
     invalid_rest_position = bool(required_rest > 0 and (start_buffer >= required_rest or end_buffer >= required_rest))
     productive_minutes = int(duty.work_time or total_drive)
     max_continuous_drive = int(duty.meta.get("max_continuous_drive_minutes", 0) or 0)
+    # CCT BR transporte urbano (CLT art. 235-D): pausa obrigatória de 30min é exigida
+    # quando há CONDUÇÃO CONTÍNUA acima do limite (mandatory_break_after, ex: 4h).
+    # Trabalho TOTAL fragmentado em pedaços menores com pausas válidas entre não exige
+    # pausa adicional só por causa do total. (A regra de meal break para jornada > 6h
+    # é separada e tratada via meal_break_minutes na classificação dos gaps.)
+    # A condição antiga `productive_minutes > mandatory_break_after` produzia falso-positivo
+    # em duties como D27/D32/D43 (work 316min com max_continuous 110min).
     mandatory_rest_required = bool(
         required_rest > 0
         and (
             has_valid_mandatory_rest
-            or productive_minutes > mandatory_break_after
             or max_continuous_drive > mandatory_break_after
         )
     )

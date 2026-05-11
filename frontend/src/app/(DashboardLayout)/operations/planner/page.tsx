@@ -131,6 +131,8 @@ export default function PlannerPage() {
         mealBreakMinutes: cct.meal_break_minutes ?? parameters?.meal_break_minutes ?? 60,
         minLayoverMinutes: vsp.min_layover_minutes ?? cct.min_layover_minutes ?? parameters?.min_layover_minutes ?? 8,
         connectionToleranceMinutes: cct.connection_tolerance_minutes ?? parameters?.connection_tolerance_minutes ?? 0,
+        pulloutMinutes: vsp.pullout_minutes ?? cct.pullout_minutes ?? parameters?.pullout_minutes ?? 0,
+        pullbackMinutes: vsp.pullback_minutes ?? cct.pullback_minutes ?? parameters?.pullback_minutes ?? 0,
       };
     },
     [parameters, schedule]
@@ -433,6 +435,31 @@ export default function PlannerPage() {
               </Alert>
             )}
 
+            {!optimizing && schedule?.status === "failed" && (() => {
+              const hasBlocks = Array.isArray(schedule.blocks) && schedule.blocks.length > 0;
+              const isHardViolation = schedule?.error_code === 'HARD_CONSTRAINT_OUTPUT' || schedule?.error_code === 'OPTIMIZER_RESULT_INVALID';
+              if (hasBlocks && isHardViolation) {
+                return (
+                  <Alert severity="warning" variant="outlined">
+                    <strong>Resultado com violações hard.</strong> Esta escala contém violações de restrições obrigatórias e não deve ser usada operacionalmente sem correção. Revise os problemas no Gantt antes de aplicar.
+                  </Alert>
+                );
+              }
+              return (
+                <Alert severity="error" variant="outlined">
+                  <strong>Última otimização falhou.</strong>
+                  {schedule?.error_message && (
+                    <> {schedule.error_message}</>
+                  )}
+                  {schedule?.error_code && (
+                    <Typography component="span" variant="caption" sx={{ ml: 1, opacity: 0.7 }}>
+                      [{schedule.error_code}]
+                    </Typography>
+                  )}
+                </Alert>
+              );
+            })()}
+
             <Paper
               variant="outlined"
               sx={{
@@ -466,7 +493,7 @@ export default function PlannerPage() {
                   </FormControl>
                 </Tooltip>
 
-                <Tooltip title="Define como o produto escolhe entre o plano atual e o cenario com +1 duty/crew.">
+                <Tooltip title="Define como o produto escolhe entre o plano atual e o cenário com +1 jornada/motorista.">
                   <FormControl size="small" sx={{ minWidth: 240, maxWidth: 300, flex: { xs: 1, md: 'none' } }}>
                     <InputLabel>Qualidade Operacional</InputLabel>
                     <Select
@@ -594,7 +621,7 @@ export default function PlannerPage() {
             <Suspense fallback={<CircularProgress />}>
               <TabGantt
                 key={schedule?.id ?? 'no-schedule'}
-                res={schedule?.status === 'completed' ? schedule : null}
+                res={schedule && (schedule.status === 'completed' || (schedule.status === 'failed' && Array.isArray(schedule.blocks) && schedule.blocks.length > 0)) ? schedule : null}
                 lines={lines}
                 terminals={terminals}
                 intervalPolicy={intervalPolicy}

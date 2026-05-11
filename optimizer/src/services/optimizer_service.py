@@ -15,20 +15,39 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .ai_service import AiService
+from .algorithm_dispatcher import dispatch_algorithm
+from .parameter_normalization import (
+    align_vsp_params_with_cct as _module_align_vsp_params_with_cct,
+    as_dict as _module_as_dict,
+    is_strict_trip_group_mode as _module_is_strict_trip_group_mode,
+    normalize_rules as _module_normalize_rules,
+    parse_rule as _module_parse_rule,
+    validate_strict_algorithm_support as _module_validate_strict_algorithm_support,
+)
+from .trip_group_inference import (
+    build_group_inference_report as _module_build_group_inference_report,
+    infer_round_trip_pairs as _module_infer_round_trip_pairs,
+    inject_trip_group_constraints as _module_inject_trip_group_constraints,
+    log_group_inference_report as _module_log_group_inference_report,
+    materialize_mandatory_trip_groups as _module_materialize_mandatory_trip_groups,
+    summarize_trip_groups as _module_summarize_trip_groups,
+)
+from .operational_quality_helpers import (
+    classify_duty_severity as _module_classify_duty_severity,
+    clone_duty_slice as _module_clone_duty_slice,
+    duty_exception_rank as _module_duty_exception_rank,
+    resolve_operational_quality_mode as _module_resolve_operational_quality_mode,
+    scenario_justification as _module_scenario_justification,
+    scenario_rejection_reason as _module_scenario_rejection_reason,
+    scenario_tradeoffs as _module_scenario_tradeoffs,
+    summarize_operational_quality as _module_summarize_operational_quality,
+)
 
 from ..algorithms.csp.greedy import GreedyCSP
 from ..algorithms.csp.set_partitioning import SetPartitioningCSP
 from ..algorithms.csp.set_partitioning_optimized import SetPartitioningOptimizedCSP
 from ..algorithms.evaluator import CostEvaluator
-from ..algorithms.hybrid.pipeline import HybridPipeline
-from ..algorithms.integrated.joint_solver import JointSolver
-from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
-from ..algorithms.vsp.assignment import AssignmentVSP
-from ..algorithms.vsp.genetic import GeneticVSP
-from ..algorithms.vsp.greedy import GreedyVSP
-from ..algorithms.vsp.mcnf import MCNFVSP
-from ..algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
-from ..algorithms.vsp.tabu_search import TabuSearchVSP
+# Imports de solvers VSP/integrated movidos para algorithm_dispatcher.py (Sprint I).
 from ..core.config import get_settings
 from ..core.exceptions import HardConstraintViolationError, InfeasibleProblemError, InvalidAlgorithmError, NoProblemDataError, OptimizerError
 from ..domain.models import AlgorithmType, Block, CSPSolution, Duty, OptimizationResult, Trip, VehicleType, VSPSolution
@@ -61,18 +80,10 @@ class OptimizerService:
     def __init__(self) -> None:
         self.evaluator = CostEvaluator()
         self.validator = HardConstraintValidator()
-        self._solver_registry = {
-            AlgorithmType.GREEDY: self._run_greedy,
-            AlgorithmType.GENETIC: self._run_genetic,
-            AlgorithmType.SIMULATED_ANNEALING: self._run_sa,
-            AlgorithmType.TABU_SEARCH: self._run_ts,
-            AlgorithmType.SET_PARTITIONING: self._run_sp,
-            AlgorithmType.MCNF: self._run_mcnf,
-            AlgorithmType.JOINT_SOLVER: self._run_joint,
-            AlgorithmType.HYBRID_PIPELINE: self._run_hybrid,
-            AlgorithmType.VCSP_PULP: self._run_vcsp_pulp,
-            AlgorithmType.ASSIGNMENT_VSP: self._run_assignment_vsp,
-        }
+        # NOTE: o dispatch dos solvers (_run_greedy, _run_hybrid, etc) foi extraído para
+        # algorithm_dispatcher.py (Sprint I — split incremental do monolito 4287→).
+        # `_make_csp` e `_make_set_covering_csp` ainda vivem aqui porque dependem de
+        # estado (evaluator, validator) e são injetados como factories no dispatcher.
 
     def run(
         self,
@@ -130,8 +141,13 @@ class OptimizerService:
                 cct_params[key] = value
                 vsp_params[key] = value
         
-        # Mapeamentos específicos de nomes legados
-        if intent_params.get("cost_vehicle"):
+        # Mapeamentos específicos de nomes legados.
+        # Preferimos `vehicle_fixed_cost` (custo fixo diário do veículo) quando disponível;
+        # `cost_vehicle` é fallback legado e historicamente vinha sobrescrito com valor inflado
+        # (ex.: custo mensal/anual em vez de diário), inflacionando o total em ~14×.
+        if intent_params.get("vehicle_fixed_cost"):
+            vsp_params["fixed_vehicle_activation_cost"] = intent_params["vehicle_fixed_cost"]
+        elif intent_params.get("cost_vehicle"):
             vsp_params["fixed_vehicle_activation_cost"] = intent_params["cost_vehicle"]
         if intent_params.get("cost_km"):
             vsp_params["deadhead_cost_per_minute"] = intent_params["cost_km"]
@@ -1669,69 +1685,17 @@ class OptimizerService:
             "strict_trip_group_mode": self._strict_trip_group_mode(trips, cct_params, vsp_params),
         }
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Sprint I-3: thin wrappers — implementação em trip_group_inference.py
+    # ─────────────────────────────────────────────────────────────────────
     def _summarize_trip_groups(self, trips: List[Trip]) -> Dict[str, int]:
-        grouped: Dict[int, set[int]] = {}
-        for trip in trips:
-            group_id = getattr(trip, "trip_group_id", None)
-            if group_id is None:
-                continue
-            grouped.setdefault(int(group_id), set()).add(int(trip.id))
+        return _module_summarize_trip_groups(trips)
 
-        group_sizes = [len(ids) for ids in grouped.values() if len(ids) >= 2]
-        return {
-            "group_count": len(group_sizes),
-            "grouped_trip_count": sum(group_sizes),
-            "max_group_size": max(group_sizes) if group_sizes else 0,
-        }
-
-    def _build_group_inference_report(
-        self,
-        trips: List[Trip],
-        request_metadata: Any,
-    ) -> Dict[str, Any]:
-        metadata = dict(request_metadata or {})
-        optimizer_input_stats = self._summarize_trip_groups(trips)
-        mode = str(metadata.get("trip_group_inference_mode") or ("direct_input" if not metadata else "unspecified"))
-        has_backend_stats = "backend_trip_group_stats" in metadata
-        backend_stats_raw = metadata.get("backend_trip_group_stats") or {}
-        backend_stats = {
-            "group_count": int(backend_stats_raw.get("group_count", optimizer_input_stats["group_count"]) or 0),
-            "grouped_trip_count": int(backend_stats_raw.get("grouped_trip_count", optimizer_input_stats["grouped_trip_count"]) or 0),
-            "max_group_size": int(backend_stats_raw.get("max_group_size", optimizer_input_stats["max_group_size"]) or 0),
-        }
-
-        if has_backend_stats and backend_stats != optimizer_input_stats:
-            raise OptimizerError(
-                "Incoming trip_group_id payload diverged between backend and optimizer input.",
-                code="TRIP_GROUP_PAYLOAD_DIVERGENCE",
-                details={
-                    "trip_group_inference_mode": mode,
-                    "backend_trip_group_stats": backend_stats,
-                    "optimizer_input_stats": optimizer_input_stats,
-                },
-            )
-
-        return {
-            "mode": mode,
-            "backend_trip_group_stats": backend_stats,
-            "optimizer_input_stats": optimizer_input_stats,
-        }
+    def _build_group_inference_report(self, trips: List[Trip], request_metadata: Any) -> Dict[str, Any]:
+        return _module_build_group_inference_report(trips, request_metadata)
 
     def _log_group_inference_report(self, report: Dict[str, Any]) -> None:
-        backend_stats = report.get("backend_trip_group_stats") or {}
-        input_stats = report.get("optimizer_input_stats") or {}
-        effective_stats = report.get("optimizer_effective_stats") or {}
-        logger.info(
-            "[GROUPS] mode=%s backend=%d/%d input=%d/%d effective=%d/%d inferred=%s",
-            report.get("mode"),
-            int(backend_stats.get("group_count", 0) or 0),
-            int(backend_stats.get("grouped_trip_count", 0) or 0),
-            int(input_stats.get("group_count", 0) or 0),
-            int(input_stats.get("grouped_trip_count", 0) or 0),
-            int(effective_stats.get("group_count", 0) or 0),
-            int(effective_stats.get("grouped_trip_count", 0) or 0),
-            bool(report.get("inference_applied", False)),
-        )
+        return _module_log_group_inference_report(report)
 
     def _build_scale_failure_hard_constraint_report(
         self,
@@ -2840,6 +2804,7 @@ class OptimizerService:
         )
         return result
 
+    # Sprint J-1: thin wrapper — implementação em operational_quality_helpers.py
     def _resolve_operational_quality_mode(
         self,
         optimization_params: Optional[Dict[str, Any]] = None,
@@ -2847,16 +2812,7 @@ class OptimizerService:
         cct_params: Optional[Dict[str, Any]] = None,
         request_metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
-        for source in (optimization_params, vsp_params, cct_params, request_metadata):
-            if not isinstance(source, dict):
-                continue
-            raw_mode = source.get("operational_quality_mode")
-            if raw_mode is None:
-                continue
-            mode = str(raw_mode).strip().lower()
-            if mode in {"strict", "balanced", "optimized"}:
-                return mode
-        return "balanced"
+        return _module_resolve_operational_quality_mode(optimization_params, vsp_params, cct_params, request_metadata)
 
     def _ensure_operational_quality_decision(
         self,
@@ -3025,90 +2981,20 @@ class OptimizerService:
         )
         return candidate_pool[0]
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Sprint J-1: thin wrappers — implementação em operational_quality_helpers.py
+    # ─────────────────────────────────────────────────────────────────────
     def _clone_duty_slice(self, source: Duty, tasks: List[Block], duty_id: int) -> Duty:
-        cloned_tasks = [copy.deepcopy(task) for task in tasks]
-        cloned = Duty(id=duty_id, meta=copy.deepcopy(source.meta or {}))
-        for task in cloned_tasks:
-            cloned.add_task(task)
-        cloned.meta["source_block_ids"] = [int(task.id) for task in cloned.tasks]
-        cloned.meta["covered_original_trip_ids"] = [
-            int(getattr(trip, "public_id", trip.id))
-            for task in cloned.tasks
-            for trip in task.trips
-        ]
-        cloned.meta["covered_trip_group_ids"] = sorted(
-            {
-                int(trip.trip_group_id)
-                for task in cloned.tasks
-                for trip in task.trips
-                if trip.trip_group_id is not None
-            }
-        )
-        cloned.meta["operator_id"] = None
-        cloned.meta["operator_name"] = None
-        return cloned
+        return _module_clone_duty_slice(source, tasks, duty_id)
 
     def _duty_exception_rank(self, duty: Duty) -> Tuple[int, float, int, int]:
-        classification = self._classify_duty_severity(duty)
-        severity_rank = {"critical": 0, "borderline": 1, "acceptable": 2}[classification["severity"]]
-        return (
-            severity_rank,
-            float(classification["utilization"]),
-            -int(classification["spread_time"]),
-            int(duty.id),
-        )
+        return _module_duty_exception_rank(duty)
 
     def _classify_duty_severity(self, duty: Duty) -> Dict[str, Any]:
-        metrics = duty.meta.get("quality_metrics") or {}
-        semantic_metrics = metrics.get("operational_semantic") or {}
-        utilization = float(semantic_metrics.get("utilization", metrics.get("utilization", 0.0)) or 0.0)
-        spread_time = int(semantic_metrics.get("spread_time", duty.spread_time) or duty.spread_time or 0)
-        total_idle = int(
-            semantic_metrics.get("total_idle_time", metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time)))
-            or 0
-        )
-        severity = "acceptable"
-        if utilization < 0.25 and spread_time > 720 and total_idle > 360:
-            severity = "critical"
-        elif utilization < 0.25:
-            severity = "borderline"
-        return {
-            "severity": severity,
-            "utilization": utilization,
-            "spread_time": spread_time,
-            "total_idle_time": total_idle,
-        }
+        return _module_classify_duty_severity(duty)
 
     def _summarize_operational_quality(self, result: OptimizationResult, audit: Dict[str, Any]) -> Dict[str, Any]:
-        duties = list(result.csp.duties or [])
-        classifications = [self._classify_duty_severity(duty) for duty in duties]
-        utilizations = [float(item["utilization"]) for item in classifications]
-        idle_values = [int(item["total_idle_time"]) for item in classifications]
-        hard_issues = list(audit.get("hard_issues") or [])
-        soft_issues = list(audit.get("soft_issues") or [])
-        mandatory_rest_missing = sum(1 for issue in soft_issues if str(issue).startswith("MANDATORY_REST_MISSING"))
-        labels: List[str] = []
-        return {
-            "total_cost": round(float(result.total_cost or 0.0), 2),
-            "vehicles": int(result.vsp.num_vehicles),
-            "duties": len(duties),
-            "crew": int(result.csp.num_crew),
-            "duties_below_25_pct": sum(1 for item in classifications if float(item["utilization"]) < 0.25),
-            "duties_below_30_pct": sum(1 for item in classifications if float(item["utilization"]) < 0.30),
-            "duties_above_12h": sum(1 for duty in duties if int(duty.spread_time or 0) > 720),
-            "avg_utilization_pct": round((sum(utilizations) / max(1, len(utilizations))) * 100.0, 2),
-            "avg_idle_minutes": round(sum(idle_values) / max(1, len(idle_values)), 2),
-            "overtime_minutes": sum(int(duty.overtime_minutes or 0) for duty in duties),
-            "mandatory_rest_missing": mandatory_rest_missing,
-            "critical_count": sum(1 for item in classifications if item["severity"] == "critical"),
-            "borderline_count": sum(1 for item in classifications if item["severity"] == "borderline"),
-            "acceptable_count": sum(1 for item in classifications if item["severity"] == "acceptable"),
-            "hard_violation_count": len(hard_issues),
-            "soft_violation_count": len(soft_issues),
-            "uncovered_blocks": len(result.csp.uncovered_blocks or []),
-            "unassigned_trips": len(result.vsp.unassigned_trips or []),
-            "labels": labels,
-        }
+        return _module_summarize_operational_quality(result, audit)
 
     def compare_scenarios(
         self,
@@ -3338,119 +3224,15 @@ class OptimizerService:
             "selected_summary": chosen_summary,
         }
 
-    def _scenario_rejection_reason(
-        self,
-        mode: str,
-        chosen: Dict[str, Any],
-        rejected: Dict[str, Any],
-        comparison: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        comparison = comparison or {}
-        chosen_summary = chosen["summary"]
-        rejected_summary = rejected["summary"]
-        blocking_reasons = list(comparison.get("blocking_reasons") or [])
-        if "coverage_regressed_unassigned_trips" in blocking_reasons or "coverage_regressed_uncovered_blocks" in blocking_reasons:
-            return "Piora cobertura do plano."
-        if "hard_violations_increased" in blocking_reasons:
-            return "Aumenta hard violations."
-        if rejected["scenario_id"] != "current_plan" and int(comparison.get("improved_count", 0) or 0) < 2:
-            return "Nao melhora ao menos 2 KPIs operacionais frente ao current_plan."
-        if mode == "optimized" and rejected_summary["total_cost"] > chosen_summary["total_cost"]:
-            return "Custo total maior do que o cenario escolhido."
-        if rejected_summary["critical_count"] > chosen_summary["critical_count"]:
-            return "Mantem mais excecoes criticas do que o cenario escolhido."
-        if rejected_summary["duties_below_25_pct"] > chosen_summary["duties_below_25_pct"]:
-            return "Mantem mais duties abaixo de 25%."
-        if rejected_summary["duties"] > chosen_summary["duties"]:
-            return "Exige mais duties sem compensar em qualidade operacional."
-        return "Perde no criterio principal do modo operacional selecionado."
+    # Sprint J-1: thin wrappers — implementação em operational_quality_helpers.py
+    def _scenario_rejection_reason(self, mode: str, chosen: Dict[str, Any], rejected: Dict[str, Any], comparison: Optional[Dict[str, Any]] = None) -> str:
+        return _module_scenario_rejection_reason(mode, chosen, rejected, comparison)
 
-    def _scenario_justification(
-        self,
-        mode: str,
-        chosen: Dict[str, Any],
-        strict: Dict[str, Any],
-        balanced: Dict[str, Any],
-        cheapest: Dict[str, Any],
-        current_plan: Dict[str, Any],
-        comparison: Optional[Dict[str, Any]],
-    ) -> List[str]:
-        chosen_summary = chosen["summary"]
-        current_summary = current_plan["summary"]
-        lines = [
-            f"Modo operacional selecionado: {mode}.",
-            (
-                f"Cenario escolhido: {chosen['title']} ({chosen['scenario_id']}) com custo {chosen_summary['total_cost']:.2f}, "
-                f"{chosen_summary['duties_below_25_pct']} duties abaixo de 25%, "
-                f"{chosen_summary['mandatory_rest_missing']} mandatory_rest_missing e "
-                f"{chosen_summary['critical_count']} excecao(oes) critica(s)."
-            ),
-        ]
-        if comparison and chosen["scenario_id"] != current_plan["scenario_id"]:
-            lines.append(
-                f"Comparado ao current_plan, o cenario escolhido melhorou {int(comparison.get('improved_count', 0))} KPI(s): "
-                + ", ".join(comparison.get("improvements") or ["sem melhoria listada"])
-                + "."
-            )
-            if comparison.get("cost_increased"):
-                lines.append(
-                    f"O custo aumentou {abs(float(comparison.get('cost_delta', 0.0) or 0.0)):.2f}, mas a melhora operacional foi considerada relevante."
-                )
-        elif chosen["scenario_id"] == current_plan["scenario_id"]:
-            lines.append(
-                "O current_plan foi mantido porque nenhum candidato melhorou pelo menos 2 KPIs operacionais sem piorar cobertura ou hard violations."
-            )
-        if mode == "strict" and chosen["scenario_id"] != strict["scenario_id"]:
-            lines.append("Nao houve cenario com zero duties abaixo de 25%; foi selecionado o fallback mais proximo sem aumentar hard violations.")
-        if mode == "balanced" and chosen["scenario_id"] == balanced["scenario_id"]:
-            lines.append("O criterio balanced priorizou reduzir a cauda operacional antes de custo marginal ou do numero de duties.")
-        if mode == "optimized" and chosen["scenario_id"] == cheapest["scenario_id"]:
-            lines.append("O criterio optimized escolheu o menor custo total entre os cenarios viaveis.")
-        if chosen["scenario_id"] != current_plan["scenario_id"]:
-            lines.append(
-                f"Current_plan: duties<25%={current_summary['duties_below_25_pct']}, duties>12h={current_summary['duties_above_12h']}, idle medio={current_summary['avg_idle_minutes']}, mandatory_rest_missing={current_summary['mandatory_rest_missing']}, overtime={current_summary['overtime_minutes']}."
-            )
-            lines.append(
-                f"Escolhido: duties<25%={chosen_summary['duties_below_25_pct']}, duties>12h={chosen_summary['duties_above_12h']}, idle medio={chosen_summary['avg_idle_minutes']}, mandatory_rest_missing={chosen_summary['mandatory_rest_missing']}, overtime={chosen_summary['overtime_minutes']}."
-            )
-        return lines
+    def _scenario_justification(self, mode: str, chosen: Dict[str, Any], strict: Dict[str, Any], balanced: Dict[str, Any], cheapest: Dict[str, Any], current_plan: Dict[str, Any], comparison: Optional[Dict[str, Any]]) -> List[str]:
+        return _module_scenario_justification(mode, chosen, strict, balanced, cheapest, current_plan, comparison)
 
-    def _scenario_tradeoffs(
-        self,
-        chosen: Dict[str, Any],
-        candidates: List[Dict[str, Any]],
-        comparison: Optional[Dict[str, Any]],
-    ) -> List[str]:
-        current = next((item for item in candidates if item["scenario_id"] == "current_plan"), chosen)
-        chosen_summary = chosen["summary"]
-        current_summary = current["summary"]
-        trade_offs: List[str] = []
-        if chosen["scenario_id"] != current["scenario_id"]:
-            duty_delta = chosen_summary["duties"] - current_summary["duties"]
-            crew_delta = chosen_summary["crew"] - current_summary["crew"]
-            if duty_delta > 0 or crew_delta > 0:
-                trade_offs.append(f"Exige {max(duty_delta, 0)} duty(s) extra e {max(crew_delta, 0)} crew adicional(is).")
-            cost_delta = round(chosen_summary["total_cost"] - current_summary["total_cost"], 2)
-            if not math.isclose(cost_delta, 0.0, abs_tol=0.01):
-                direction = "reduz" if cost_delta < 0 else "aumenta"
-                trade_offs.append(f"{direction.capitalize()} o custo total em {abs(cost_delta):.2f}.")
-            if comparison and comparison.get("regressions"):
-                trade_offs.append(
-                    "Ainda piora os seguintes KPIs frente ao current_plan: "
-                    + ", ".join(str(item) for item in comparison.get("regressions") or [])
-                    + "."
-                )
-        if chosen_summary["critical_count"] < current_summary["critical_count"]:
-            trade_offs.append("Reduz o numero de excecoes criticas no plano final.")
-        if chosen_summary["duties_below_25_pct"] < current_summary["duties_below_25_pct"]:
-            trade_offs.append("Encurta a cauda de duties abaixo de 25% de utilizacao.")
-        if chosen_summary["mandatory_rest_missing"] < current_summary["mandatory_rest_missing"]:
-            trade_offs.append("Reduz duties com mandatory_rest_missing.")
-        if chosen_summary["avg_idle_minutes"] < current_summary["avg_idle_minutes"]:
-            trade_offs.append("Reduz idle medio publicado.")
-        if not trade_offs:
-            trade_offs.append("Mantem o plano atual por nao haver alternativa melhor dentro dos criterios objetivos.")
-        return trade_offs
+    def _scenario_tradeoffs(self, chosen: Dict[str, Any], candidates: List[Dict[str, Any]], comparison: Optional[Dict[str, Any]]) -> List[str]:
+        return _module_scenario_tradeoffs(chosen, candidates, comparison)
 
     def _build_operational_kpis(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> Dict[str, Any]:
         duties = list(result.csp.duties or [])
@@ -3638,30 +3420,19 @@ class OptimizerService:
         optimization_params: Optional[Dict[str, Any]],
         effective_time_budget_s: float,
     ) -> OptimizationResult:
-        
-        # Unifica parâmetros dinâmicos de otimização na base do VSP e CCT
-        if optimization_params:
-            vsp_params.update(optimization_params)
-            cct_params.update(optimization_params)
-
-        # Usar o registro de solvers centralizado
-        handler = self._solver_registry.get(algorithm)
-        if not handler:
-            raise InvalidAlgorithmError(str(algorithm))
-
-        logger.info(
-            f"[OptimizerService] Dispatching algorithm={algorithm.value if hasattr(algorithm, 'value') else algorithm} "
-            f"trips={len(trips)} budget={effective_time_budget_s}s"
-        )
-
-        return handler(
+        # Delegamos para o módulo extraído (algorithm_dispatcher.py). Injetamos os
+        # factories de CSP que dependem do estado deste service (evaluator, validator).
+        return dispatch_algorithm(
+            algorithm,
             trips=trips,
             vehicle_types=vehicle_types,
             depot_id=depot_id,
-            time_budget_s=effective_time_budget_s,
             cct_params=cct_params,
             vsp_params=vsp_params,
-            optimization_params=optimization_params
+            optimization_params=optimization_params,
+            effective_time_budget_s=effective_time_budget_s,
+            csp_factory=self._make_csp,
+            set_covering_factory=self._make_set_covering_csp,
         )
 
 
@@ -3669,339 +3440,45 @@ class OptimizerService:
 
 
 
-    def _run_greedy(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
+    # NOTE: Os métodos _run_greedy/_run_genetic/_run_sa/_run_ts/_run_sp/_run_mcnf/
+    # _run_joint/_run_hybrid/_run_vcsp_pulp/_run_assignment_vsp foram movidos para
+    # services/algorithm_dispatcher.py (Sprint I — split incremental do monolito).
+    # Caso necessite chamar diretamente sem passar pelo dispatcher, importe de lá.
 
-    def _run_genetic(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        ga = GeneticVSP(vsp_params=vsp_params)
-        ga.time_budget_s = time_budget_s
-        vsp = ga.solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
-
-
-    def _run_sa(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        sa = SimulatedAnnealingVSP(vsp_params=vsp_params)
-        sa.time_budget_s = time_budget_s
-        vsp = sa.solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
-
-
-    def _run_ts(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        ts = TabuSearchVSP(vsp_params=vsp_params)
-        ts.time_budget_s = time_budget_s
-        vsp = ts.solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
-
-
-    def _run_sp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-        ilp = self._make_set_covering_csp(cct_params, vsp_params, optimization_params)
-        ilp.time_budget_s = time_budget_s
-        return OptimizationResult(vsp=vsp, csp=ilp.solve(vsp.blocks, trips))
-
-
-    def _run_mcnf(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        mcnf = MCNFVSP(vsp_params=vsp_params)
-        mcnf.time_budget_s = time_budget_s
-        vsp = mcnf.solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
-
-
-    def _run_joint(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        return JointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params, optimization_params=optimization_params).solve(trips, vehicle_types, depot_id)
-
-    def _run_hybrid(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
-        full_cct_params = {**cct_params, **(optimization_params or {})}
-        full_vsp_params = {**vsp_params}
-        if optimization_params and optimization_params.get("ilp_timeout_seconds") is not None:
-            full_vsp_params.setdefault("ilp_timeout_seconds", optimization_params["ilp_timeout_seconds"])
-        return HybridPipeline(time_budget_s=budget, cct_params=full_cct_params, vsp_params=full_vsp_params).solve(trips, vehicle_types, depot_id)
-
-    def _run_vcsp_pulp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        return VCSPJointSolver(time_budget_s=time_budget_s, cct_params={**cct_params, **(optimization_params or {})}, vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-
-
-    def _run_assignment_vsp(self, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int], time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None) -> OptimizationResult:
-        csp = self._make_csp(cct_params, vsp_params, optimization_params)
-        vsp = AssignmentVSP(vsp_params=vsp_params)
-        vsp.time_budget_s = time_budget_s
-        vsp_sol = vsp.solve(trips, vehicle_types, depot_id)
-        return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
-
-
+    # ─────────────────────────────────────────────────────────────────────
+    # Sprint I-2: lógica movida para services/parameter_normalization.py.
+    # Mantemos thin wrappers para compatibilidade interna (testes monkey-patcham
+    # alguns métodos via `self._method`).
+    # ─────────────────────────────────────────────────────────────────────
     def _as_dict(self, params: Any) -> Dict[str, Any]:
-        if params is None:
-            return {}
-        if isinstance(params, dict):
-            return dict(params)
-        if hasattr(params, "model_dump"):
-            return params.model_dump(exclude_none=True)
-        return {
-            key: value
-            for key, value in vars(params).items()
-            if not key.startswith("_") and value is not None
-        }
+        return _module_as_dict(params)
 
     def _normalize_rules(self, params: Any) -> Dict[str, Any]:
-        normalized = self._as_dict(params)
-        fairness_weight = normalized.get("fairness_weight")
-        if fairness_weight is not None:
-            try:
-                fairness = float(fairness_weight)
-                if fairness > 1.0:
-                    fairness = fairness / 100.0
-                fairness = max(0.0, fairness)
-                goal_weights = dict(normalized.get("goal_weights") or {})
-                goal_weights.setdefault("fairness", fairness)
-                normalized["goal_weights"] = goal_weights
-            except (TypeError, ValueError):
-                pass
+        return _module_normalize_rules(params)
 
-        rules = normalized.get("natural_language_rules") or []
-        if rules:
-            regex_parsed: Dict[str, Any] = {}
-            for rule in rules:
-                regex_parsed.update(self._parse_rule(rule))
+    # ─────────────────────────────────────────────────────────────────────
+    # Sprint I-3: thin wrappers — implementação em trip_group_inference.py
+    # ─────────────────────────────────────────────────────────────────────
+    def _inject_trip_group_constraints(self, trips: List[Trip], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> None:
+        return _module_inject_trip_group_constraints(trips, cct_params, vsp_params)
 
-            if regex_parsed:
-                for key, value in regex_parsed.items():
-                    normalized.setdefault(key, value)
-            else:
-                ai_parsed = AiService().translate_rules_sync(rules)
-                if ai_parsed:
-                    for key, value in ai_parsed.items():
-                        normalized.setdefault(key, value)
-
-        return normalized
-
-    def _inject_trip_group_constraints(
-        self,
-        trips: List[Trip],
-        cct_params: Dict[str, Any],
-        vsp_params: Dict[str, Any],
-    ) -> None:
-        strict_group_mode = self._strict_trip_group_mode(trips, cct_params, vsp_params)
-        hard_pairing = (
-            strict_group_mode
-            or bool(cct_params.get("enforce_trip_groups_hard", False))
-            or bool(cct_params.get("operator_pairing_hard", False))
-        )
-        if cct_params.get("mandatory_trip_groups_same_duty"):
-            self._materialize_mandatory_trip_groups(
-                trips,
-                cct_params.get("mandatory_trip_groups_same_duty") or [],
-                seed=-9_000_000,
-            )
-            return
-        if not hard_pairing and not bool(vsp_params.get("preserve_preferred_pairs", True)):
-            return
-
-        grouped: Dict[Any, List[int]] = {}
-        for trip in trips:
-            if trip.trip_group_id is None:
-                continue
-            group_key: Any
-            if strict_group_mode:
-                group_key = int(trip.trip_group_id)
-            else:
-                group_key = (int(trip.line_id), int(trip.trip_group_id))
-            grouped.setdefault(group_key, []).append(int(trip.id))
-
-        explicit_groups: List[List[int]] = [
-            sorted(set(ids))
-            for ids in grouped.values()
-            if len(set(ids)) >= 2
-        ]
-
-        if not explicit_groups and hard_pairing:
-            inferred = self._infer_round_trip_pairs(trips, vsp_params)
-            trip_by_id = {trip.id: trip for trip in trips}
-            synthetic_group = -1
-            for a_id, b_id in inferred:
-                a_trip = trip_by_id.get(a_id)
-                b_trip = trip_by_id.get(b_id)
-                if a_trip is None or b_trip is None:
-                    continue
-                if a_trip.trip_group_id is None and b_trip.trip_group_id is None:
-                    a_trip.trip_group_id = synthetic_group
-                    b_trip.trip_group_id = synthetic_group
-                    explicit_groups.append(sorted([a_id, b_id]))
-                    synthetic_group -= 1
-
-        if hard_pairing and explicit_groups:
-            self._materialize_mandatory_trip_groups(trips, explicit_groups, seed=-1)
-            cct_params["mandatory_trip_groups_same_duty"] = explicit_groups
-            fixed_cost = float(vsp_params.get("fixed_vehicle_activation_cost", 800.0) or 800.0)
-            vsp_params.setdefault("hard_pairing_vehicle_level", True)
-            vsp_params.setdefault("hard_pairing_penalty", max(fixed_cost * 25.0, 20000.0))
-
-    def _materialize_mandatory_trip_groups(
-        self,
-        trips: List[Trip],
-        groups: List[List[int]],
-        seed: int,
-    ) -> None:
-        trip_by_id = {int(trip.id): trip for trip in trips}
-        for index, group in enumerate(groups):
-            group_ids = [int(item) for item in group]
-            existing_group_ids = {
-                int(trip_by_id[trip_id].trip_group_id)
-                for trip_id in group_ids
-                if trip_id in trip_by_id and trip_by_id[trip_id].trip_group_id is not None
-            }
-            synthetic_group_id = int(seed) - index
-            materialized_group_id = next(iter(existing_group_ids)) if len(existing_group_ids) == 1 else synthetic_group_id
-            for trip_id in group_ids:
-                trip = trip_by_id.get(trip_id)
-                if trip is not None and trip.trip_group_id is None:
-                    trip.trip_group_id = materialized_group_id
+    def _materialize_mandatory_trip_groups(self, trips: List[Trip], groups: List[List[int]], seed: int) -> None:
+        return _module_materialize_mandatory_trip_groups(trips, groups, seed)
 
     def _infer_round_trip_pairs(self, trips: List[Trip], vsp_params: Dict[str, Any]) -> List[List[int]]:
-        pair_window = int(vsp_params.get("preferred_pair_window_minutes", 30) or 30)
-        pair_window = max(5, min(pair_window, 90))
+        return _module_infer_round_trip_pairs(trips, vsp_params)
 
-        by_line: Dict[int, List[Trip]] = {}
-        for trip in trips:
-            by_line.setdefault(int(trip.line_id), []).append(trip)
+    # ─────────────────────────────────────────────────────────────────────
+    # Sprint I-2: thin wrappers — implementação em parameter_normalization.py
+    # ─────────────────────────────────────────────────────────────────────
+    def _align_vsp_params_with_cct(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> None:
+        return _module_align_vsp_params_with_cct(cct_params, vsp_params)
 
-        used: set[int] = set()
-        pairs: List[List[int]] = []
-        for line_id in sorted(by_line.keys()):
-            ordered = sorted(by_line[line_id], key=lambda item: (item.start_time, item.id))
-            for index, trip in enumerate(ordered):
-                if trip.id in used:
-                    continue
+    def _strict_trip_group_mode(self, trips: List[Trip], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> bool:
+        return _module_is_strict_trip_group_mode(trips, cct_params, vsp_params)
 
-                best: Optional[Trip] = None
-                best_gap = 10**9
-                for nxt in ordered[index + 1 :]:
-                    if nxt.id in used:
-                        continue
-                    gap = int(nxt.start_time - trip.end_time)
-                    if gap < 0:
-                        continue
-                    if gap > pair_window:
-                        break
-                    # Verificar por terminal: destino da ida == origem da volta
-                    if trip.destination_id != nxt.origin_id:
-                        continue
-                    if trip.origin_id != nxt.destination_id:
-                        continue
-                    # Verificar por direction se disponível: ida deve ser outbound, volta return
-                    if trip.direction and nxt.direction:
-                        if trip.direction == nxt.direction:
-                            continue  # Mesma direção não forma par ida/volta
-                    if gap < best_gap:
-                        best = nxt
-                        best_gap = gap
-
-                if best is None:
-                    continue
-
-                used.add(trip.id)
-                used.add(best.id)
-                pairs.append(sorted([trip.id, best.id]))
-
-        return pairs
-
-    def _align_vsp_params_with_cct(
-        self,
-        cct_params: Dict[str, Any],
-        vsp_params: Dict[str, Any],
-    ) -> None:
-        passthrough_fields = (
-            "min_layover_minutes",
-            "pullout_minutes",
-            "pullback_minutes",
-            "connection_tolerance_minutes",
-            "strict_hard_validation",
-            "strict_zero_gap_validation",
-            "strict_operational_mode",
-            "strict_hard_constraints",
-        )
-        for field in passthrough_fields:
-            if field not in vsp_params and cct_params.get(field) is not None:
-                vsp_params[field] = cct_params[field]
-
-        if cct_params.get("min_connection_time") is not None and cct_params.get("min_layover_minutes") is None:
-            cct_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
-        if vsp_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
-            vsp_params["min_layover_minutes"] = int(vsp_params["min_connection_time"])
-        if cct_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
-            vsp_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
-
-        if "same_depot_required" not in vsp_params and cct_params.get("enforce_same_depot_start_end") is not None:
-            vsp_params["same_depot_required"] = bool(cct_params.get("enforce_same_depot_start_end"))
-
-        # min_break_minutes (descanso entre viagens do motorista) deve ser piso
-        # de min_layover_minutes (gap entre viagens no mesmo bloco do VSP).
-        # Sem isso o VSP greedy usa default 8 min e ignora o intervalo configurado.
-        min_break = cct_params.get("min_break_minutes")
-        if min_break is not None:
-            enforce_min_interval = bool(
-                cct_params.get(
-                    "enforce_min_interval",
-                    vsp_params.get("enforce_min_interval", True),
-                )
-            )
-            cct_params.setdefault("enforce_min_interval", enforce_min_interval)
-            vsp_params.setdefault("enforce_min_interval", enforce_min_interval)
-            current_layover = int(vsp_params.get("min_layover_minutes") or 0)
-            if enforce_min_interval:
-                vsp_params["min_layover_minutes"] = max(current_layover, int(min_break))
-
-        if "pricing_enabled" not in vsp_params and "enable_column_generation" in vsp_params:
-            vsp_params["pricing_enabled"] = bool(vsp_params.get("enable_column_generation"))
-
-    def _strict_trip_group_mode(
-        self,
-        trips: List[Trip],
-        cct_params: Dict[str, Any],
-        vsp_params: Dict[str, Any],
-    ) -> bool:
-        strict_groups = bool(
-            vsp_params.get(
-                "strict_hard_constraints",
-                cct_params.get("strict_hard_constraints", False),
-            )
-        )
-        if not strict_groups:
-            return False
-        return any(getattr(trip, "trip_group_id", None) is not None for trip in trips)
-
-    def _validate_strict_algorithm_support(
-        self,
-        algorithm: AlgorithmType,
-        trips: List[Trip],
-        cct_params: Dict[str, Any],
-        vsp_params: Dict[str, Any],
-    ) -> None:
-        if not self._strict_trip_group_mode(trips, cct_params, vsp_params):
-            return
-        algorithm_value = algorithm.value if hasattr(algorithm, "value") else str(algorithm)
-        unsupported = {AlgorithmType.ASSIGNMENT_VSP.value}
-        if algorithm_value in unsupported:
-            raise OptimizerError(
-                (
-                    f"Algorithm '{algorithm_value}' is not allowed with strict_hard_constraints=true "
-                    "when trip_group_id is present because it does not guarantee mandatory group preservation."
-                ),
-                code="ALGORITHM_UNSUPPORTED_STRICT_GROUPS",
-                details={
-                    "algorithm": algorithm_value,
-                    "strict_hard_constraints": True,
-                    "grouped_trips": sum(1 for trip in trips if getattr(trip, "trip_group_id", None) is not None),
-                    "recommendation": "Use an algorithm with group repair/audit, or disable strict_hard_constraints for exploratory runs.",
-                },
-            )
+    def _validate_strict_algorithm_support(self, algorithm: AlgorithmType, trips: List[Trip], cct_params: Dict[str, Any], vsp_params: Dict[str, Any]) -> None:
+        return _module_validate_strict_algorithm_support(algorithm, trips, cct_params, vsp_params)
 
     def _ensure_deadhead_coverage(
         self,
@@ -4168,69 +3645,8 @@ class OptimizerService:
         return base * topo_factor
 
     def _parse_rule(self, rule: str) -> Dict[str, Any]:
-        text = rule.lower().strip()
-        parsed: Dict[str, Any] = {}
-
-        def _hours_to_minutes(raw: str) -> int:
-            return int(round(float(raw.replace(",", ".")) * 60))
-
-        m = re.search(r"pausa de\s+(\d+)\s+min", text)
-        if m:
-            parsed.setdefault("min_break_minutes", int(m.group(1)))
-
-        m = re.search(r"após\s+cada\s+(\d+[\.,]?\d*)\s+horas", text)
-        if m:
-            parsed.setdefault("mandatory_break_after_minutes", _hours_to_minutes(m.group(1)))
-
-        m = re.search(r"máximo de\s+(\d+)\s+horas\s+por\s+semana", text)
-        if m:
-            parsed.setdefault("weekly_driving_limit_minutes", int(m.group(1)) * 60)
-
-        m = re.search(r"(?:nenhum motorista|motorista)\s+deve\s+trabalhar\s+mais\s+de\s+(\d+[\.,]?\d*)\s+horas", text)
-        if m:
-            parsed.setdefault("max_shift_minutes", _hours_to_minutes(m.group(1)))
-
-        m = re.search(r"spread\s+(?:máximo|maximo|limitado)?\s*(?:de)?\s*(\d+[\.,]?\d*)\s+horas", text)
-        if m:
-            parsed.setdefault("max_shift_minutes", _hours_to_minutes(m.group(1)))
-
-        m = re.search(r"reduzir\s+horas\s+extras", text)
-        if m:
-            parsed.setdefault("goal_weights", {})
-            parsed["goal_weights"].setdefault("overtime", 1.0)
-
-        m = re.search(r"reduzir\s+o?\s*spread", text)
-        if m:
-            parsed.setdefault("goal_weights", {})
-            parsed["goal_weights"].setdefault("spread", 0.8)
-
-        m = re.search(r"reduzir\s+deslocamentos?\s+passivos", text)
-        if m:
-            parsed.setdefault("goal_weights", {})
-            parsed["goal_weights"].setdefault("passive_transfer", 0.8)
-
-        m = re.search(r"equidade|balancear\s+jornadas|fairness", text)
-        if m:
-            parsed.setdefault("goal_weights", {})
-            parsed["goal_weights"].setdefault("fairness", 0.5)
-
-        m = re.search(r"descanso\s+interjornada\s+de\s+(\d+)\s*h", text)
-        if m:
-            parsed.setdefault("inter_shift_rest_minutes", int(m.group(1)) * 60)
-
-        m = re.search(r"descanso\s+semanal\s+de\s+(\d+)\s*h", text)
-        if m:
-            parsed.setdefault("weekly_rest_minutes", int(m.group(1)) * 60)
-
-        m = re.search(r"máximo de\s+(\d+)\s+jornadas\s+acima\s+de\s+(\d+)\s*horas", text)
-        if m:
-            parsed.setdefault("max_long_duties_per_period", int(m.group(1)))
-            parsed.setdefault("extended_daily_driving_limit_minutes", int(m.group(2)) * 60)
-
-        if "mesmo depósito" in text or "mesmo deposito" in text:
-            parsed.setdefault("enforce_same_depot_start_end", True)
-
-        return parsed
+        # Sprint I-2: lógica em parameter_normalization.parse_rule
+        return _module_parse_rule(rule)
 
     def _make_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any], optimization_params: Optional[Dict[str, Any]] = None):
         # Merge optimization_params into cct_params for CSP solvers

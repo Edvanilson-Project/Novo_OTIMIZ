@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
 import { AuditLog, AuditAction } from '../database/entities/audit-log.entity';
@@ -15,6 +15,8 @@ export interface LogPayload {
 
 @Injectable()
 export class AuditService {
+  private readonly logger = new Logger(AuditService.name);
+
   constructor(
     @InjectRepository(AuditLog)
     private readonly repo: Repository<AuditLog>,
@@ -25,7 +27,18 @@ export class AuditService {
       ...data,
       entityId: data.entityId != null ? String(data.entityId) : undefined,
     });
-    await this.repo.save(entry).catch(() => {});
+    // Persistir audit log é melhor-esforço (não bloquear a request principal),
+    // mas falha SILENCIOSA mascara perda de auditoria. Logamos no console com
+    // contexto do payload para não perder o trail em logs centralizados.
+    try {
+      await this.repo.save(entry);
+    } catch (err) {
+      this.logger.error(
+        `[AUDIT-PERSIST-FAIL] action=${data.action} entity=${data.entity} ` +
+        `entityId=${data.entityId ?? '-'} userId=${data.userId ?? '-'} ` +
+        `companyId=${data.companyId ?? '-'} error=${(err as Error).message}`,
+      );
+    }
   }
 
   async findByCompany(

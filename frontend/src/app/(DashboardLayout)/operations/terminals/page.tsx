@@ -21,6 +21,7 @@ export default function TerminalsPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [notify, setNotify] = useState<{ msg: string; sev: 'success' | 'error' } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -29,15 +30,17 @@ export default function TerminalsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormError(null); setOpen(true); };
   const openEdit = (row: Terminal) => {
     setEditing(row);
     setForm({ terminalId: row.terminalId, name: row.name, city: row.city ?? '', latitude: row.latitude, longitude: row.longitude });
+    setFormError(null);
     setOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.terminalId || !form.name) { setNotify({ msg: 'Código e Nome são obrigatórios.', sev: 'error' }); return; }
+    if (!form.terminalId || !form.name) { setFormError('Código e Nome do Terminal são obrigatórios.'); return; }
+    setFormError(null);
     setSaving(true);
     try {
       const payload = { ...form, latitude: form.latitude ? Number(form.latitude) : undefined, longitude: form.longitude ? Number(form.longitude) : undefined };
@@ -84,12 +87,13 @@ export default function TerminalsPage() {
         </Box>
       </DashboardCard>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={() => { setOpen(false); setFormError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <IconMapPin size={20} /> {editing ? `Editar: ${editing.name}` : 'Novo Terminal'}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {formError && <Alert severity="error">{formError}</Alert>}
             <TextField label="Código do Terminal *" size="small" fullWidth value={form.terminalId}
               onChange={e => setForm(f => ({ ...f, terminalId: e.target.value }))} helperText="Ex: TER-001, GARAGEM-SP" />
             <TextField label="Nome do Terminal *" size="small" fullWidth value={form.name}

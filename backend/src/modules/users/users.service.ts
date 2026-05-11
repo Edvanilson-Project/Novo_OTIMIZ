@@ -1,29 +1,45 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from '../database/entities/user.entity';
+import { TenantContext } from '../../common/context/tenant-context';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly repo: Repository<User>,
+    private readonly tenantContext: TenantContext,
   ) {}
 
+  private requireCompanyId(): number {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) {
+      throw new ForbiddenException('Empresa não identificada no contexto autenticado.');
+    }
+    return companyId;
+  }
+
   findAll(): Promise<User[]> {
-    return this.repo.find({ order: { name: 'ASC' } });
+    const companyId = this.requireCompanyId();
+    return this.repo.find({ where: { companyId }, order: { name: 'ASC' } });
   }
 
   async findOne(id: number): Promise<User> {
-    const user = await this.repo.findOne({ where: { id } });
+    const companyId = this.requireCompanyId();
+    const user = await this.repo.findOne({ where: { id, companyId } });
     if (!user) throw new NotFoundException(`Usuário ${id} não encontrado`);
     return user;
   }
 
   async create(dto: Record<string, any>): Promise<User> {
-    const exists = await this.repo.findOne({ where: { email: dto.email } });
-    if (exists) throw new ConflictException('Já existe um usuário com este e-mail');
+    const companyId = this.requireCompanyId();
+    if (dto.companyId !== undefined && Number(dto.companyId) !== companyId) {
+      throw new BadRequestException('CompanyId divergente do tenant autenticado.');
+    }
+    const exists = await this.repo.findOne({ where: { email: dto.email, companyId } });
+    if (exists) throw new ConflictException('Já existe um usuário com este e-mail nesta empresa');
 
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, 10) : '';
     const entity = this.repo.create({
@@ -31,7 +47,7 @@ export class UsersService {
       email: dto.email,
       passwordHash,
       role: dto.role ?? 'operator',
-      companyId: dto.companyId ?? null,
+      companyId,
       isActive: dto.status === 'inactive' ? false : true,
     });
     return this.repo.save(entity);
@@ -39,11 +55,13 @@ export class UsersService {
 
   async update(id: number, dto: Record<string, any>): Promise<User> {
     const user = await this.findOne(id);
+    if (dto.companyId !== undefined && Number(dto.companyId) !== user.companyId) {
+      throw new BadRequestException('Não é permitido transferir usuário para outra empresa.');
+    }
     if (dto.name !== undefined) user.name = dto.name;
     if (dto.email !== undefined) user.email = dto.email;
     if (dto.password) user.passwordHash = await bcrypt.hash(dto.password, 10);
     if (dto.role !== undefined) user.role = dto.role;
-    if (dto.companyId !== undefined) user.companyId = dto.companyId;
     if (dto.status !== undefined) user.isActive = dto.status !== 'inactive';
     return this.repo.save(user);
   }

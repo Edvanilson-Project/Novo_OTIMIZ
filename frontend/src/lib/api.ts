@@ -161,3 +161,50 @@ export const whatIfApi = {
   evaluateBaseline: (body: object) =>
     apiClient.post('/operations/evaluate-baseline', body).then((r) => r.data),
 };
+
+// ─── Vehicles & Fleet ─────────────────────────────────────────────────────────
+export const vehiclesApi = {
+  getTypes: () => apiClient.get('/vehicles/types').then((r) => r.data),
+  getTypeById: (id: ID) => apiClient.get(`/vehicles/types/${id}`).then((r) => r.data),
+  createType: (data: object) => apiClient.post('/vehicles/types', data).then((r) => r.data),
+  getAll: () => apiClient.get('/vehicles').then((r) => r.data),
+  getActive: () => apiClient.get('/vehicles/active').then((r) => r.data),
+  getByType: (typeId: ID) => apiClient.get(`/vehicles/by-type/${typeId}`).then((r) => r.data),
+  getById: (id: ID) => apiClient.get(`/vehicles/${id}`).then((r) => r.data),
+  create: (data: object) => apiClient.post('/vehicles', data).then((r) => r.data),
+  getMetricsAll: () => apiClient.get('/vehicles/metrics/all').then((r) => r.data),
+  getMetrics: (id: ID) => apiClient.get(`/vehicles/metrics/${id}`).then((r) => r.data),
+  getMaintenance: (vehicleId: ID) => apiClient.get(`/vehicles/${vehicleId}/maintenance`).then((r) => r.data),
+  createMaintenance: (vehicleId: ID, data: object) => apiClient.post(`/vehicles/${vehicleId}/maintenance`, data).then((r) => r.data),
+  updateMaintenance: (vehicleId: ID, maintenanceId: ID, data: object) =>
+    apiClient.patch(`/vehicles/${vehicleId}/maintenance/${maintenanceId}`, data).then((r) => r.data),
+  checkAvailability: (vehicleId: ID, params?: object) =>
+    apiClient.get(`/vehicles/${vehicleId}/maintenance/availability/check`, { params }).then((r) => r.data),
+  getAvailabilityWindows: (vehicleId: ID) =>
+    apiClient.get(`/vehicles/${vehicleId}/maintenance/availability/periods`).then((r) => r.data),
+  createAvailabilityWindow: (vehicleId: ID, data: object) =>
+    apiClient.post(`/vehicles/${vehicleId}/maintenance/availability-windows`, data).then((r) => r.data),
+};
+
+// ─── Operation Reporting ──────────────────────────────────────────────────────
+export const operationReportingApi = {
+  generate: (scheduleId: ID) => apiClient.post(`/operations/reporting/generate/${scheduleId}`).then((r) => r.data),
+  getHistorical: (scheduleId: ID, days?: number) =>
+    apiClient.get(`/operations/reporting/historical/${scheduleId}`, { params: { days } }).then((r) => r.data),
+  compare: (scheduleId: ID, compareWith?: ID) =>
+    apiClient.get(`/operations/reporting/compare/${scheduleId}`, { params: { compareWith } }).then((r) => r.data),
+  exportPdfUrl: (scheduleId: ID) => `/api/operations/reporting/export-pdf/${scheduleId}`,
+  exportExcelUrl: (scheduleId: ID) => `/api/operations/reporting/export-excel/${scheduleId}`,
+};
+
+// ─── Scenarios & Advanced Optimization ───────────────────────────────────────
+export const scenariosApi = {
+  generate: (scheduleId: ID) => apiClient.post(`/operations/optimization-advanced/scenarios/${scheduleId}`).then((r) => r.data),
+  compare: (scheduleId: ID, scenario1Id: string, scenario2Id: string) =>
+    apiClient.post(`/operations/optimization-advanced/scenarios/${scheduleId}/compare`, { scenario1Id, scenario2Id }).then((r) => r.data),
+  whatIfVehicleType: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/vehicle-type-change', body).then((r) => r.data),
+  whatIfTimeShift: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/time-shift', body).then((r) => r.data),
+  whatIfTripRemoval: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/trip-removal', body).then((r) => r.data),
+  whatIfTripAddition: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/trip-addition', body).then((r) => r.data),
+  whatIfParameterChange: (body: object) => apiClient.post('/operations/optimization-advanced/whatif/parameter-change', body).then((r) => r.data),
+};

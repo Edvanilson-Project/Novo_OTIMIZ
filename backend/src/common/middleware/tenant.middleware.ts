@@ -30,15 +30,25 @@ export class TenantMiddleware implements NestMiddleware {
       }
     }
 
-    // 2. Fallback para Header (Útil para testes de integração e dev tools)
-    if (!companyId) {
+    // 2. Fallback para Header — habilitado apenas em testes de integração ou via flag explícita
+    //    (em produção sem JWT, JwtAuthGuard rejeitará a requisição mesmo se chegarmos aqui)
+    if (!companyId && process.env.NODE_ENV !== 'production') {
       const companyIdStr = req.headers['x-company-id'] as string;
       companyId = companyIdStr ? parseInt(companyIdStr, 10) : undefined;
     }
 
-    // 3. Bypass de Desenvolvedor: injeta companyId=1 quando NODE_ENV=development e não há token
-    if (!companyId && process.env.NODE_ENV === 'development') {
-      companyId = 1;
+    // 3. Bypass dev: SOMENTE quando NODE_ENV=development, request veio de loopback (localhost)
+    //    e variável ALLOW_DEV_TENANT_FALLBACK=true. Reduz risco de bypass acidental
+    //    se ambiente de dev for exposto na rede ou via reverse proxy mal configurado.
+    if (!companyId
+      && process.env.NODE_ENV === 'development'
+      && process.env.ALLOW_DEV_TENANT_FALLBACK === 'true'
+    ) {
+      const ip = req.ip || (req.socket && req.socket.remoteAddress) || '';
+      const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+      if (isLoopback) {
+        companyId = 1;
+      }
     }
 
     if (companyId) {

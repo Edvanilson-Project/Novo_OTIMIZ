@@ -30,6 +30,7 @@ import {
   Typography,
 } from '@mui/material';
 import { IconPlus, IconCalendar, IconTrash } from '@tabler/icons-react';
+import { vehiclesApi } from '@/lib/api';
 
 interface Maintenance {
   id: number;
@@ -72,11 +73,8 @@ const MaintenanceScheduler: React.FC<MaintenanceSchedulerProps> = ({
   const fetchMaintenance = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/vehicles/${vehicleId}/maintenance`);
-      if (response.ok) {
-        const data = await response.json();
-        setMaintenance(data);
-      }
+      const data = await vehiclesApi.getMaintenance(vehicleId);
+      setMaintenance(data);
     } catch (err) {
       setError('Erro ao carregar manutenções');
     } finally {
@@ -102,37 +100,19 @@ const MaintenanceScheduler: React.FC<MaintenanceSchedulerProps> = ({
   const handleSubmit = async () => {
     try {
       setError(null);
-      const response = await fetch(`/api/vehicles/${vehicleId}/maintenance`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
-        await fetchMaintenance();
-        handleCloseDialog();
-      } else {
-        const data = await response.json();
-        setError(data.message || 'Erro ao agendar manutenção');
-      }
-    } catch (err) {
-      setError('Erro ao agendar manutenção');
+      await vehiclesApi.createMaintenance(vehicleId, formData);
+      await fetchMaintenance();
+      handleCloseDialog();
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Erro ao agendar manutenção');
     }
   };
 
   const handleDelete = async (maintenanceId: number) => {
     try {
       setDeleting(maintenanceId);
-      const response = await fetch(
-        `/api/vehicles/${vehicleId}/maintenance/${maintenanceId}`,
-        { method: 'DELETE' }
-      );
-
-      if (response.ok) {
-        await fetchMaintenance();
-      } else {
-        setError('Erro ao cancelar manutenção');
-      }
+      await vehiclesApi.updateMaintenance(vehicleId, maintenanceId, { status: 'cancelled' });
+      await fetchMaintenance();
     } catch (err) {
       setError('Erro ao cancelar manutenção');
     } finally {
@@ -265,7 +245,7 @@ const MaintenanceScheduler: React.FC<MaintenanceSchedulerProps> = ({
               onChange={(e) =>
                 setFormData({ ...formData, maintenanceDate: e.target.value })
               }
-              InputLabelProps={{ shrink: true }}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
 
             <FormControl fullWidth>

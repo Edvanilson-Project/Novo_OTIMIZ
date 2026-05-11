@@ -76,6 +76,10 @@ interface TripFormState {
   returnOriginId: number;
   returnDestinationId: number;
   returnDistanceKm: number;
+  // Rendição (relief points)
+  isReliefPoint: boolean;
+  midTripReliefPointId: number | null;
+  midTripReliefOffsetMinutes: number | null;
 }
 
 const EMPTY_TRIP: TripFormState = {
@@ -84,6 +88,7 @@ const EMPTY_TRIP: TripFormState = {
   direction: "IDA", roundTrip: false,
   returnStartTime: "14:00", returnEndTime: "22:00",
   returnDuration: 0, returnOriginId: 0, returnDestinationId: 0, returnDistanceKm: 0,
+  isReliefPoint: false, midTripReliefPointId: null, midTripReliefOffsetMinutes: null,
 };
 
 const EMPTY_DRIVER: Omit<Driver, "id"> = {
@@ -121,6 +126,7 @@ export default function OperationsDataPage() {
   const [driverDialog, setDriverDialog] = useState(false);
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null);
   const [driverForm, setDriverForm] = useState<Omit<Driver, "id">>(EMPTY_DRIVER);
+  const [driverError, setDriverError] = useState<string | null>(null);
 
   const notify = (message: string, severity: "success" | "error" | "info" | "warning" = "success") =>
     setNotification({ open: true, message, severity });
@@ -292,6 +298,9 @@ export default function OperationsDataPage() {
       returnOriginId: pairTrip?.originId ?? row.destinationId,
       returnDestinationId: pairTrip?.destinationId ?? row.originId,
       returnDistanceKm: pairTrip?.distanceKm ?? row.distanceKm,
+      isReliefPoint: !!(row as any).isReliefPoint,
+      midTripReliefPointId: (row as any).midTripReliefPointId ?? null,
+      midTripReliefOffsetMinutes: (row as any).midTripReliefOffsetMinutes ?? null,
     });
     setTripDialog(true);
   };
@@ -310,11 +319,38 @@ export default function OperationsDataPage() {
   };
 
   const handleSaveTrip = async () => {
-    if (!tripForm.startTime || !tripForm.endTime) {
-      notify("Início e Fim são obrigatórios.", "error"); return;
-    }
-    if (tripForm.roundTrip && (!tripForm.returnStartTime || !tripForm.returnEndTime)) {
-      notify("Horários da VOLTA são obrigatórios.", "error"); return;
+    // Validações client-side antes de submit. Mantém formato HH:MM (ou HH:MM > 24h
+    // para overnight). originId != destinationId. distanceKm > 0. duration plausível
+    // (1..480min). end > start. Estas validações evitam submetting de dados inválidos
+    // que o backend rejeitaria com erro genérico.
+    const HHMM = /^([0-9]{1,2}):([0-5][0-9])$/;
+    const parseHHMM = (s: string): number | null => {
+      const m = HHMM.exec(s.trim());
+      if (!m) return null;
+      const h = Number(m[1]); const min = Number(m[2]);
+      if (h < 0 || h > 47) return null;  // permite até 47:59 para overnight
+      return h * 60 + min;
+    };
+    const validateLeg = (label: string, st: string, et: string, oid: number, did: number, dist: number): string | null => {
+      if (!st || !et) return `${label}: início e fim são obrigatórios.`;
+      const sm = parseHHMM(st);
+      const em = parseHHMM(et);
+      if (sm === null) return `${label}: horário de início inválido (use HH:MM, ex: 06:00).`;
+      if (em === null) return `${label}: horário de fim inválido (use HH:MM, ex: 14:00).`;
+      const adjustedEnd = em < sm ? em + 1440 : em; // overnight
+      const dur = adjustedEnd - sm;
+      if (dur <= 0) return `${label}: fim deve ser depois do início.`;
+      if (dur > 480) return `${label}: duração ${dur}min excede 8h — verifique se está correto.`;
+      if (oid === did) return `${label}: terminal de origem e destino não podem ser iguais.`;
+      if (dist <= 0) return `${label}: distância (km) deve ser maior que zero.`;
+      return null;
+    };
+
+    const idaErr = validateLeg("IDA", tripForm.startTime, tripForm.endTime, Number(tripForm.originId), Number(tripForm.destinationId), Number(tripForm.distanceKm || 0));
+    if (idaErr) { notify(idaErr, "error"); return; }
+    if (tripForm.roundTrip) {
+      const voltaErr = validateLeg("VOLTA", tripForm.returnStartTime || "", tripForm.returnEndTime || "", Number(tripForm.returnOriginId), Number(tripForm.returnDestinationId), Number(tripForm.returnDistanceKm || 0));
+      if (voltaErr) { notify(voltaErr, "error"); return; }
     }
     try {
       const payload: Record<string, any> = {
@@ -327,6 +363,9 @@ export default function OperationsDataPage() {
         distanceKm: tripForm.distanceKm,
         direction: tripForm.direction || "IDA",
         roundTrip: tripForm.roundTrip,
+        isReliefPoint: tripForm.isReliefPoint,
+        midTripReliefPointId: tripForm.midTripReliefPointId,
+        midTripReliefOffsetMinutes: tripForm.midTripReliefOffsetMinutes,
       };
       if (tripForm.roundTrip) {
         payload.returnStartTime = tripForm.returnStartTime;
@@ -395,7 +434,7 @@ export default function OperationsDataPage() {
   };
 
   // ─── CRUD Motoristas ──────────────────────────────────────────────────────
-  const openCreateDriver = () => { setEditingDriver(null); setDriverForm(EMPTY_DRIVER); setDriverDialog(true); };
+  const openCreateDriver = () => { setEditingDriver(null); setDriverForm(EMPTY_DRIVER); setDriverError(null); setDriverDialog(true); };
   const openEditDriver = (row: Driver) => {
     setEditingDriver(row);
     setDriverForm({
@@ -407,8 +446,9 @@ export default function OperationsDataPage() {
 
   const handleSaveDriver = async () => {
     if (!driverForm.driverId || !driverForm.name) {
-      notify("ID e Nome são obrigatórios.", "error"); return;
+      setDriverError("Cód. Motorista e Nome Completo são obrigatórios."); return;
     }
+    setDriverError(null);
     try {
       if (editingDriver) {
         await operationsApi.updateDriver(editingDriver.id, driverForm);
@@ -754,6 +794,77 @@ export default function OperationsDataPage() {
                 </Alert>
               </>
             )}
+
+            {/* ── Rendição (relief points) ── opcional, requer allow_relief_points habilitado */}
+            <Divider />
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Rendição (opcional)
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Permite que o motorista entregue o veículo a outro motorista no terminal de origem/destino
+                ou em um ponto intermediário no meio da viagem. Requer parâmetro &quot;Permitir Pontos de Rendição&quot;
+                ativo em /settings/parameters.
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={tripForm.isReliefPoint}
+                    onChange={e => setTripForm(f => ({ ...f, isReliefPoint: e.target.checked }))}
+                  />
+                }
+                label={
+                  <Typography variant="body2">
+                    Origem/destino desta viagem é ponto de rendição
+                  </Typography>
+                }
+              />
+
+              <Stack direction="row" spacing={1.5}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Ponto de rendição (terminal intermediário)</InputLabel>
+                  <Select
+                    value={tripForm.midTripReliefPointId == null ? "" : String(tripForm.midTripReliefPointId)}
+                    label="Ponto de rendição (terminal intermediário)"
+                    onChange={e => {
+                      const v = e.target.value;
+                      setTripForm(f => ({
+                        ...f,
+                        midTripReliefPointId: v === "" ? null : Number(v),
+                      }));
+                    }}
+                  >
+                    <MenuItem value="">— Nenhum —</MenuItem>
+                    {terminals
+                      .filter(t => t.id !== Number(tripForm.originId) && t.id !== Number(tripForm.destinationId))
+                      .map(t => (
+                        <MenuItem key={t.id} value={String(t.id)}>
+                          {t.name || `Terminal #${t.id}`}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Min após início (split)"
+                  slotProps={{ htmlInput: { min: 1, max: tripForm.duration || 480 } }}
+                  value={tripForm.midTripReliefOffsetMinutes ?? ""}
+                  onChange={e => setTripForm(f => ({
+                    ...f,
+                    midTripReliefOffsetMinutes: e.target.value === "" ? null : Number(e.target.value),
+                  }))}
+                  helperText="Quando dividir a viagem"
+                />
+              </Stack>
+
+              {tripForm.midTripReliefPointId && !tripForm.midTripReliefOffsetMinutes && (
+                <Alert severity="warning" sx={{ py: 0.5 }}>
+                  Ponto intermediário definido, mas falta o offset. Optimizer ignorará split.
+                </Alert>
+              )}
+            </Stack>
           </Stack>
         </DialogContent>
         <DialogActions>
@@ -765,10 +876,11 @@ export default function OperationsDataPage() {
       </Dialog>
 
       {/* ── Dialog Motorista ── */}
-      <Dialog open={driverDialog} onClose={() => setDriverDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={driverDialog} onClose={() => { setDriverDialog(false); setDriverError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle>{editingDriver ? "Editar Motorista" : "Novo Motorista"}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {driverError && <Alert severity="error">{driverError}</Alert>}
             <Grid container spacing={2}>
               <Grid size={{ xs: 6 }}>
                 <TextField fullWidth size="small" label="Cód. Motorista *"

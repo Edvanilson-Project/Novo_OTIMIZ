@@ -1,11 +1,8 @@
 import {
   Entity,
-  PrimaryGeneratedColumn,
   Column,
   ManyToOne,
   JoinColumn,
-  CreateDateColumn,
-  UpdateDateColumn,
 } from 'typeorm';
 import { Vehicle } from './vehicle.entity';
 import { TenantBaseEntity } from '../../../common/entities/base.entity';
@@ -25,9 +22,6 @@ export enum MaintenanceStatus {
 
 @Entity('vehicle_maintenance')
 export class VehicleMaintenance extends TenantBaseEntity {
-  @PrimaryGeneratedColumn()
-  id: number;
-
   @Column()
   vehicleId: number;
 
@@ -63,10 +57,4 @@ export class VehicleMaintenance extends TenantBaseEntity {
 
   @Column({ nullable: true })
   notes: string;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
 }

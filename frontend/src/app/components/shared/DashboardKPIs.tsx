@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   Grid,
+  Tooltip,
   Typography,
   Stack,
   useTheme,
@@ -17,6 +18,7 @@ import {
   IconCurrencyDollar,
   IconAlertTriangle,
   IconRoute,
+  IconScale,
 } from "@tabler/icons-react";
 
 const pulseGlow = keyframes`
@@ -109,6 +111,17 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
     schedule?.resultSummary?.trip_group_audit?.split_groups ??
     0;
 
+  // Equidade entre motoristas (Gini sobre work_time): 0 = perfeitamente igual, 1 = desigual.
+  // costBreakdown vem em vários caminhos dependendo de onde a schedule é carregada
+  // (latest-schedule hidrata em resultSummary.costBreakdown; alguns flows passam direto).
+  const fairness =
+    schedule?.resultSummary?.costBreakdown?.csp?.fairness ??
+    schedule?.metadata?.cost_breakdown?.csp?.fairness ??
+    schedule?.cost_breakdown?.csp?.fairness ??
+    null;
+  const fairnessGini = fairness?.work_time?.gini ?? null;
+  const dutiesBelow50 = fairness?.imbalance?.duties_below_50pct_avg ?? 0;
+
   let totalMinutes = 0;
   let totalTrips = schedule?.totalTrips ?? schedule?.resultSummary?.total_trips ?? 0;
   schedule?.blocks?.forEach((b: any) => {
@@ -196,6 +209,48 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
           isError={splitGroups > 0}
         />
       </Grid>
+      {fairnessGini !== null && (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          <Tooltip
+            arrow
+            title={
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  <strong>Coeficiente de Gini</strong> sobre tempo de trabalho.
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  0 = perfeitamente igual entre todas as jornadas.
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  &gt; 0,3 = desigualdade alta (alguns motoristas com muito mais trabalho).
+                </Typography>
+                {dutiesBelow50 > 0 && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                    {dutiesBelow50} jornada(s) abaixo de 50% da média.
+                  </Typography>
+                )}
+              </Box>
+            }
+          >
+            <Box>
+              <KPICard
+                title="Equidade (Gini)"
+                value={Number(fairnessGini).toFixed(3)}
+                changeKey={`fairness-${fairnessGini}-${scheduleVersion}`}
+                icon={<IconScale size="24" />}
+                color={
+                  Number(fairnessGini) > 0.3
+                    ? theme.palette.error.main
+                    : Number(fairnessGini) > 0.15
+                    ? theme.palette.warning.main
+                    : theme.palette.success.main
+                }
+                isError={Number(fairnessGini) > 0.3}
+              />
+            </Box>
+          </Tooltip>
+        </Grid>
+      )}
     </Grid>
   );
 };

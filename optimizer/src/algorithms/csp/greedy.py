@@ -221,7 +221,23 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         # Inicializar Evaluador para scoring preciso se desejado
         self.evaluator = params.get("evaluator") or CostEvaluator()
         self.evaluator.set_costs(params)
-        
+
+        # Sanity checks de configuração — não corrige, apenas alerta. Configuração com
+        # min_break < 30 não respeita CCT padrão BR para condução contínua, e
+        # max_spread_soft > max_shift hard torna o gradiente soft inerte.
+        if self.apply_cct and self.mandatory_break_after > 0 and self.min_break < 30:
+            _log.warning(
+                "[CONFIG] min_break_minutes=%d < 30 — pausa de 30min é padrão CCT após "
+                "%dmin de condução contínua. Verifique se é intencional.",
+                self.min_break, self.mandatory_break_after,
+            )
+        if self.max_shift > 0 and self.max_spread_soft > self.max_shift:
+            _log.warning(
+                "[CONFIG] max_spread_soft (%d) > max_shift hard (%d) — penalty soft "
+                "inerte (hard rejeita antes do soft penalizar).",
+                self.max_spread_soft, self.max_shift,
+            )
+
         self._extension_diagnostics = self._empty_extension_diagnostics()
 
     def _block_drive(self, block: Block) -> int:

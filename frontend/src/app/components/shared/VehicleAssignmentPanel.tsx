@@ -18,6 +18,7 @@ import {
   Chip,
 } from '@mui/material';
 import { IconCheck, IconX, IconTruck } from '@tabler/icons-react';
+import { vehiclesApi } from '@/lib/api';
 
 interface Vehicle {
   id: number;
@@ -64,11 +65,8 @@ const VehicleAssignmentPanel: React.FC<VehicleAssignmentPanelProps> = ({
 
   const fetchVehicles = async () => {
     try {
-      const response = await fetch('/api/vehicles/active');
-      if (response.ok) {
-        const data = await response.json();
-        setVehicles(data);
-      }
+      const data = await vehiclesApi.getActive();
+      setVehicles(data);
     } catch (err) {
       setError('Erro ao carregar veículos');
     }

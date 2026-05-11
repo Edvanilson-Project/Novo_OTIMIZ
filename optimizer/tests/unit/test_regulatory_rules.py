@@ -607,12 +607,19 @@ def test_vsp_force_round_trip_intent_enables_hard_group_split_validation():
 
 
 def test_hard_validator_uses_meal_break_parameter_not_min_break_only():
+    # Setup com trips de 200min (> mandatory_break_after=180) → triggera mandatory_rest_required
+    # de fato (max_continuous_drive > limit). Antes do fix CCT em operational_time_service:248,
+    # o trigger vinha de productive_minutes > mandatory_break_after, mas isso conflate trabalho
+    # total com condução contínua (ver CLT art. 235-D).
     def _build_result():
-        first = Block(id=1, trips=[_trip(1, 360, 180, origin=10, dest=20)])
-        second = Block(id=2, trips=[_trip(2, 570, 180, origin=20, dest=10)])
+        first = Block(id=1, trips=[_trip(1, 360, 200, origin=10, dest=20)])
+        second = Block(id=2, trips=[_trip(2, 590, 200, origin=20, dest=10)])
         duty = Duty(id=1)
         duty.add_task(first)
         duty.add_task(second)
+        # Em produção, finalize_selected_duties popula este meta via _continuous_drive_stats.
+        # Em teste construído manualmente, setamos explícito para refletir o cenário CCT real.
+        duty.meta["max_continuous_drive_minutes"] = 200  # > mandatory_break_after=180
         result = OptimizationResult(
             vsp=VSPSolution(blocks=[first, second]),
             csp=CSPSolution(duties=[duty]),

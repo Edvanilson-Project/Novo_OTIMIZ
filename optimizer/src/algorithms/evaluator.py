@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal, ROUND_HALF_UP, getcontext
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from ..core.config import get_settings
 from ..core.rule_engine import DynamicRuleEngine
@@ -123,6 +123,93 @@ def _nocturnal_overlap(start: int, end: int, noct_start_h: int, noct_end_h: int)
                 total += ov_e - ov_s
                 
     return total
+
+
+def _gini_coefficient(values: List[float]) -> float:
+    """Coeficiente de Gini sobre uma distribuição. 0 = perfeitamente igual, 1 = max desigual."""
+    if not values:
+        return 0.0
+    sorted_v = sorted(values)
+    n = len(sorted_v)
+    total = sum(sorted_v)
+    if total <= 0:
+        return 0.0
+    cumsum = sum((i + 1) * v for i, v in enumerate(sorted_v))
+    return round((2.0 * cumsum) / (n * total) - (n + 1) / n, 4)
+
+
+def _percentile(sorted_values: List[float], p: float) -> float:
+    """Percentil simples (linear interpolation). p em [0,100]."""
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    rank = (p / 100.0) * (len(sorted_values) - 1)
+    lo = int(rank)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    frac = rank - lo
+    return float(sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac)
+
+
+def _compute_fairness_metrics(duties_objs: Sequence[Any], duties_costs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Métricas de equidade entre motoristas (workload balance).
+
+    Optbus expõe esse tipo de informação para o gestor identificar duties muito
+    desiguais. Aqui só computamos e expomos — não penalizamos automaticamente
+    (mudar custo muda a busca, comportamento já documentado em sprint anterior).
+    """
+    if not duties_objs:
+        return {
+            "num_duties": 0,
+            "work_time": {"min": 0, "max": 0, "mean": 0, "median": 0, "stddev": 0, "cv": 0, "p5": 0, "p95": 0, "gini": 0},
+            "total_cost": {"min": 0, "max": 0, "mean": 0, "stddev": 0, "cv": 0, "gini": 0},
+            "imbalance": {"duties_below_50pct_avg": 0, "duties_above_150pct_avg": 0},
+        }
+
+    work_times = [int(d.work_time or 0) for d in duties_objs]
+    cost_totals = [float(c.get("total", 0.0) or 0.0) for c in duties_costs]
+
+    def _stats(values: List[float]) -> Dict[str, float]:
+        if not values:
+            return {"min": 0, "max": 0, "mean": 0, "median": 0, "stddev": 0, "cv": 0, "p5": 0, "p95": 0, "gini": 0}
+        sv = sorted(values)
+        n = len(sv)
+        mean = sum(sv) / n
+        median = sv[n // 2] if n % 2 == 1 else (sv[n // 2 - 1] + sv[n // 2]) / 2
+        var = sum((v - mean) ** 2 for v in sv) / n
+        stddev = var ** 0.5
+        cv = stddev / mean if mean > 0 else 0.0
+        return {
+            "min": round(float(sv[0]), 2),
+            "max": round(float(sv[-1]), 2),
+            "mean": round(float(mean), 2),
+            "median": round(float(median), 2),
+            "stddev": round(float(stddev), 2),
+            "cv": round(float(cv), 4),
+            "p5": round(_percentile(sv, 5), 2),
+            "p95": round(_percentile(sv, 95), 2),
+            "gini": _gini_coefficient([float(v) for v in sv]),
+        }
+
+    work_stats = _stats([float(w) for w in work_times])
+    cost_stats = _stats(cost_totals)
+    # Agora removemos campos inadequados de cost (median/p5/p95 são úteis, mas mantemos só os essenciais)
+    cost_simple = {k: cost_stats[k] for k in ("min", "max", "mean", "stddev", "cv", "gini")}
+
+    # Imbalance: quantas duties estão muito abaixo ou muito acima da média
+    avg_work = work_stats["mean"]
+    below_50 = sum(1 for w in work_times if avg_work > 0 and w < avg_work * 0.5)
+    above_150 = sum(1 for w in work_times if avg_work > 0 and w > avg_work * 1.5)
+
+    return {
+        "num_duties": len(duties_objs),
+        "work_time": work_stats,
+        "total_cost": cost_simple,
+        "imbalance": {
+            "duties_below_50pct_avg": below_50,
+            "duties_above_150pct_avg": above_150,
+        },
+    }
 
 
 class CostEvaluator(ICostEvaluator):
@@ -659,6 +746,7 @@ class CostEvaluator(ICostEvaluator):
             "num_duties": len(solution.duties),
             "num_uncovered_blocks": len(solution.uncovered_blocks),
             "duties": duties,
+            "fairness": _compute_fairness_metrics(solution.duties, duties),
         }
         if has_dynamic_rules:
             result["dynamic_rules_applied"] = rule_engine.rule_count

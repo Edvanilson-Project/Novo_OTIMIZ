@@ -13,7 +13,7 @@ import {
   IconBus, IconUsers, IconMaximize, IconMinimize,
   IconFileSpreadsheet, IconTable, IconRoute, IconClipboardData,
   IconChevronDown, IconChevronUp,
-  IconFlag, IconMapPin, IconCoffee,
+  IconFlag, IconMapPin, IconCoffee, IconClock,
 } from '@tabler/icons-react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -243,16 +243,16 @@ function normalizeExportSegments(rawSegments: any[], tripById: Map<number, any>)
 }
 
 // ─── Event Kind Config ────────────────────────────────────────────────────────
-const EVENT_CONFIG: Record<EventKind, { label: string; color: 'success' | 'primary' | 'error' | 'warning' | 'default' | 'info' | 'secondary'; icon: React.ReactNode }> = {
-  inicio_jornada:  { label: 'Início de jornada', color: 'info', icon: <IconCoffee size={14} /> },
-  fim_jornada:     { label: 'Fim de jornada', color: 'info', icon: <IconCoffee size={14} /> },
-  soltura:         { label: 'Soltura',         color: 'success', icon: <IconMapPin size={14} /> },
-  viagem:          { label: 'Viagem',          color: 'primary', icon: <IconBus size={14} /> },
-  recolhimento:    { label: 'Recolhimento',    color: 'error',   icon: <IconFlag size={14} /> },
-  descanso:        { label: 'Descanso/Refeição', color: 'warning', icon: <IconCoffee size={14} /> },
-  deslocamento_operacional: { label: 'Deslocamento oper.', color: 'default', icon: <IconBus size={14} /> },
-  troca_motorista: { label: 'Troca motorista', color: 'default', icon: <IconUsers size={14} /> },
-  troca_veiculo:   { label: 'Troca de veículo', color: 'secondary', icon: <IconRoute size={14} /> },
+const EVENT_CONFIG: Record<EventKind, { label: string; description: string; color: 'success' | 'primary' | 'error' | 'warning' | 'default' | 'info' | 'secondary'; icon: React.ReactNode }> = {
+  inicio_jornada:  { label: 'Início de jornada', description: 'Marca o começo da jornada do motorista.', color: 'info', icon: <IconCoffee size={14} /> },
+  fim_jornada:     { label: 'Fim de jornada', description: 'Marca o término da jornada do motorista.', color: 'info', icon: <IconCoffee size={14} /> },
+  soltura:         { label: 'Soltura', description: 'Saída do veículo da garagem para o terminal de início da operação.', color: 'success', icon: <IconMapPin size={14} /> },
+  viagem:          { label: 'Viagem', description: 'Trecho comercial: ônibus em operação com passageiros.', color: 'primary', icon: <IconBus size={14} /> },
+  recolhimento:    { label: 'Recolhimento', description: 'Retorno do veículo à garagem ao final da operação.', color: 'error',   icon: <IconFlag size={14} /> },
+  descanso:        { label: 'Descanso/Refeição', description: 'Intervalo obrigatório, refeição ou espera operacional.', color: 'warning', icon: <IconCoffee size={14} /> },
+  deslocamento_operacional: { label: 'Deslocamento oper.', description: 'Deslocamento sem passageiros entre pontos da operação.', color: 'default', icon: <IconBus size={14} /> },
+  troca_motorista: { label: 'Troca motorista', description: 'Rendição: motorista entrega o veículo a outro no meio da operação.', color: 'default', icon: <IconUsers size={14} /> },
+  troca_veiculo:   { label: 'Troca de veículo', description: 'Mesmo motorista assume um veículo diferente.', color: 'secondary', icon: <IconRoute size={14} /> },
 };
 
 function sortOperationalTrips<T extends Record<string, any>>(trips: T[]): T[] {
@@ -308,7 +308,7 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
   }
 
   const segmentTrips = Array.isArray(duty.duty_time_segments)
-    ? duty.duty_time_segments.flatMap((segment: any, segmentIndex: number) => {
+    ? duty.duty_time_segments.flatMap((segment: any, absoluteIndex: number) => {
       if ((segment.type ?? segment.event_type) !== 'commercial_trip') {
         return [];
       }
@@ -327,7 +327,7 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
         driver_id: dutyId,
         event_scope: 'trip',
         sequence_in_duty: 0,
-        segment_sequence: segmentIndex + 1,
+        segment_sequence: absoluteIndex + 1,
         sequence_in_bundle: tripIndex + 1,
         bundle_trip_count: trips.length,
         bundle_event_type: segment.bundle_event_type ?? (trips.length > 1 ? 'commercial_trip_bundle' : 'commercial_trip'),
@@ -379,6 +379,7 @@ function buildEvents(
   dutyIdOverride?: number | null,
   includeSoltura = true,
   includeRecolhimento = true,
+  blockBuffer?: { start: number; end: number },
 ): PlanEvent[] {
   const realTrips = trips.filter((t) => t.lineCode || t.lineId);
   if (realTrips.length === 0) return [];
@@ -399,19 +400,20 @@ function buildEvents(
   const lastLine = lineByCode.get(lastTrip.lineCode ?? '');
 
   // ── Soltura: garagem → terminal da 1ª viagem ──────────────────────────────
-  if (includeSoltura && firstLine?.garageTerminalId && firstLine.solturaMinutes) {
+  const solturaMinutes = firstLine?.solturaMinutes ?? blockBuffer?.start ?? 0;
+  if (includeSoltura && solturaMinutes > 0) {
     const solturaEnd = firstTrip.start_time ?? 0;
-    const solturaStart = solturaEnd - firstLine.solturaMinutes;
+    const solturaStart = solturaEnd - solturaMinutes;
     events.push({
       kind: 'soltura',
       linha: '—',
       sentido: '—',
       inicio: solturaStart,
       chegada: solturaEnd,
-      origemName: tName(firstLine.garageTerminalId),
+      origemName: firstLine?.garageTerminalId ? tName(firstLine.garageTerminalId) : '(Garagem)',
       destinoName: tName(firstTrip.origin_id),
-      km: firstLine.garageDistanceKm ?? 0,
-      duracao: firstLine.solturaMinutes,
+      km: firstLine?.garageDistanceKm ?? 0,
+      duracao: solturaMinutes,
       vehicleId,
       dutyId: dutyIdOverride,
     });
@@ -466,9 +468,10 @@ function buildEvents(
   });
 
   // ── Recolhimento: último terminal → garagem ───────────────────────────────
-  if (includeRecolhimento && lastLine?.garageTerminalId && lastLine.recolhimentoMinutes) {
+  const recolhMinutes = lastLine?.recolhimentoMinutes ?? blockBuffer?.end ?? 0;
+  if (includeRecolhimento && recolhMinutes > 0) {
     const recolhimentoStart = lastTrip.end_time ?? 0;
-    const recolhimentoEnd = recolhimentoStart + lastLine.recolhimentoMinutes;
+    const recolhimentoEnd = recolhimentoStart + recolhMinutes;
     events.push({
       kind: 'recolhimento',
       linha: '—',
@@ -476,9 +479,9 @@ function buildEvents(
       inicio: recolhimentoStart,
       chegada: recolhimentoEnd,
       origemName: tName(lastTrip.destination_id),
-      destinoName: tName(lastLine.garageTerminalId),
-      km: lastLine.recolhimentoDistanceKm ?? 0,
-      duracao: lastLine.recolhimentoMinutes,
+      destinoName: lastLine?.garageTerminalId ? tName(lastLine.garageTerminalId) : '(Garagem)',
+      km: lastLine?.recolhimentoDistanceKm ?? 0,
+      duracao: recolhMinutes,
       vehicleId,
       dutyId: dutyIdOverride,
     });
@@ -528,7 +531,7 @@ function buildEventsFromSegments(
     else if (type === 'duty_end') kind = 'fim_jornada';
     else if (type === 'deadhead') kind = 'deslocamento_operacional';
     else if (type === 'driver_change') kind = 'troca_motorista';
-    else if (type === 'driver_vehicle_change') kind = 'troca_veiculo';
+    // driver_vehicle_change is intentionally skipped — vehicle-change bookkeeping events are not shown
 
     if (!kind) return;
 
@@ -603,11 +606,9 @@ function buildEventsFromSegments(
       duracao: dur,
       gapMinutes: kind === 'descanso' ? dur : undefined,
       intervalKind,
-      vehicleId: kind === 'troca_veiculo'
-        ? Number(seg.to_vehicle_id ?? seg.from_vehicle_id ?? seg.block_id ?? blockId)
-        : (blockId ?? seg.block_id) != null
-          ? Number(blockId ?? seg.block_id)
-          : undefined,
+      vehicleId: (blockId ?? seg.block_id) != null
+        ? Number(blockId ?? seg.block_id)
+        : undefined,
       vehicleFromId: seg.from_vehicle_id != null ? Number(seg.from_vehicle_id) : undefined,
       vehicleToId: seg.to_vehicle_id != null ? Number(seg.to_vehicle_id) : undefined,
       dutyId,
@@ -782,7 +783,7 @@ function buildOperationalExportRows(
           issue_severity,
           issue_codes,
           issue_explanation,
-          explanation: seg.explanation ?? (driverId ? 'Motorista real não disponível; usando identificador da duty' : ''),
+          explanation: seg.explanation ?? (driverId ? 'Motorista real não disponível; usando identificador da jornada' : ''),
         });
       });
     } else {
@@ -861,7 +862,7 @@ function buildOperationalExportRows(
           issue_severity,
           issue_codes,
           issue_explanation,
-          explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
+          explanation: driverId ? 'Motorista real não disponível; usando identificador da jornada' : fallbackExplanation,
         });
 
         // Gap between consecutive trips
@@ -911,7 +912,7 @@ function buildOperationalExportRows(
               issue_severity: dutyExportFields.issue_severity,
               issue_codes: dutyExportFields.issue_codes,
               issue_explanation: dutyExportFields.issue_explanation,
-              explanation: driverId ? 'Motorista real não disponível; usando identificador da duty' : fallbackExplanation,
+              explanation: driverId ? 'Motorista real não disponível; usando identificador da jornada' : fallbackExplanation,
             });
           }
         }
@@ -1112,14 +1113,16 @@ function EventKindChip({ kind, gap, intervalKind }: { kind: EventKind; gap?: num
     );
   }
   return (
-    <Chip
-      size="small"
-      icon={<>{cfg.icon}</>}
-      label={cfg.label}
-      color={cfg.color}
-      variant="outlined"
-      sx={{ fontWeight: 700 }}
-    />
+    <Tooltip title={cfg.description} arrow placement="top">
+      <Chip
+        size="small"
+        icon={<>{cfg.icon}</>}
+        label={cfg.label}
+        color={cfg.color}
+        variant="outlined"
+        sx={{ fontWeight: 700 }}
+      />
+    </Tooltip>
   );
 }
 
@@ -1376,6 +1379,20 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const [loading, setLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [notification, setNotification] = useState<{ msg: string; sev: 'success' | 'error' | 'info' } | null>(null);
+  const ganttScrollRef = useRef<HTMLDivElement>(null);
+
+  // Centraliza o scroll horizontal no horário atual (ou no primeiro evento se for fora do horário operacional).
+  const scrollToNow = useCallback(() => {
+    const container = ganttScrollRef.current;
+    if (!container) return;
+    const now = new Date();
+    const minutesNow = now.getHours() * 60 + now.getMinutes();
+    const ppm = scale * BASE_PIXELS_PER_MINUTE;
+    const targetX = minutesNow * ppm;
+    // centraliza: posiciona o "agora" no meio da viewport visível
+    const offset = container.clientWidth / 2;
+    container.scrollTo({ left: Math.max(0, targetX - offset), behavior: 'smooth' });
+  }, [scale]);
 
   const [filterLine, setFilterLine] = useState<string>('');
   const [filterSearch, setFilterSearch] = useState('');
@@ -1540,26 +1557,132 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     return auditMap;
   }, [duties]);
 
+  // Pullout/pullback times per block derived from duty_time_segments (authoritative source)
+  const blockPullTimes = useMemo(() => {
+    // Build trip→blockId from effectiveBlocks to correct optimizer block_id mismatches
+    const tripToBlock = new Map<number, number>();
+    effectiveBlocks.forEach((b) => {
+      (b.items || []).forEach((t: any) => {
+        if (t.tripId) tripToBlock.set(Number(t.tripId), Number(b.block_id));
+      });
+    });
+
+    const resolveBlockId = (seg: any): number => {
+      // Prefer trip-based lookup (authoritative) over segment's block_id (may be stale/mismatched)
+      const tripIds: number[] = Array.isArray(seg?.trip_ids) ? seg.trip_ids.map(Number) : [];
+      for (const tid of tripIds) {
+        const bid = tripToBlock.get(tid);
+        if (bid) return bid;
+      }
+      return Number(seg?.block_id ?? seg?.vehicle_id ?? 0);
+    };
+
+    const pullout = new Map<number, { start: number; end: number }>();
+    const pullback = new Map<number, { start: number; end: number }>();
+    duties.forEach((duty: any) => {
+      const segs: any[] = duty.duty_time_segments || [];
+      const poSeg = segs.find((s: any) => s.type === 'pullout' || s.type === 'vehicle_pullout');
+      if (poSeg) {
+        const firstCT = segs.find((s: any) => s.type === 'commercial_trip');
+        const bid = resolveBlockId(firstCT);
+        if (bid && !pullout.has(bid))
+          pullout.set(bid, { start: Number(poSeg.start), end: Number(poSeg.end) });
+      }
+      const pbSeg = [...segs].reverse().find((s: any) => s.type === 'pullback' || s.type === 'vehicle_pullback');
+      if (pbSeg) {
+        const lastCT = [...segs].reverse().find((s: any) => s.type === 'commercial_trip');
+        const bid = resolveBlockId(lastCT);
+        if (bid && !pullback.has(bid))
+          pullback.set(bid, { start: Number(pbSeg.start), end: Number(pbSeg.end) });
+      }
+    });
+    return { pullout, pullback };
+  }, [duties, effectiveBlocks]);
+
   // ─── PlanGroups for Veículos tab ───
+  // Vehicles show only commercial trips + one pullout (soltura) + one pullback (recolhimento).
+  // Driver-specific events (descanso, troca_motorista) are NOT shown in the vehicle view.
   const vehicleGroups = useMemo((): PlanGroup[] => {
     return effectiveBlocks.map((block) => {
-      const trips = (block.items || []).filter((t: any) => t.lineCode || t.lineId);
-      const events = buildEvents(trips, terminalMap, lineByCode, intervalPolicy, block.block_id, undefined);
+      const allItems: any[] = block.items || [];
+      // Commercial trips are items with a line code or line id; include all as viagem
+      const trips = allItems.length > 0 ? allItems : [];
+      if (trips.length === 0) {
+        return { id: block.block_id, label: `Veículo ${block.block_id}`, tripCount: 0, totalKm: 0, startTime: 0, endTime: 0, events: [] };
+      }
 
-      // startTime inclui soltura (antes da 1ª viagem), endTime inclui recolhimento (após última)
+      const tName = (id?: number) =>
+        id != null ? (terminalMap.get(id)?.shortName ?? terminalMap.get(id)?.name ?? `T${id}`) : '—';
+
+      const events: PlanEvent[] = [];
+      const firstTrip = trips[0];
+      const lastTrip = trips[trips.length - 1];
+
+      // Soltura: 1) duty_time_segments, 2) block metadata buffer, 3) line config, 4) company params
+      const po = blockPullTimes.pullout.get(block.block_id);
+      const startBuffer = Number(block.metadata?.start_buffer_minutes ?? 0);
+      const firstLine = lineByCode.get(firstTrip.lineCode ?? '');
+      const solturaFromLine = firstLine?.solturaMinutes ?? 0;
+      const solturaFromPolicy = intervalPolicy?.pulloutMinutes ?? 0;
+      if (po && po.end > po.start) {
+        events.push({ kind: 'soltura', linha: '—', sentido: '—', inicio: po.start, chegada: po.end, origemName: '(Garagem)', destinoName: tName(firstTrip.origin_id), km: 0, duracao: po.end - po.start, vehicleId: block.block_id });
+      } else if (startBuffer > 0) {
+        const solturaEnd = firstTrip.start_time ?? 0;
+        events.push({ kind: 'soltura', linha: '—', sentido: '—', inicio: solturaEnd - startBuffer, chegada: solturaEnd, origemName: '(Garagem)', destinoName: tName(firstTrip.origin_id), km: 0, duracao: startBuffer, vehicleId: block.block_id });
+      } else if (solturaFromLine > 0) {
+        const solturaEnd = firstTrip.start_time ?? 0;
+        events.push({ kind: 'soltura', linha: '—', sentido: '—', inicio: solturaEnd - solturaFromLine, chegada: solturaEnd, origemName: firstLine?.garageTerminalId ? tName(firstLine.garageTerminalId) : '(Garagem)', destinoName: tName(firstTrip.origin_id), km: firstLine?.garageDistanceKm ?? 0, duracao: solturaFromLine, vehicleId: block.block_id });
+      } else if (solturaFromPolicy > 0) {
+        const solturaEnd = firstTrip.start_time ?? 0;
+        events.push({ kind: 'soltura', linha: '—', sentido: '—', inicio: solturaEnd - solturaFromPolicy, chegada: solturaEnd, origemName: '(Garagem)', destinoName: tName(firstTrip.origin_id), km: 0, duracao: solturaFromPolicy, vehicleId: block.block_id });
+      }
+
+      // All trips — vehicles do not have driver breaks between trips
+      trips.forEach((t: any) => {
+        events.push({
+          kind: 'viagem', tripId: t.tripId,
+          linha: t.lineCode ?? String(t.lineId ?? '—'),
+          sentido: t.direction ?? t.sentido ?? '—',
+          inicio: t.start_time ?? 0, chegada: t.end_time ?? 0,
+          origemName: tName(t.origin_id), destinoName: tName(t.destination_id),
+          km: t.distance_km ?? 0, duracao: (t.end_time ?? 0) - (t.start_time ?? 0),
+          vehicleId: block.block_id, color: t.color,
+        });
+      });
+
+      // Recolhimento: 1) duty_time_segments, 2) block metadata buffer, 3) line config, 4) company params
+      const pb = blockPullTimes.pullback.get(block.block_id);
+      const endBuffer = Number(block.metadata?.end_buffer_minutes ?? 0);
+      const lastLine = lineByCode.get(lastTrip.lineCode ?? '');
+      const recolhFromLine = lastLine?.recolhimentoMinutes ?? 0;
+      const recolhFromPolicy = intervalPolicy?.pullbackMinutes ?? 0;
+      if (pb && pb.end > pb.start) {
+        events.push({ kind: 'recolhimento', linha: '—', sentido: '—', inicio: pb.start, chegada: pb.end, origemName: tName(lastTrip.destination_id), destinoName: '(Garagem)', km: 0, duracao: pb.end - pb.start, vehicleId: block.block_id });
+      } else if (endBuffer > 0) {
+        const recolhStart = lastTrip.end_time ?? 0;
+        events.push({ kind: 'recolhimento', linha: '—', sentido: '—', inicio: recolhStart, chegada: recolhStart + endBuffer, origemName: tName(lastTrip.destination_id), destinoName: '(Garagem)', km: 0, duracao: endBuffer, vehicleId: block.block_id });
+      } else if (recolhFromLine > 0) {
+        const recolhStart = lastTrip.end_time ?? 0;
+        events.push({ kind: 'recolhimento', linha: '—', sentido: '—', inicio: recolhStart, chegada: recolhStart + recolhFromLine, origemName: tName(lastTrip.destination_id), destinoName: lastLine?.garageTerminalId ? tName(lastLine.garageTerminalId) : '(Garagem)', km: lastLine?.recolhimentoDistanceKm ?? 0, duracao: recolhFromLine, vehicleId: block.block_id });
+      } else if (recolhFromPolicy > 0) {
+        const recolhStart = lastTrip.end_time ?? 0;
+        events.push({ kind: 'recolhimento', linha: '—', sentido: '—', inicio: recolhStart, chegada: recolhStart + recolhFromPolicy, origemName: tName(lastTrip.destination_id), destinoName: '(Garagem)', km: 0, duracao: recolhFromPolicy, vehicleId: block.block_id });
+      }
+
       const solturaEvt = events.find(e => e.kind === 'soltura');
       const recolhEvt = events.slice().reverse().find(e => e.kind === 'recolhimento');
+      const commercialTrips = trips.filter((t: any) => t.lineCode || t.lineId);
       return {
         id: block.block_id,
         label: `Veículo ${block.block_id}`,
-        tripCount: trips.length,
+        tripCount: commercialTrips.length,
         totalKm: events.reduce((s, e) => s + (e.km ?? 0), 0),
         startTime: solturaEvt?.inicio ?? trips[0]?.start_time ?? 0,
         endTime: recolhEvt?.chegada ?? trips[trips.length - 1]?.end_time ?? 0,
         events,
       };
     });
-  }, [effectiveBlocks, terminalMap, lineByCode, intervalPolicy]);
+  }, [effectiveBlocks, terminalMap, blockPullTimes, lineByCode, intervalPolicy]);
 
   // ─── PlanGroups for Motoristas tab ───
   const tripById = useMemo(() => {
@@ -1622,14 +1745,20 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         events = buildEvents(fallbackDutyTrips, terminalMap, lineByCode, intervalPolicy, undefined, dutyId, includeSoltura, includeRecolhimento);
       }
 
+      // Enforce soltura/recolhimento based on vehicle allocation regardless of segment path
+      if (!includeSoltura) events = events.filter(e => e.kind !== 'soltura');
+      if (!includeRecolhimento) events = events.filter(e => e.kind !== 'recolhimento');
+
       const violations = (duty.shift_violations ?? 0) + (duty.rest_violations ?? 0);
       const audit = dutyAuditById.get(Number(dutyId)) ?? buildDutyAuditSummary(duty);
 
-      // Jornada inclui soltura e recolhimento se configurados
+      // Jornada: usa duty_start/duty_end segment times as authoritative fallback
       const solturaEvt = events.find(e => e.kind === 'soltura');
       const recolhEvt = events.slice().reverse().find(e => e.kind === 'recolhimento');
-      const jornStart = solturaEvt?.inicio ?? duty.start_time ?? dutyTrips[0]?.start_time ?? 0;
-      const jornEnd = recolhEvt?.chegada ?? duty.end_time ?? dutyTrips[dutyTrips.length - 1]?.end_time ?? 0;
+      const jornStartEvt = events.find(e => e.kind === 'inicio_jornada');
+      const jornEndEvt = events.slice().reverse().find(e => e.kind === 'fim_jornada');
+      const jornStart = solturaEvt?.inicio ?? jornStartEvt?.inicio ?? duty.start_time ?? dutyTrips[0]?.start_time ?? 0;
+      const jornEnd = recolhEvt?.chegada ?? jornEndEvt?.chegada ?? duty.end_time ?? dutyTrips[dutyTrips.length - 1]?.end_time ?? 0;
 
       return {
         id: dutyId,
@@ -1638,7 +1767,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         totalKm: events.reduce((s, e) => s + (e.km ?? 0), 0),
         startTime: jornStart,
         endTime: jornEnd,
-        workTime: duty.work_time ?? duty.operational_time_report?.work_time ?? (jornEnd - jornStart),
+        workTime: jornEnd - jornStart,
         totalCost: duty.total_cost ?? 0,
         violations,
         driverDisplayName: audit.driverDisplayName,
@@ -1924,6 +2053,15 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         </>
       )}
 
+      {activeTab === 0 && (
+        <Tooltip title="Centralizar a Gantt no horário atual">
+          <Button size="small" variant="outlined" onClick={scrollToNow}
+            startIcon={<IconClock size={16} />}>
+            Agora
+          </Button>
+        </Tooltip>
+      )}
+
       <Tooltip title={fullscreen ? 'Sair do modo tela cheia' : 'Tela cheia'}>
         <Button size="small" variant="outlined" onClick={() => setFullscreen((f) => !f)}
           startIcon={fullscreen ? <IconMinimize size={16} /> : <IconMaximize size={16} />}>
@@ -1983,7 +2121,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
       {/* ─── Tab 0: Gantt ─── */}
       {activeTab === 0 && (
-        <Box sx={{ width: '100%', overflowX: 'auto', bgcolor: 'background.paper' }}>
+        <Box ref={ganttScrollRef} sx={{ width: '100%', overflowX: 'auto', bgcolor: 'background.paper' }}>
           <Box sx={{ width: totalWidth, minWidth: '100%' }}>
             <GanttTimeHeader scale={scale} theme={theme} />
             <Box sx={{ height: ganttHeight, width: '100%', position: 'relative' }}>

@@ -210,10 +210,14 @@ def _make_duty_with_buffers(
     block_first = _block(1, _trip(1, first_trip_start, first_trip_start + 60, origin=1, dest=2))
     block_first.meta["task_start_buffer_minutes"] = pullout
     block_first.meta["task_end_buffer_minutes"] = 0
+    block_first.meta["is_source_block_start"] = True
+    block_first.meta["is_source_block_end"] = False
 
     block_last = _block(2, _trip(2, last_trip_end - 60, last_trip_end, origin=2, dest=1))
     block_last.meta["task_start_buffer_minutes"] = 0
     block_last.meta["task_end_buffer_minutes"] = pullback
+    block_last.meta["is_source_block_start"] = False
+    block_last.meta["is_source_block_end"] = True
 
     duty = Duty(id=duty_id)
     duty.add_task(block_first)
@@ -513,3 +517,96 @@ def test_bundle_metadata_and_vehicle_change_segment_are_exposed():
     assert vehicle_changes[0]["from_block_id"] == 1
     assert vehicle_changes[0]["to_block_id"] == 2
     assert vehicle_changes[0]["event_scope"] == "driver"
+
+
+def test_cumulative_work_resets_after_mandatory_rest():
+    """
+    Após um descanso obrigatório, o contador de trabalho acumulado deve zerar.
+    Sem o reset, o segundo intervalo (gap2) seria classificado como mandatory_rest
+    porque cumulative continua crescendo além de mandatory_break_after.
+    Com o reset, gap2 < mandatory_break_after → normal_break.
+
+    Cenário:
+      A(150min) → gap1(45min, mandatory_rest) → B(90min) → gap2(45min, normal_break)
+      mandatory_break_after=120min, required_rest=45min
+    """
+    block_a = _block(1, _trip(1, 0, 150, origin=1, dest=2))
+    block_b = _block(2, _trip(2, 195, 285, origin=2, dest=3))
+    block_c = _block(3, _trip(3, 330, 390, origin=3, dest=1))
+    duty = _duty([block_a, block_b, block_c])
+
+    report = build_duty_operational_time_report(
+        duty,
+        min_break_minutes=45,
+        meal_break_minutes=45,
+        mandatory_break_after_minutes=120,
+    )
+
+    # gap1=45 min, cumulative=150≥120, work_after>0 → mandatory_rest ✅
+    # gap2=45 min, cumulative_after_reset=90<120 → normal_break ✅
+    assert report["mandatory_rest_time"] == 45, "Apenas o primeiro gap deve ser mandatory_rest"
+    assert report["normal_break_time"] == 45, "O segundo gap deve ser normal_break após o reset"
+    assert report["has_valid_mandatory_rest"] is True
+
+    seg_types = [s["type"] for s in report["duty_time_segments"]]
+    assert seg_types.count("mandatory_rest") == 1
+    assert seg_types.count("normal_break") == 1
+
+
+# -- Regra 9: rendição (driver_change) em duties que pegam veículo no meio do block ---
+def test_driver_change_emitted_when_duty_starts_mid_block():
+    """Duty cujo primeiro task NÃO é o início do source block deve emitir driver_change no início (rendição) e não pullout."""
+    block = _block(1, _trip(1, 8 * 60, 9 * 60, origin=1, dest=2))
+    block.meta["task_start_buffer_minutes"] = 0
+    block.meta["task_end_buffer_minutes"] = 10
+    block.meta["is_source_block_start"] = False
+    block.meta["is_source_block_end"] = True
+    block.meta["source_block_id"] = 42
+
+    duty = Duty(id=77)
+    duty.add_task(block)
+    duty.meta["start_buffer_minutes"] = 0
+    duty.meta["end_buffer_minutes"] = 10
+
+    report = build_duty_operational_time_report(
+        duty,
+        min_break_minutes=30,
+        meal_break_minutes=60,
+        mandatory_break_after_minutes=270,
+    )
+
+    seg_types = [s["type"] for s in report["duty_time_segments"]]
+    assert "pullout" not in seg_types, "Não deve emitir pullout quando duty pega veículo em operação"
+    driver_change = [s for s in report["duty_time_segments"] if s["type"] == "driver_change"]
+    assert len(driver_change) == 1, "Deve emitir 1 driver_change no início"
+    assert driver_change[0]["relief_role"] == "incoming"
+    assert driver_change[0]["start"] == 8 * 60
+
+
+def test_driver_change_emitted_when_duty_ends_mid_block():
+    """Duty cujo último task NÃO é o fim do source block deve emitir driver_change no fim (rendição) e não pullback."""
+    block = _block(1, _trip(1, 6 * 60, 7 * 60, origin=1, dest=2))
+    block.meta["task_start_buffer_minutes"] = 10
+    block.meta["task_end_buffer_minutes"] = 0
+    block.meta["is_source_block_start"] = True
+    block.meta["is_source_block_end"] = False
+    block.meta["source_block_id"] = 42
+
+    duty = Duty(id=78)
+    duty.add_task(block)
+    duty.meta["start_buffer_minutes"] = 10
+    duty.meta["end_buffer_minutes"] = 0
+
+    report = build_duty_operational_time_report(
+        duty,
+        min_break_minutes=30,
+        meal_break_minutes=60,
+        mandatory_break_after_minutes=270,
+    )
+
+    seg_types = [s["type"] for s in report["duty_time_segments"]]
+    assert "pullback" not in seg_types, "Não deve emitir pullback quando duty entrega veículo em operação"
+    driver_change = [s for s in report["duty_time_segments"] if s["type"] == "driver_change"]
+    assert len(driver_change) == 1, "Deve emitir 1 driver_change no fim"
+    assert driver_change[0]["relief_role"] == "outgoing"
+    assert driver_change[0]["start"] == 7 * 60

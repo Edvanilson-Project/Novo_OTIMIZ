@@ -2,6 +2,7 @@ import { Module, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/c
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { RolesGuard } from './common/guards/roles.guard';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { AuditModule } from './modules/audit/audit.module';
@@ -52,7 +53,9 @@ import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-a
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
         entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow],
-        synchronize: true, 
+        // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
+        // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
+        synchronize: configService.get<string>('NODE_ENV') !== 'production',
         logging: false,
       }),
     }),
@@ -68,6 +71,12 @@ import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-a
     ReportsModule,
     AuditModule,
     JwtModule.register({}),
+    // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
+    // (/optimize). Throttles podem ser sobrescritos por endpoint via @Throttle decorator.
+    ThrottlerModule.forRoot([
+      { name: 'short', ttl: 1_000, limit: 30 },     // 30 req/s por IP — burst defense
+      { name: 'medium', ttl: 60_000, limit: 300 },  // 300 req/min — uso normal
+    ]),
 ],
   controllers: [AppController],
   providers: [
@@ -77,6 +86,10 @@ import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-a
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
     },
     {
       provide: APP_GUARD,

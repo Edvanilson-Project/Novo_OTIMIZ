@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -32,6 +33,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { vehiclesApi } from '@/lib/api';
 
 interface VehicleType {
   id: number;
@@ -61,6 +63,8 @@ export default function FleetManagementPage() {
   const [openVehicleDialog, setOpenVehicleDialog] = useState(false);
   const [editingType, setEditingType] = useState<VehicleType | null>(null);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [typeError, setTypeError] = useState<string | null>(null);
+  const [vehicleError, setVehicleError] = useState<string | null>(null);
 
   const [typeForm, setTypeForm] = useState({
     name: '',
@@ -86,17 +90,12 @@ export default function FleetManagementPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [typesRes, vehiclesRes] = await Promise.all([
-        fetch('/api/vehicles/types'),
-        fetch('/api/vehicles'),
+      const [types, vehicles] = await Promise.all([
+        vehiclesApi.getTypes(),
+        vehiclesApi.getAll(),
       ]);
-
-      if (typesRes.ok) {
-        setVehicleTypes(await typesRes.json());
-      }
-      if (vehiclesRes.ok) {
-        setVehicles(await vehiclesRes.json());
-      }
+      setVehicleTypes(types);
+      setVehicles(vehicles);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {
@@ -105,38 +104,28 @@ export default function FleetManagementPage() {
   };
 
   const handleAddVehicleType = async () => {
+    if (!typeForm.name.trim()) { setTypeError('Nome é obrigatório.'); return; }
+    setTypeError(null);
     try {
-      const res = await fetch('/api/vehicles/types', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(typeForm),
-      });
-
-      if (res.ok) {
-        setTypeForm({ name: '', capacity: 40, costPerDay: 800, accessible: false, description: '' });
-        setOpenTypeDialog(false);
-        fetchData();
-      }
+      await vehiclesApi.createType(typeForm);
+      setTypeForm({ name: '', capacity: 40, costPerDay: 800, accessible: false, description: '' });
+      setOpenTypeDialog(false);
+      fetchData();
     } catch (error) {
-      console.error('Erro ao criar tipo de veículo:', error);
+      setTypeError('Erro ao salvar tipo de veículo.');
     }
   };
 
   const handleAddVehicle = async () => {
+    if (!vehicleForm.vehicleId.trim()) { setVehicleError('ID do Veículo é obrigatório.'); return; }
+    setVehicleError(null);
     try {
-      const res = await fetch('/api/vehicles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(vehicleForm),
-      });
-
-      if (res.ok) {
-        setVehicleForm({ vehicleId: '', typeId: 1, depotId: 1, isActive: true, licensePlate: '', odometer: 0 });
-        setOpenVehicleDialog(false);
-        fetchData();
-      }
+      await vehiclesApi.create(vehicleForm);
+      setVehicleForm({ vehicleId: '', typeId: 1, depotId: 1, isActive: true, licensePlate: '', odometer: 0 });
+      setOpenVehicleDialog(false);
+      fetchData();
     } catch (error) {
-      console.error('Erro ao criar veículo:', error);
+      setVehicleError('Erro ao salvar veículo.');
     }
   };
 
@@ -264,12 +253,13 @@ export default function FleetManagementPage() {
       </Grid>
 
       {/* Vehicle Type Dialog */}
-      <Dialog open={openTypeDialog} onClose={() => setOpenTypeDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={openTypeDialog} onClose={() => { setOpenTypeDialog(false); setTypeError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle>Novo Tipo de Veículo</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
+          {typeError && <Alert severity="error" sx={{ mb: 1 }}>{typeError}</Alert>}
           <TextField
             fullWidth
-            label="Nome"
+            label="Nome *"
             value={typeForm.name}
             onChange={e => setTypeForm({ ...typeForm, name: e.target.value })}
             margin="normal"
@@ -320,12 +310,13 @@ export default function FleetManagementPage() {
       </Dialog>
 
       {/* Vehicle Dialog */}
-      <Dialog open={openVehicleDialog} onClose={() => setOpenVehicleDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={openVehicleDialog} onClose={() => { setOpenVehicleDialog(false); setVehicleError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle>Novo Veículo</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
+          {vehicleError && <Alert severity="error" sx={{ mb: 1 }}>{vehicleError}</Alert>}
           <TextField
             fullWidth
-            label="ID do Veículo"
+            label="ID do Veículo *"
             value={vehicleForm.vehicleId}
             onChange={e => setVehicleForm({ ...vehicleForm, vehicleId: e.target.value })}
             margin="normal"

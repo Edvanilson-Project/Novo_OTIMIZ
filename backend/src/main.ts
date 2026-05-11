@@ -23,9 +23,15 @@ async function bootstrap() {
   // Habilitar Cookie Parser para ler tokens HTTP-Only
   app.use(cookieParser());
 
-  // CORS configurado para aceitar credentials e SameSite=Strict futuramente
+  // CORS: combinar `origin: true` (refletir Origin) com `credentials: true` permite que qualquer
+  // site exfiltre cookies/headers autenticados. Lemos a allowlist da env CORS_ALLOWED_ORIGINS
+  // (separada por vírgula). Em dev, default permissivo para localhost:3000.
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: true, // Em prod, especificar o domínio do frontend
+    origin: allowedOrigins,
     credentials: true,
   });
 

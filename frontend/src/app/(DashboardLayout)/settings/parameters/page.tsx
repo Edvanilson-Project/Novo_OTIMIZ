@@ -898,7 +898,7 @@ export default function ParametersPage() {
                     <ToggleButton value="optimized">Optimized</ToggleButton>
                   </ToggleButtonGroup>
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                    Strict pode adicionar +1 duty/crew para evitar excecoes criticas; balanced aceita ate 1 com warning; optimized prioriza menor custo.
+                    Strict pode adicionar +1 jornada/motorista para evitar exceções críticas; balanced aceita até 1 com warning; optimized prioriza menor custo.
                   </Typography>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>

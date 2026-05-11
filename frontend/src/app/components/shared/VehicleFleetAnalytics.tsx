@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { vehiclesApi } from '@/lib/api';
 import {
   Box,
   Card,
@@ -46,13 +47,8 @@ const VehicleFleetAnalytics: React.FC = () => {
   const fetchFleetMetrics = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/vehicles/metrics/all');
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics(data);
-      } else {
-        setError('Erro ao carregar métricas da frota');
-      }
+      const data = await vehiclesApi.getMetricsAll();
+      setMetrics(data);
     } catch (err) {
       setError('Erro ao carregar métricas da frota');
     } finally {
@@ -113,13 +109,19 @@ const VehicleFleetAnalytics: React.FC = () => {
     <Box>
       {/* Summary Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
                 Saúde Média
               </Typography>
-              <Typography variant="h5" sx={{ fontWeight: 700, color: getStatusColor(avgHealth) }}>
+              <Typography
+                variant="h5"
+                sx={{
+                  fontWeight: 700,
+                  color: getStatusColor(avgHealth >= 80 ? 'good' : avgHealth >= 60 ? 'warning' : 'critical'),
+                }}
+              >
                 {avgHealth}
               </Typography>
               <Typography variant="caption" color="textSecondary">
@@ -129,7 +131,7 @@ const VehicleFleetAnalytics: React.FC = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -145,7 +147,7 @@ const VehicleFleetAnalytics: React.FC = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -161,7 +163,7 @@ const VehicleFleetAnalytics: React.FC = () => {
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>

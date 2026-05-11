@@ -19,6 +19,7 @@ from src.algorithms.integrated.joint_solver import JointSolver
 from src.algorithms.evaluator import CostEvaluator
 from src.services.optimizer_service import OptimizerService
 from src.services import optimizer_service as optimizer_service_module
+from src.services import algorithm_dispatcher as algorithm_dispatcher_module
 from src.domain.models import AlgorithmType, CSPSolution, OptimizationResult, VSPSolution
 
 
@@ -228,7 +229,8 @@ def test_optimizer_service_passes_time_budget_to_joint_solver(monkeypatch):
         def solve(self, trips, vehicle_types, depot_id=None):
             return OptimizationResult(vsp=VSPSolution(blocks=[]), csp=CSPSolution())
 
-    monkeypatch.setattr(optimizer_service_module, "JointSolver", FakeJointSolver)
+    # Patch no novo módulo onde JointSolver vive após Sprint I (algorithm_dispatcher).
+    monkeypatch.setattr(algorithm_dispatcher_module, "JointSolver", FakeJointSolver)
 
     OptimizerService().run(
         trips,
