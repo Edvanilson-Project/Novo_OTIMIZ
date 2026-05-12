@@ -781,15 +781,25 @@ def _enhanced_large_neighborhood_search(
         candidate_csp = csp_solver.solve(candidate_vsp.blocks, trips)
 
         candidate_cost = evaluator.csp_cost(candidate_csp) + evaluator.vsp_cost(candidate_vsp, vehicle_types)
-        
+
         # 4. ACEITAR: Critério de simulated annealing
         cost_delta = candidate_cost - best_cost
-        
+
+        # GUARD: rejeita candidatos que pioram violações CCT, mesmo com cost_delta negativo.
+        # Defensivo — não corrige o bug específico do benchmark 2026-05-11 (hybrid easy/N=1000
+        # retornando 392 hard_issues do tipo OPERATOR_CHANGE_NON_TERMINAL + SOURCE_BLOCK_DUTY_OVERLAP,
+        # esses vêm do CSP greedy split de duties em pontos inválidos, não do LNS). Mas evita
+        # regressão futura onde LNS aceitaria aumentar violações CCT puramente por custo.
+        candidate_violations = int(getattr(candidate_csp, "cct_violations", 0) or 0)
+        best_violations = int(getattr(best_csp, "cct_violations", 0) or 0)
+        if candidate_violations > best_violations:
+            continue
+
         if cost_delta < 0 or random.random() < math.exp(-cost_delta / current_temp):
             best_vsp = candidate_vsp
             best_csp = candidate_csp
             best_cost = candidate_cost
-            
+
             if cost_delta < 0:
                 stats["improvements"] += 1
             stats["accepted"] += 1

@@ -817,9 +817,14 @@ export class OptimizationService implements OnModuleInit {
         const reportedViolations = Math.max(Number(result.cct_violations ?? 0), hardIssues.length);
         const hardConstraintReport = result.meta?.hard_constraint_report ?? null;
         const outputReport = hardConstraintReport?.output ?? null;
+        // Defesa em profundidade: solver pode retornar solver_explanation.status='feasible'
+        // (ou ausente) mas ainda ter hard_issue_count > 0. Visto no benchmark 2026-05-11
+        // em hybrid_pipeline easy/N=1000 que retornou cost menor com 392 violações hard.
+        // Tratar como FAILED — solução não é válida para operação real.
         const invalidCompleted =
           solverExplanation?.status === 'hard_violation'
-          || outputReport?.ok === false;
+          || outputReport?.ok === false
+          || hardIssueCount > 0;
         const finalStatus = invalidCompleted ? ScheduleStatus.FAILED : ScheduleStatus.COMPLETED;
 
         const BATCH_SIZE = 500;
@@ -1349,11 +1354,15 @@ export class OptimizationService implements OnModuleInit {
   private extractInvalidResultMessage(result: any): string {
     const solverStatus = result?.solver_explanation?.status ?? result?.meta?.solver_explanation?.status;
     const outputReport = result?.meta?.hard_constraint_report?.output;
+    const hardCount = Number(result?.solver_explanation?.issues?.hard_count ?? 0);
     if (solverStatus === 'hard_violation') {
       return 'Resultado inválido: solver_explanation.status=hard_violation.';
     }
     if (outputReport?.ok === false) {
       return 'Resultado inválido: hard_constraint_report.output.ok=false.';
+    }
+    if (hardCount > 0) {
+      return `Resultado inválido: ${hardCount} restrição(ões) hard violada(s). Solver retornou solução numericamente mais barata mas inviável.`;
     }
     return 'Resultado inválido persistido como falha por validação final.';
   }

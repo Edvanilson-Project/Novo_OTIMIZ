@@ -26,10 +26,17 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Iterable
+
+try:
+    import psutil  # noqa: F401
+    _HAS_PSUTIL = True
+except ImportError:
+    _HAS_PSUTIL = False
 
 OPTIMIZER_URL = os.environ.get("OPTIMIZER_URL", "http://localhost:8000")
 INTERNAL_KEY = os.environ.get("INTERNAL_OPTIMIZER_KEY", "internal-key-123456")
@@ -90,6 +97,10 @@ def make_synthetic_trips(n: int, seed: int = 42, difficulty: str = "easy") -> li
         lines = list(range(1, 8))  # 7
         dur_min, dur_max = 90, 240
         peak_concentration = 0.7
+    elif difficulty == "violator":
+        # Força violações CCT: cadeias longas de trips consecutivas (gap pequeno) na mesma linha,
+        # somando >270min de condução contínua sem pausa válida. Stress real para penalty engine.
+        return _make_violator_trips(n, seed)
     else:
         raise ValueError(f"difficulty inválida: {difficulty}")
 
@@ -127,6 +138,160 @@ def make_synthetic_trips(n: int, seed: int = 42, difficulty: str = "easy") -> li
             }
         )
     return trips
+
+
+def _make_violator_trips(n: int, seed: int = 42) -> list[dict]:
+    """
+    Profile que FORÇA violações CCT.
+    Estratégia: gerar cadeias longas de trips consecutivas (gap=0 ou 5min) na mesma linha,
+    cada uma de 45–75min. Uma cadeia de 6+ trips somando >270min força violação de
+    condução contínua (max_driving_minutes default = 270). Sem pausa entre.
+    """
+    rng = random.Random(seed)
+    trips: list[dict] = []
+    terminals = [1, 2, 3, 4]
+    chain_size = 7  # 7 × ~50min = ~350min > 270 → força violação de condução contínua
+    chain_count = max(1, n // chain_size)
+    leftover = n - chain_count * chain_size
+    trip_id = 1
+    cursor = 5 * 60  # começa às 5h
+    for _ in range(chain_count):
+        # Wrap se não cabe a cadeia inteira no dia
+        chain_window = chain_size * 75 + (chain_size - 1) * 5  # worst-case
+        if cursor + chain_window > 1430:
+            cursor = 5 * 60
+        line = rng.choice([1, 2, 3])
+        origin = rng.choice(terminals)
+        dest = rng.choice([t for t in terminals if t != origin])
+        for k in range(chain_size):
+            dur = rng.randint(45, 75)
+            start = cursor
+            end = start + dur
+            if end > 1439:
+                end = 1439
+                dur = end - start
+                if dur <= 0:
+                    break  # sem espaço — pula resto da cadeia
+            trips.append({
+                "id": trip_id, "line_id": line, "trip_group_id": None,
+                "direction": "IDA" if k % 2 == 0 else "VOLTA",
+                "origin_id": origin if k % 2 == 0 else dest,
+                "destination_id": dest if k % 2 == 0 else origin,
+                "start_time": start, "end_time": end,
+                "duration": dur, "distance_km": dur * 0.4,
+                "origin_latitude": None, "origin_longitude": None,
+                "destination_latitude": None, "destination_longitude": None,
+            })
+            trip_id += 1
+            cursor = end + rng.choice([0, 0, 5])  # gap 0 ou 5min — nunca pausa válida (min_break=30)
+        cursor += 30  # gap entre cadeias
+    # filler para N exato
+    for _ in range(leftover):
+        start = rng.randint(0, 1380)
+        dur = rng.randint(30, 60)
+        terms = terminals
+        o = rng.choice(terms); d = rng.choice([t for t in terms if t != o])
+        trips.append({
+            "id": trip_id, "line_id": rng.choice([1, 2, 3]), "trip_group_id": None,
+            "direction": "IDA", "origin_id": o, "destination_id": d,
+            "start_time": start, "end_time": min(start + dur, 1439),
+            "duration": dur, "distance_km": dur * 0.4,
+            "origin_latitude": None, "origin_longitude": None,
+            "destination_latitude": None, "destination_longitude": None,
+        })
+        trip_id += 1
+    return trips
+
+
+class ResourceSampler:
+    """
+    Amostra CPU+RSS de processos celery (workers) durante uma run. Roda thread
+    em background polando a cada 1s. Retorna pico de RSS e CPU acumulado.
+    Quando psutil não disponível, retorna None nos campos.
+    """
+
+    def __init__(self, target_pids: list[int]):
+        self.target_pids = target_pids
+        self.peak_rss_mb = 0.0
+        self.cpu_seconds = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._cpu_start: float | None = None
+        self.enabled = _HAS_PSUTIL and bool(target_pids)
+
+    def _walk_processes(self):
+        for pid in self.target_pids:
+            try:
+                p = psutil.Process(pid)
+                yield p
+                for child in p.children(recursive=True):
+                    yield child
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+    def _snapshot_cpu(self) -> float:
+        total = 0.0
+        for p in self._walk_processes():
+            try:
+                t = p.cpu_times()
+                total += t.user + t.system
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return total
+
+    def start(self) -> None:
+        if not self.enabled:
+            return
+        self._cpu_start = self._snapshot_cpu()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            for p in self._walk_processes():
+                try:
+                    rss = p.memory_info().rss / 1024 / 1024
+                    if rss > self.peak_rss_mb:
+                        self.peak_rss_mb = rss
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            time.sleep(1)
+
+    def stop(self) -> dict:
+        if not self.enabled:
+            return {"peak_rss_mb": None, "cpu_seconds": None}
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+        cpu_end = self._snapshot_cpu()
+        self.cpu_seconds = (cpu_end - (self._cpu_start or 0.0))
+        return {
+            "peak_rss_mb": round(self.peak_rss_mb, 1),
+            "cpu_seconds": round(self.cpu_seconds, 2),
+        }
+
+
+def _find_celery_pid() -> int | None:
+    """
+    Localiza PID do worker celery (lê /tmp/celery-worker.pid se existir; senão psutil scan).
+    """
+    pid_file = "/tmp/celery-worker.pid"
+    if os.path.exists(pid_file):
+        try:
+            return int(open(pid_file).read().strip())
+        except (OSError, ValueError):
+            pass
+    if not _HAS_PSUTIL:
+        return None
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or [])
+            if "celery" in cmd and "-A src.core.celery_app" in cmd:
+                return proc.pid
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return None
 
 
 VEHICLE_TYPES = [
@@ -199,12 +364,20 @@ def build_payload(trips: list[dict], algorithm: str, time_budget_s: float | None
     }
 
 
+_CELERY_PID_CACHED: int | None = None
+
+
 def submit_and_poll(payload: dict) -> dict[str, Any]:
+    global _CELERY_PID_CACHED
+    if _CELERY_PID_CACHED is None:
+        _CELERY_PID_CACHED = _find_celery_pid()
+    sampler = ResourceSampler([_CELERY_PID_CACHED] if _CELERY_PID_CACHED else [])
+    sampler.start()
     t0 = time.monotonic()
     try:
         submit = _http_post("/optimize/", payload)
     except urllib.error.HTTPError as err:
-        # Captura body do erro p/ diagnóstico (422 normalmente = schema rejected)
+        sampler.stop()
         body = err.read().decode(errors="replace")[:500]
         return {
             "status": "failed",
@@ -214,6 +387,7 @@ def submit_and_poll(payload: dict) -> dict[str, Any]:
     submit_latency_ms = (time.monotonic() - t0) * 1000
     task_id = submit.get("task_id")
     if not task_id:
+        sampler.stop()
         return {"status": "failed", "error": "no task_id", "submit_latency_ms": submit_latency_ms}
 
     deadline = time.monotonic() + POLL_TIMEOUT_S
@@ -230,6 +404,7 @@ def submit_and_poll(payload: dict) -> dict[str, Any]:
             fairness = (
                 ((result.get("cost_breakdown") or {}).get("csp") or {}).get("fairness") or {}
             )
+            resources = sampler.stop()
             return {
                 "status": "completed",
                 "submit_latency_ms": submit_latency_ms,
@@ -243,22 +418,31 @@ def submit_and_poll(payload: dict) -> dict[str, Any]:
                 "hard_issue_count": ((result.get("solver_explanation") or {}).get("issues") or {}).get(
                     "hard_count", 0
                 ),
+                "solver_status": (result.get("solver_explanation") or {}).get("status"),
                 "fairness_gini": (fairness.get("work_time") or {}).get("gini"),
                 "fairness_cv": (fairness.get("work_time") or {}).get("cv"),
                 "algorithm_resolved": result.get("vsp_algorithm"),
+                "peak_rss_mb": resources.get("peak_rss_mb"),
+                "cpu_seconds": resources.get("cpu_seconds"),
             }
         if st == "failed":
+            resources = sampler.stop()
             return {
                 "status": "failed",
                 "submit_latency_ms": submit_latency_ms,
                 "solve_latency_ms": (time.monotonic() - t0) * 1000,
                 "error": status.get("message") or status.get("error", {}).get("message"),
+                "peak_rss_mb": resources.get("peak_rss_mb"),
+                "cpu_seconds": resources.get("cpu_seconds"),
             }
         time.sleep(POLL_INTERVAL_S)
+    resources = sampler.stop()
     return {
         "status": "timeout",
         "submit_latency_ms": submit_latency_ms,
         "solve_latency_ms": (time.monotonic() - t0) * 1000,
+        "peak_rss_mb": resources.get("peak_rss_mb"),
+        "cpu_seconds": resources.get("cpu_seconds"),
     }
 
 
@@ -310,6 +494,7 @@ def main(sizes: list[int], algos: list[str], seeds: list[int], difficulties: lis
         "Seed",
         "Algo",
         "Status",
+        "Solver",
         "Solve ms",
         "Custo R$",
         "Veículos",
@@ -318,7 +503,8 @@ def main(sizes: list[int], algos: list[str], seeds: list[int], difficulties: lis
         "Violações",
         "Hard",
         "Gini",
-        "CV",
+        "RSS MB",
+        "CPU s",
     ]
     print("| " + " | ".join(headers) + " |")
     print("|" + "|".join(["---"] * len(headers)) + "|")
@@ -329,6 +515,7 @@ def main(sizes: list[int], algos: list[str], seeds: list[int], difficulties: lis
             r.get("seed"),
             r["algorithm"],
             r.get("status"),
+            r.get("solver_status", "—"),
             fmt_cell(r.get("solve_latency_ms")),
             fmt_cell(r.get("total_cost")),
             fmt_cell(r.get("num_vehicles")),
@@ -337,7 +524,8 @@ def main(sizes: list[int], algos: list[str], seeds: list[int], difficulties: lis
             fmt_cell(r.get("cct_violations")),
             fmt_cell(r.get("hard_issue_count")),
             fmt_cell(r.get("fairness_gini")),
-            fmt_cell(r.get("fairness_cv")),
+            fmt_cell(r.get("peak_rss_mb")),
+            fmt_cell(r.get("cpu_seconds")),
         ]
         print("| " + " | ".join(str(c) for c in row) + " |")
 
