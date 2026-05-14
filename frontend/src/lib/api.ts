@@ -148,6 +148,34 @@ export const reportsApi = {
     apiClient.get('/reports/compare', { params: { run1, run2 } }).then((r) => r.data),
 };
 
+// ─── Custom Reports (FASE 4.2) ────────────────────────────────────────────────
+export interface CustomReportTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  metrics: string[];
+  filters: Record<string, any>;
+  format: 'json' | 'csv' | 'pdf';
+  ownerUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const customReportsApi = {
+  listMetrics: () => apiClient.get<{ metrics: string[] }>('/custom-reports/metrics').then((r) => r.data),
+  list: () => apiClient.get<CustomReportTemplate[]>('/custom-reports').then((r) => r.data),
+  get: (id: ID) => apiClient.get<CustomReportTemplate>(`/custom-reports/${id}`).then((r) => r.data),
+  create: (data: { name: string; description?: string; metrics: string[]; filters?: Record<string, any>; format?: string }) =>
+    apiClient.post<CustomReportTemplate>('/custom-reports', data).then((r) => r.data),
+  update: (id: ID, data: Partial<{ name: string; description: string; metrics: string[]; filters: Record<string, any>; format: string }>) =>
+    apiClient.patch<CustomReportTemplate>(`/custom-reports/${id}`, data).then((r) => r.data),
+  remove: (id: ID) => apiClient.delete(`/custom-reports/${id}`).then((r) => r.data),
+  run: (id: ID) => apiClient.get<Record<string, any>>(`/custom-reports/${id}/run`).then((r) => r.data),
+  preview: (metrics: string[], filters: Record<string, any> = {}) =>
+    apiClient.post<Record<string, any>>('/custom-reports/preview', { metrics, filters }).then((r) => r.data),
+  exportCsvUrl: (id: ID) => `${API_BASE_URL}/custom-reports/${id}/export.csv`,
+};
+
 // ─── Audit Log ───────────────────────────────────────────────────────────────
 export const auditApi = {
   find: (params?: { entity?: string; days?: number; page?: number; limit?: number }) =>

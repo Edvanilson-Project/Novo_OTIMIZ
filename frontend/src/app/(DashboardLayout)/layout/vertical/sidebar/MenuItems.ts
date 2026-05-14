@@ -13,6 +13,7 @@ import {
   IconWand,
   IconTruck,
   IconCalendarTime,
+  IconReportAnalytics,
 } from "@tabler/icons-react";
 import { uniqueId } from "lodash";
 
@@ -79,6 +80,12 @@ const Menuitems: MenuitemsType[] = [
     title: "Analytics & Relatórios",
     icon: IconChartBar,
     href: "/operations/reporting",
+  },
+  {
+    id: uniqueId(),
+    title: "Relatórios Customizados",
+    icon: IconReportAnalytics,
+    href: "/operations/reporting/custom",
   },
   {
     navlabel: true,
