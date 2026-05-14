@@ -22,10 +22,10 @@ describe('OptimizationAdvancedController', () => {
       }),
     };
     whatIfSvc = {
-      simulateWhatIf: jest.fn().mockResolvedValue({ delta: {} }),
+      simulateVehicleTypeChange: jest.fn().mockReturnValue({ delta: {} }),
     };
     optimizationSvc = {
-      getBenchmarkResults: jest.fn().mockResolvedValue([]),
+      replayRun: jest.fn().mockResolvedValue({}),
     };
 
     const module: TestingModule = await Test.createTestingModule({

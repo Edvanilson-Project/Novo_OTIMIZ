@@ -1,8 +1,9 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import type AdmZipType from 'adm-zip';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const AdmZip = require('adm-zip');
+const AdmZip = require('adm-zip') as typeof AdmZipType;
 import { Terminal } from '../database/entities/terminal.entity';
 import { Line } from '../database/entities/line.entity';
 import { Trip } from '../database/entities/trip.entity';
@@ -33,7 +34,7 @@ export class GtfsImportService {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada.');
 
-    let zip: AdmZip;
+    let zip: AdmZipType;
     try {
       zip = new AdmZip(buffer);
     } catch {
@@ -179,7 +180,7 @@ export class GtfsImportService {
     };
   }
 
-  private _readEntry(zip: AdmZip, filename: string): string | null {
+  private _readEntry(zip: AdmZipType, filename: string): string | null {
     const entry = zip.getEntry(filename) ?? zip.getEntries().find(e => e.entryName.endsWith('/' + filename));
     return entry ? entry.getData().toString('utf8') : null;
   }
