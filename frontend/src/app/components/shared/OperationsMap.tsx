@@ -19,12 +19,22 @@ export interface MapTripLine {
   destinationLatitude: number | null;
   destinationLongitude: number | null;
   lineCode?: string | null;
+  originId?: number | null;
+  destinationId?: number | null;
+  startTime?: number | null;
+  endTime?: number | null;
+  duration?: number | null;
+  distanceKm?: number | null;
 }
 
 interface OperationsMapProps {
   terminals: MapTerminal[];
   trips?: MapTripLine[];
   height?: number | string;
+  selectedTerminalId?: number | null;
+  selectedTripId?: number | null;
+  onSelectTerminal?: (terminal: MapTerminal) => void;
+  onSelectTrip?: (trip: MapTripLine) => void;
 }
 
 function FitBounds({ points }: { points: Array<[number, number]> }) {
@@ -39,7 +49,15 @@ function FitBounds({ points }: { points: Array<[number, number]> }) {
   return null;
 }
 
-export default function OperationsMap({ terminals, trips = [], height = 600 }: OperationsMapProps) {
+export default function OperationsMap({
+  terminals,
+  trips = [],
+  height = 600,
+  selectedTerminalId = null,
+  selectedTripId = null,
+  onSelectTerminal,
+  onSelectTrip,
+}: OperationsMapProps) {
   const validTerminals = useMemo(
     () =>
       terminals.filter(
@@ -70,7 +88,6 @@ export default function OperationsMap({ terminals, trips = [], height = 600 }: O
     return pts;
   }, [validTerminals, validTrips]);
 
-  // Centro padrão: aproximação do Brasil (São Paulo) caso não haja dados
   const defaultCenter: [number, number] = [-23.55, -46.63];
 
   return (
@@ -86,34 +103,51 @@ export default function OperationsMap({ terminals, trips = [], height = 600 }: O
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {validTrips.map((trip) => (
-          <Polyline
-            key={`trip-${trip.id}`}
-            positions={[
-              [trip.originLatitude as number, trip.originLongitude as number],
-              [trip.destinationLatitude as number, trip.destinationLongitude as number],
-            ]}
-            pathOptions={{ color: '#1976d2', weight: 2, opacity: 0.55 }}
-          >
-            <Tooltip sticky>
-              Viagem #{trip.id}
-              {trip.lineCode ? ` · Linha ${trip.lineCode}` : ''}
-            </Tooltip>
-          </Polyline>
-        ))}
+        {validTrips.map((trip) => {
+          const isSelected = selectedTripId === trip.id;
+          return (
+            <Polyline
+              key={`trip-${trip.id}`}
+              positions={[
+                [trip.originLatitude as number, trip.originLongitude as number],
+                [trip.destinationLatitude as number, trip.destinationLongitude as number],
+              ]}
+              pathOptions={{
+                color: isSelected ? '#ff9800' : '#1976d2',
+                weight: isSelected ? 4 : 2,
+                opacity: isSelected ? 0.95 : 0.55,
+              }}
+              eventHandlers={onSelectTrip ? { click: () => onSelectTrip(trip) } : undefined}
+            >
+              <Tooltip sticky>
+                Viagem #{trip.id}
+                {trip.lineCode ? ` · Linha ${trip.lineCode}` : ''}
+              </Tooltip>
+            </Polyline>
+          );
+        })}
 
-        {validTerminals.map((t) => (
-          <CircleMarker
-            key={`terminal-${t.id}`}
-            center={[t.latitude, t.longitude]}
-            radius={6}
-            pathOptions={{ color: '#e53935', fillColor: '#e53935', fillOpacity: 0.85, weight: 1 }}
-          >
-            <Tooltip direction="top" offset={[0, -6]}>
-              {t.name}
-            </Tooltip>
-          </CircleMarker>
-        ))}
+        {validTerminals.map((t) => {
+          const isSelected = selectedTerminalId === t.id;
+          return (
+            <CircleMarker
+              key={`terminal-${t.id}`}
+              center={[t.latitude, t.longitude]}
+              radius={isSelected ? 10 : 6}
+              pathOptions={{
+                color: isSelected ? '#ff9800' : '#e53935',
+                fillColor: isSelected ? '#ff9800' : '#e53935',
+                fillOpacity: 0.85,
+                weight: isSelected ? 2 : 1,
+              }}
+              eventHandlers={onSelectTerminal ? { click: () => onSelectTerminal(t) } : undefined}
+            >
+              <Tooltip direction="top" offset={[0, -6]}>
+                {t.name}
+              </Tooltip>
+            </CircleMarker>
+          );
+        })}
 
         <FitBounds points={allPoints} />
       </MapContainer>
