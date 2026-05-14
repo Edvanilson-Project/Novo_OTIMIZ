@@ -47,6 +47,7 @@ export default function OperationsMapPage() {
   const [selectedTerminal, setSelectedTerminal] = useState<MapTerminal | null>(null);
   const [selectedTrip, setSelectedTrip] = useState<MapTripLine | null>(null);
   const [colorByLine, setColorByLine] = useState(true);
+  const [lineFilter, setLineFilter] = useState<Set<string>>(new Set());
 
   const lineStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -62,12 +63,31 @@ export default function OperationsMapPage() {
       }));
   }, [trips]);
 
+  // Reset filtro quando troca schedule (linhas mudam)
+  useEffect(() => {
+    setLineFilter(new Set());
+  }, [selectedScheduleId]);
+
+  const filteredTrips = useMemo(() => {
+    if (lineFilter.size === 0) return trips;
+    return trips.filter((t) => t.lineCode && lineFilter.has(t.lineCode));
+  }, [trips, lineFilter]);
+
   const lineColors = useMemo(() => {
     if (!colorByLine) return undefined;
     const map: Record<string, string> = {};
     for (const { code, color } of lineStats) map[code] = color;
     return map;
   }, [colorByLine, lineStats]);
+
+  function toggleLineFilter(code: string) {
+    setLineFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
 
   useEffect(() => {
     (async () => {
@@ -128,7 +148,7 @@ export default function OperationsMapPage() {
   const terminalsWithCoords = terminals.filter(
     (t) => typeof t.latitude === 'number' && typeof t.longitude === 'number',
   ).length;
-  const tripsWithCoords = trips.filter(
+  const tripsWithCoords = filteredTrips.filter(
     (t) =>
       typeof t.originLatitude === 'number' &&
       typeof t.originLongitude === 'number' &&
@@ -183,7 +203,9 @@ export default function OperationsMapPage() {
             </Stack>
             {!!selectedScheduleId && (
               <Typography variant="body2">
-                <strong>{tripsWithCoords}</strong> de {trips.length} viagens com coordenadas
+                <strong>{tripsWithCoords}</strong> de {filteredTrips.length} viagens
+                {lineFilter.size > 0 ? ` (filtrado de ${trips.length})` : ''}
+                {' '}com coordenadas
                 {tripsLoading ? ' (carregando…)' : ''}
               </Typography>
             )}
@@ -201,28 +223,51 @@ export default function OperationsMapPage() {
               />
             )}
           </Stack>
-          {colorByLine && lineStats.length > 0 && (
-            <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {lineStats.map(({ code, count, color }) => (
-                <Stack
-                  key={code}
-                  sx={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 0.75,
-                    px: 1,
-                    py: 0.25,
-                    borderRadius: 1,
-                    bgcolor: 'action.hover',
-                    fontSize: '0.75rem',
-                  }}
+          {lineStats.length > 0 && (
+            <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+              {lineStats.map(({ code, count, color }) => {
+                const active = lineFilter.has(code);
+                const dimmed = lineFilter.size > 0 && !active;
+                return (
+                  <Stack
+                    key={code}
+                    onClick={() => toggleLineFilter(code)}
+                    sx={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 0.75,
+                      px: 1,
+                      py: 0.25,
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      bgcolor: active ? 'primary.main' : 'action.hover',
+                      color: active ? 'primary.contrastText' : 'inherit',
+                      opacity: dimmed ? 0.45 : 1,
+                      transition: 'all 0.15s',
+                      border: '1px solid',
+                      borderColor: active ? 'primary.dark' : 'transparent',
+                      fontSize: '0.75rem',
+                      '&:hover': { opacity: 1, borderColor: active ? 'primary.dark' : 'divider' },
+                    }}
+                  >
+                    {colorByLine && (
+                      <Box sx={{ width: 12, height: 4, bgcolor: color, borderRadius: 0.5 }} />
+                    )}
+                    <Typography variant="caption" sx={{ color: 'inherit' }}>
+                      {code} · {count}
+                    </Typography>
+                  </Stack>
+                );
+              })}
+              {lineFilter.size > 0 && (
+                <Typography
+                  variant="caption"
+                  onClick={() => setLineFilter(new Set())}
+                  sx={{ cursor: 'pointer', textDecoration: 'underline', ml: 1 }}
                 >
-                  <Box sx={{ width: 12, height: 4, bgcolor: color, borderRadius: 0.5 }} />
-                  <Typography variant="caption">
-                    {code} · {count}
-                  </Typography>
-                </Stack>
-              ))}
+                  limpar filtro
+                </Typography>
+              )}
             </Box>
           )}
         </CardContent>
@@ -240,7 +285,7 @@ export default function OperationsMapPage() {
         <Box sx={{ borderRadius: 1, overflow: 'hidden' }}>
           <OperationsMap
             terminals={terminals}
-            trips={trips}
+            trips={filteredTrips}
             height={650}
             selectedTerminalId={selectedTerminal?.id ?? null}
             selectedTripId={selectedTrip?.id ?? null}
