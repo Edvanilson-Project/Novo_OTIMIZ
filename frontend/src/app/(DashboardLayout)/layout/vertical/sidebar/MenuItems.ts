@@ -77,6 +77,12 @@ const Menuitems: MenuitemsType[] = [
   },
   {
     id: uniqueId(),
+    title: "Mapa Operacional",
+    icon: IconMapPin,
+    href: "/operations/map",
+  },
+  {
+    id: uniqueId(),
     title: "Analytics & Relatórios",
     icon: IconChartBar,
     href: "/operations/reporting",
