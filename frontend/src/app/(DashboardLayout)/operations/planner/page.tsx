@@ -17,10 +17,18 @@ import {
   FormControl,
   InputLabel,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
 } from "@mui/material";
-import { IconSettings, IconBolt, IconRefresh, IconRobot } from "@tabler/icons-react";
+import { IconSettings, IconBolt, IconRefresh, IconRobot, IconShieldCheck } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
-import { linesApi, terminalsApi, operationsApi, parametersApi } from "@/lib/api";
+import { linesApi, terminalsApi, operationsApi, parametersApi, auditApi } from "@/lib/api";
 import type { OperationalQualityDecision, OperationalQualityMode } from "../_types";
 import { type TripIntervalPolicy } from "./_helpers/formatters";
 import { getSessionUser } from "@/lib/api";
@@ -81,6 +89,10 @@ export default function PlannerPage() {
   const [parameters, setParameters] = useState<any>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hybrid_pipeline");
   const [selectedOperationalQualityMode, setSelectedOperationalQualityMode] = useState<OperationalQualityMode>("balanced");
+  const [selectedDepotIds, setSelectedDepotIds] = useState<number[]>([]);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<any>(null);
+  const [validationOpen, setValidationOpen] = useState(false);
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [notification, setNotification] = useState({
     open: false,
@@ -339,6 +351,7 @@ export default function PlannerPage() {
       const optimizeResponse = await operationsApi.optimize({
         algorithm: selectedAlgorithm,
         operational_quality_mode: selectedOperationalQualityMode,
+        ...(selectedDepotIds.length > 0 ? { depot_ids: selectedDepotIds } : {}),
       });
       setOptimizationProgress((prev) => ({
         taskId: optimizeResponse?.taskId ?? optimizeResponse?.task_id ?? prev?.taskId ?? null,
@@ -371,6 +384,24 @@ export default function PlannerPage() {
         message: error.response?.data?.message || "Erro ao disparar otimização.",
         severity: "error",
       });
+    }
+  };
+
+  const handleValidate = async () => {
+    if (!schedule?.id) return;
+    setValidating(true);
+    try {
+      const result = await auditApi.validateSchedule(schedule.id);
+      setValidationResult(result);
+      setValidationOpen(true);
+    } catch (e: any) {
+      setNotification({
+        open: true,
+        message: e?.response?.data?.message || 'Erro ao validar escala.',
+        severity: 'error',
+      });
+    } finally {
+      setValidating(false);
     }
   };
 
@@ -511,6 +542,35 @@ export default function PlannerPage() {
                   </FormControl>
                 </Tooltip>
 
+                {terminals.length > 0 && (
+                  <Tooltip title="Filtra a otimização para incluir apenas viagens destes depots. Vazio = todos os depots.">
+                    <FormControl size="small" sx={{ minWidth: 200, maxWidth: 280, flex: { xs: 1, md: 'none' } }}>
+                      <InputLabel>Depots (opcional)</InputLabel>
+                      <Select
+                        multiple
+                        value={selectedDepotIds}
+                        label="Depots (opcional)"
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSelectedDepotIds(typeof v === 'string' ? v.split(',').map(Number) : v as number[]);
+                        }}
+                        disabled={optimizing}
+                        renderValue={(selected) =>
+                          (selected as number[])
+                            .map((id) => terminals.find((t: any) => t.id === id)?.name ?? id)
+                            .join(', ')
+                        }
+                      >
+                        {terminals.map((terminal: any) => (
+                          <MenuItem key={terminal.id} value={terminal.id}>
+                            {terminal.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Tooltip>
+                )}
+
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                   <Button
                     variant="outlined"
@@ -528,6 +588,19 @@ export default function PlannerPage() {
                   >
                     {optimizing ? "Otimizando..." : "Executar Otimização"}
                   </Button>
+                  <Tooltip title={!schedule?.id ? "Execute uma otimização para ativar" : "Audita erros e avisos da escala atual"}>
+                    <span>
+                      <Button
+                        variant="outlined"
+                        color="warning"
+                        startIcon={validating ? <CircularProgress size={16} color="inherit" /> : <IconShieldCheck size={18} />}
+                        onClick={handleValidate}
+                        disabled={!schedule?.id || optimizing || validating}
+                      >
+                        {validating ? "Validando..." : "Validar Escala"}
+                      </Button>
+                    </span>
+                  </Tooltip>
                   <Tooltip title={schedule?.status !== 'completed' ? "Execute uma otimização para ativar" : "Copiloto de Análise de Custos"}>
                     <span>
                       <Button
@@ -651,6 +724,92 @@ export default function PlannerPage() {
           {notification.message}
         </Alert>
       </Snackbar>
+
+      <Dialog
+        open={validationOpen}
+        onClose={() => setValidationOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <IconShieldCheck size={20} />
+          Validação da Escala
+          {validationResult && (
+            <Chip
+              label={validationResult.valid ? "Válida" : `${validationResult.errorCount} erro(s)`}
+              color={validationResult.valid ? "success" : "error"}
+              size="small"
+              sx={{ ml: 1 }}
+            />
+          )}
+        </DialogTitle>
+        <DialogContent dividers>
+          {validationResult && (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
+                {[
+                  { label: 'Viagens', value: validationResult.stats?.totalTrips ?? '—' },
+                  { label: 'Alocadas', value: validationResult.stats?.allocatedTrips ?? '—' },
+                  { label: 'Veículos', value: validationResult.stats?.totalVehicles ?? '—' },
+                  { label: 'Jornadas', value: validationResult.stats?.totalDuties ?? '—' },
+                  { label: 'Horas op.', value: validationResult.stats?.totalOperatorHours != null ? `${validationResult.stats.totalOperatorHours}h` : '—' },
+                  { label: 'Alocação', value: validationResult.stats?.allocationPercentage != null ? `${validationResult.stats.allocationPercentage.toFixed(1)}%` : '—' },
+                ].map(({ label, value }) => (
+                  <Box key={label} sx={{ textAlign: 'center', minWidth: 72 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>{value}</Typography>
+                    <Typography variant="caption" color="text.secondary">{label}</Typography>
+                  </Box>
+                ))}
+              </Stack>
+
+              {validationResult.errors?.length > 0 && (
+                <>
+                  <Divider />
+                  <Typography variant="subtitle2" color="error.main">
+                    Erros ({validationResult.errors.length})
+                  </Typography>
+                  <List dense disablePadding>
+                    {validationResult.errors.map((e: any, i: number) => (
+                      <ListItem key={i} disablePadding sx={{ py: 0.25 }}>
+                        <ListItemText
+                          primary={<Typography variant="body2" color="error.main">{e.detail}</Typography>}
+                          secondary={e.suggestedFix ? <Typography variant="caption">Sugestão: {e.suggestedFix}</Typography> : undefined}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {validationResult.warnings?.length > 0 && (
+                <>
+                  <Divider />
+                  <Typography variant="subtitle2" color="warning.main">
+                    Avisos ({validationResult.warnings.length})
+                  </Typography>
+                  <List dense disablePadding>
+                    {validationResult.warnings.map((w: any, i: number) => (
+                      <ListItem key={i} disablePadding sx={{ py: 0.25 }}>
+                        <ListItemText
+                          primary={<Typography variant="body2" color="warning.dark">{w.detail}</Typography>}
+                          secondary={w.suggestedFix ? <Typography variant="caption">Sugestão: {w.suggestedFix}</Typography> : undefined}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </>
+              )}
+
+              {validationResult.valid && validationResult.warnings?.length === 0 && (
+                <Alert severity="success">Escala válida — nenhum erro ou aviso encontrado.</Alert>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setValidationOpen(false)}>Fechar</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

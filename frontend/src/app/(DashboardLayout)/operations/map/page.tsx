@@ -5,8 +5,10 @@ import dynamic from 'next/dynamic';
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
+  CircularProgress,
   Container,
   Divider,
   Drawer,
@@ -17,6 +19,7 @@ import {
   MenuItem,
   Select,
   Slider,
+  Snackbar,
   Stack,
   Switch,
   Typography,
@@ -37,6 +40,15 @@ interface ScheduleSummary {
   status?: string;
 }
 
+interface ScheduleBlock {
+  id: number;
+  block_id: number;
+  start_time: number;
+  end_time: number;
+  total_cost: number;
+  trips: Array<{ id: number; start_time: number; end_time: number }>;
+}
+
 export default function OperationsMapPage() {
   const [terminals, setTerminals] = useState<MapTerminal[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSummary[]>([]);
@@ -45,8 +57,11 @@ export default function OperationsMapPage() {
   const [loading, setLoading] = useState(true);
   const [tripsLoading, setTripsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlock[]>([]);
   const [selectedTerminal, setSelectedTerminal] = useState<MapTerminal | null>(null);
   const [selectedTrip, setSelectedTrip] = useState<MapTripLine | null>(null);
+  const [reassigning, setReassigning] = useState(false);
+  const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
   const [colorByLine, setColorByLine] = useState(true);
   const [lineFilter, setLineFilter] = useState<Set<string>>(new Set());
   const [timeRange, setTimeRange] = useState<[number, number]>([0, 1440]);
@@ -91,6 +106,20 @@ export default function OperationsMapPage() {
     return map;
   }, [colorByLine, lineStats]);
 
+  async function handleReassign(tripId: number, targetBlockId: number) {
+    if (!selectedScheduleId) return;
+    setReassigning(true);
+    try {
+      await operationsApi.reassignTrip({ scheduleId: Number(selectedScheduleId), tripId, targetBlockId });
+      setSnack({ open: true, message: `Viagem #${tripId} reatribuída ao bloco ${targetBlockId}.`, severity: 'success' });
+      setSelectedTrip(null);
+    } catch (e: any) {
+      setSnack({ open: true, message: e?.response?.data?.message || 'Erro ao reatribuir viagem.', severity: 'error' });
+    } finally {
+      setReassigning(false);
+    }
+  }
+
   function toggleLineFilter(code: string) {
     setLineFilter((prev) => {
       const next = new Set(prev);
@@ -113,6 +142,7 @@ export default function OperationsMapPage() {
         if (latest?.id) {
           setSchedules([latest]);
           setSelectedScheduleId(String(latest.id));
+          setScheduleBlocks(Array.isArray(latest.blocks) ? latest.blocks : []);
         }
       } catch (e: any) {
         setError(e?.response?.data?.message || e?.message || 'Falha ao carregar dados do mapa.');
@@ -370,9 +400,26 @@ export default function OperationsMapPage() {
           <TerminalDetails terminal={selectedTerminal} trips={trips} />
         )}
         {selectedTrip && (
-          <TripDetails trip={selectedTrip} terminals={terminals} />
+          <TripDetails
+            trip={selectedTrip}
+            terminals={terminals}
+            blocks={scheduleBlocks}
+            onReassign={handleReassign}
+            reassigning={reassigning}
+          />
         )}
       </Drawer>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={4000}
+        onClose={() => setSnack((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snack.severity} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
+          {snack.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }
@@ -419,9 +466,23 @@ function formatMinutes(min: number | null | undefined): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function TripDetails({ trip, terminals }: { trip: MapTripLine; terminals: MapTerminal[] }) {
+function TripDetails({
+  trip,
+  terminals,
+  blocks = [],
+  onReassign,
+  reassigning = false,
+}: {
+  trip: MapTripLine;
+  terminals: MapTerminal[];
+  blocks?: ScheduleBlock[];
+  onReassign?: (tripId: number, targetBlockId: number) => void;
+  reassigning?: boolean;
+}) {
   const origin = terminals.find((t) => t.id === trip.originId);
   const destination = terminals.find((t) => t.id === trip.destinationId);
+  const currentBlock = blocks.find((b) => b.trips.some((bt) => bt.id === trip.id));
+  const [targetBlockId, setTargetBlockId] = React.useState<number | ''>('');
 
   return (
     <Stack spacing={1.5}>
@@ -463,6 +524,44 @@ function TripDetails({ trip, terminals }: { trip: MapTripLine; terminals: MapTer
           <Typography variant="body2">{trip.distanceKm != null ? `${trip.distanceKm.toFixed(2)} km` : '—'}</Typography>
         </Box>
       </Stack>
+
+      {blocks.length > 0 && onReassign && (
+        <>
+          <Divider />
+          <Box>
+            <Typography variant="overline" color="textSecondary">Bloco atual</Typography>
+            <Typography variant="body2">
+              {currentBlock ? `Bloco ${currentBlock.block_id} (${currentBlock.trips.length} viagens)` : '—'}
+            </Typography>
+          </Box>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Mover para bloco</InputLabel>
+            <Select
+              value={targetBlockId}
+              label="Mover para bloco"
+              onChange={(e) => setTargetBlockId(e.target.value as number)}
+              disabled={reassigning}
+            >
+              {blocks
+                .filter((b) => b.block_id !== currentBlock?.block_id)
+                .map((b) => (
+                  <MenuItem key={b.block_id} value={b.block_id}>
+                    Bloco {b.block_id} · {b.trips.length} viagens · {formatMinutes(b.start_time)}–{formatMinutes(b.end_time)}
+                  </MenuItem>
+                ))}
+            </Select>
+          </FormControl>
+          <Button
+            variant="outlined"
+            size="small"
+            disabled={targetBlockId === '' || reassigning}
+            startIcon={reassigning ? <CircularProgress size={14} /> : undefined}
+            onClick={() => targetBlockId !== '' && onReassign(trip.id, targetBlockId as number)}
+          >
+            {reassigning ? 'Reatribuindo…' : 'Confirmar Reatribuição'}
+          </Button>
+        </>
+      )}
     </Stack>
   );
 }
