@@ -350,6 +350,7 @@ class OptimizeRequest(BaseModel):
         description="Preferência de motor VSP: 'assignment_vsp' ativa o solver esparso de alta escala (40k+ viagens)",
     )
     depot_id: Optional[int] = None
+    depot_ids: Optional[List[int]] = Field(None, description="Filtro multi-depot: inclui apenas viagens cujo depot_id esteja na lista")
     time_budget_s: Optional[float] = Field(None, ge=1, le=3600)
     wait_for_completion: bool = Field(False, description="Se True, a requisição aguarda o resultado e o retorna diretamente")
     trips: List[TripInput]

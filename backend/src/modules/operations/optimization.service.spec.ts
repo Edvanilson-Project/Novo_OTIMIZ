@@ -50,7 +50,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
 
@@ -284,7 +284,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any,
       { getCompanyId: jest.fn() } as any,
     );
     (localService as any).pollOptimizerTask = jest.fn();
@@ -343,7 +343,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       { transaction: async (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -426,7 +426,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       { transaction: async (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -555,7 +555,7 @@ describe('OptimizationService polling', () => {
           .mockReturnValueOnce(mockedDutyRepo),
       } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -657,7 +657,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any, // ConfigService
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).pollOptimizerTask = jest.fn();
@@ -734,7 +734,7 @@ describe('OptimizationService polling', () => {
       { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
-      { get: jest.fn().mockReturnValue('internal-key-123456') } as any,
+      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any,
       { getCompanyId: jest.fn() } as any,
     );
     (localService as any).pollOptimizerTask = jest.fn();

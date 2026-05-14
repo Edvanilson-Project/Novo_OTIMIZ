@@ -26,6 +26,7 @@ export class OperationsController {
     @Body('algorithm') algorithm?: string,
     @Body('companyId') requestedCompanyId?: number,
     @Body('operational_quality_mode') operationalQualityMode?: string,
+    @Body('depot_ids') depotIds?: number[],
   ) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
@@ -52,7 +53,14 @@ export class OperationsController {
       `optimization_request_received company_id=${companyId} algorithm=${algorithm ?? 'default'} requested_operational_quality_mode=${requestedOperationalQualityMode ?? 'null'}`,
     );
 
-    return this.optimizationService.runOptimization(companyId, algorithm, requestedOperationalQualityMode);
+    const rawDepotIds = depotIds ?? body?.depot_ids;
+    const resolvedDepotIds = Array.isArray(rawDepotIds)
+      ? rawDepotIds.map(Number).filter(Boolean)
+      : undefined;
+
+    return this.optimizationService.runOptimization(companyId, algorithm, requestedOperationalQualityMode, {
+      depotIds: resolvedDepotIds,
+    });
   }
 
   @Post('chat')

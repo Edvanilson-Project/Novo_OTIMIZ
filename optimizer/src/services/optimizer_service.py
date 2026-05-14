@@ -91,6 +91,7 @@ class OptimizerService:
         vehicle_types: List[VehicleType],
         algorithm: AlgorithmType = AlgorithmType.HYBRID_PIPELINE,
         depot_id: Optional[int] = None,
+        depot_ids: Optional[List[int]] = None,
         time_budget_s: Optional[float] = None,
         cct_params: Any = None,
         vsp_params: Any = None,
@@ -99,6 +100,11 @@ class OptimizerService:
     ) -> OptimizationResult:
         if not trips:
             raise NoProblemDataError("trips list is empty")
+
+        if depot_ids:
+            trips = [t for t in trips if t.depot_id is None or t.depot_id in depot_ids]
+            if not trips:
+                raise NoProblemDataError(f"Nenhuma viagem encontrada para os depots {depot_ids}")
 
         t0 = time.perf_counter()
         cct_params = self._normalize_rules(cct_params)

@@ -7,6 +7,7 @@ import OperationReportViewer from '../../../components/shared/OperationReportVie
 import KPITrendAnalytics from '../../../components/shared/KPITrendAnalytics';
 import CostBenefitAnalysis from '../../../components/shared/CostBenefitAnalysis';
 import FairnessHistogram from '../../../components/shared/FairnessHistogram';
+import DutyStatsPanel from '../../../components/shared/DutyStatsPanel';
 import { operationsApi } from '@/lib/api';
 
 interface TabPanelProps {
@@ -98,6 +99,8 @@ export default function ReportingPage() {
           <Tab label="Relatório de Operação" id="reporting-tab-0" />
           <Tab label="Tendências KPI" id="reporting-tab-1" />
           <Tab label="Análise Custo-Benefício" id="reporting-tab-2" />
+          <Tab label="Jornadas" id="reporting-tab-3" />
+          <Tab label="Equidade" id="reporting-tab-4" />
         </Tabs>
       </Box>
 
@@ -116,6 +119,12 @@ export default function ReportingPage() {
           </TabPanel>
           <TabPanel value={tabValue} index={2}>
             <CostBenefitAnalysis key={refreshKey} scheduleId={scheduleId} />
+          </TabPanel>
+          <TabPanel value={tabValue} index={3}>
+            <DutyStatsPanel key={refreshKey} scheduleId={scheduleId} />
+          </TabPanel>
+          <TabPanel value={tabValue} index={4}>
+            <FairnessHistogram key={refreshKey} scheduleId={scheduleId} />
           </TabPanel>
         </>
       )}

@@ -129,6 +129,7 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
     algorithm_str: str = payload.get("algorithm", "hybrid_pipeline")
     depot_id = payload.get("depot_id")
+    depot_ids = payload.get("depot_ids") or None
     time_budget_s = payload.get("time_budget_s")
     cct_params = payload.get("cct_params") or {}
     vsp_params = dict(payload.get("vsp_params") or {})
@@ -169,6 +170,7 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             vehicle_types=vehicle_types,
             algorithm=AlgorithmType(algorithm_str),
             depot_id=depot_id,
+            depot_ids=depot_ids,
             time_budget_s=time_budget_s,
             cct_params=cct_params,
             vsp_params=vsp_params,

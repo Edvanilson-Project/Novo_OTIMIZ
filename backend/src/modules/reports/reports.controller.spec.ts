@@ -47,10 +47,15 @@ describe('ReportsController', () => {
     expect(service.getOptimizationHistory).toHaveBeenCalledWith(5, 7, 2, 10);
   });
 
-  it('compare calls service with both run ids', async () => {
+  it('compare calls service with both run ids and companyId', async () => {
     const result = await controller.compare(1, 2);
-    expect(service.compareOptimizations).toHaveBeenCalledWith(1, 2);
+    expect(service.compareOptimizations).toHaveBeenCalledWith(1, 2, 5);
     expect(result).toMatchObject({ delta: { cost: -500 } });
+  });
+
+  it('compare throws BadRequestException when no company in context', () => {
+    tenantCtx.getCompanyId.mockReturnValue(null);
+    expect(() => controller.compare(1, 2)).toThrow(BadRequestException);
   });
 
   it('throws BadRequestException when no company in context', () => {

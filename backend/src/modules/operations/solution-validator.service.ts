@@ -1,5 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
 import { Logger } from '@nestjs/common';
+import { BlockAssignment } from '../database/entities/block-assignment.entity';
+import { DutyAssignment } from '../database/entities/duty-assignment.entity';
+import { Trip } from '../database/entities/trip.entity';
 
 /**
  * Serviço de validação independente de soluções
@@ -38,6 +43,15 @@ export interface ValidationResult {
 export class SolutionValidatorService {
   private readonly logger = new Logger(SolutionValidatorService.name);
   private readonly toleranceMinutes = 5;
+
+  constructor(
+    @InjectRepository(BlockAssignment)
+    private readonly blockRepo: Repository<BlockAssignment>,
+    @InjectRepository(DutyAssignment)
+    private readonly dutyRepo: Repository<DutyAssignment>,
+    @InjectRepository(Trip)
+    private readonly tripRepo: Repository<Trip>,
+  ) {}
 
   /**
    * Valida uma solução completa (blocos + jornadas)
@@ -189,14 +203,86 @@ export class SolutionValidatorService {
   }
 
   /**
-   * Valida posição de almoço obrigatório
+   * Verifica se jornadas longas têm folga suficiente para intervalo de almoço.
+   * Usa metadata.work_time e metadata.spread_time armazenados na DutyAssignment.
    */
   private checkMealBreakPosition(
     duties: any[],
     params: Record<string, any>,
   ): ValidationError[] {
-    // TODO: Implementar quando tivermos estrutura de events detalhada
-    return [];
+    const warnings: ValidationError[] = [];
+    const mealBreakMinutes = params.meal_break_minutes ?? params.mealBreakMinutes ?? 30;
+    const mealBreakThreshold = params.meal_break_threshold ?? 360; // 6h
+
+    for (const duty of duties) {
+      const meta = duty.metadata ?? duty;
+      const workTime: number = meta.work_time ?? meta.workTime ?? 0;
+      const spreadTime: number = meta.spread_time ?? meta.spreadTime ?? 0;
+
+      if (workTime <= mealBreakThreshold) continue;
+
+      const availableBreak = spreadTime - workTime;
+      if (availableBreak < mealBreakMinutes) {
+        warnings.push({
+          type: 'MEAL_BREAK_INSUFFICIENT',
+          severity: 'WARNING',
+          dutyId: duty.dutyId ?? duty.duty_id ?? duty.id,
+          detail: `Jornada de ${workTime}min (>${mealBreakThreshold}min) com apenas ${availableBreak}min de folga — abaixo dos ${mealBreakMinutes}min de intervalo de almoço`,
+          suggestedFix: 'Aumentar a folga entre viagens ou dividir a jornada',
+        });
+      }
+    }
+
+    return warnings;
+  }
+
+  /**
+   * Carrega blocos/jornadas/viagens do banco e valida o schedule salvo.
+   */
+  async validateScheduleById(scheduleId: number, companyId: number): Promise<ValidationResult> {
+    const [blocks, duties] = await Promise.all([
+      this.blockRepo.find({ where: { scheduleId, companyId }, order: { blockId: 'ASC' } }),
+      this.dutyRepo.find({ where: { scheduleId, companyId }, order: { dutyId: 'ASC' } }),
+    ]);
+
+    if (!blocks.length && !duties.length) {
+      throw new NotFoundException(`Schedule ${scheduleId} não encontrado ou sem dados para a empresa ${companyId}`);
+    }
+
+    const allTripIds = [
+      ...new Set([
+        ...blocks.flatMap((b) => b.tripIds ?? []),
+        ...duties.flatMap((d) => d.tripIds ?? []),
+      ]),
+    ];
+
+    const trips = allTripIds.length
+      ? await this.tripRepo.find({
+          where: { id: In(allTripIds) },
+          select: { id: true, startTime: true, endTime: true, duration: true, originId: true, destinationId: true },
+        })
+      : [];
+
+    // Normaliza para o formato que validate() espera
+    const blocksDto = blocks.map((b) => ({
+      blockId: b.blockId,
+      trips: (b.tripIds ?? []).map((id) => {
+        const t = trips.find((tr) => tr.id === id);
+        return t
+          ? { tripId: t.id, startTime: Number(t.startTime), endTime: Number(t.endTime) }
+          : { tripId: id };
+      }),
+      ...(b.metadata ?? {}),
+    }));
+
+    const dutiesDto = duties.map((d) => ({
+      dutyId: d.dutyId,
+      metadata: d.metadata ?? {},
+      ...(d.metadata ?? {}),
+    }));
+
+    const params = {}; // usa defaults do serviço
+    return this.validate(blocksDto, dutiesDto, trips.map((t) => ({ id: t.id, startTime: t.startTime, endTime: t.endTime })), params);
   }
 
   /**

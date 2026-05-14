@@ -1,36 +1,42 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { SolutionValidatorController } from './solution-validator.controller';
-import { SolutionValidatorService } from './solution-validator.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+const MOCK_RESULT = { valid: true, errorCount: 0, warningCount: 0, errors: [], warnings: [], stats: {} };
+
+function makeController(companyId: number | null) {
+  const service = {
+    validate: jest.fn().mockReturnValue(MOCK_RESULT),
+    validateScheduleById: jest.fn().mockResolvedValue(MOCK_RESULT),
+  };
+  const tenantCtx = { getCompanyId: jest.fn().mockReturnValue(companyId) };
+  const ctrl = new SolutionValidatorController(service as any, tenantCtx as any);
+  return { ctrl, service, tenantCtx };
+}
 
 describe('SolutionValidatorController', () => {
-  let controller: SolutionValidatorController;
-  let service: jest.Mocked<Partial<SolutionValidatorService>>;
-
-  beforeEach(async () => {
-    service = {
-      validate: jest.fn().mockReturnValue({ valid: true, errorCount: 0, errors: [], stats: {} }),
-    };
-
-    const module: TestingModule = await Test.createTestingModule({
-      controllers: [SolutionValidatorController],
-      providers: [{ provide: SolutionValidatorService, useValue: service }],
-    })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
-      .compile();
-
-    controller = module.get(SolutionValidatorController);
-  });
-
   it('validate calls service and returns result', () => {
+    const { ctrl, service } = makeController(7);
     const body = { blocks: [{ blockId: 1 }], duties: [], trips: [{ id: 1 }], params: {} };
-    const result = controller.validate(body);
+    const result = ctrl.validate(body);
     expect(service.validate).toHaveBeenCalledWith(body.blocks, body.duties, body.trips, body.params);
     expect(result).toMatchObject({ valid: true, errorCount: 0 });
   });
 
   it('validate with no params defaults to empty object', () => {
-    controller.validate({ blocks: [], duties: [], trips: [] });
+    const { ctrl, service } = makeController(7);
+    ctrl.validate({ blocks: [], duties: [], trips: [] });
     expect(service.validate).toHaveBeenCalledWith([], [], [], {});
+  });
+
+  it('validateSchedule calls validateScheduleById with scheduleId and companyId', async () => {
+    const { ctrl, service } = makeController(7);
+    const result = await ctrl.validateSchedule(42);
+    expect(service.validateScheduleById).toHaveBeenCalledWith(42, 7);
+    expect(result).toMatchObject({ valid: true });
+  });
+
+  it('validateSchedule throws ForbiddenException when no companyId in context', async () => {
+    const { ctrl } = makeController(null);
+    await expect(ctrl.validateSchedule(1)).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { OperationReportGeneratorService } from './operation-report-generator.service';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
+import { DutyAssignment } from '../../database/entities/duty-assignment.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
@@ -57,6 +58,8 @@ describe('OperationReportGeneratorService', () => {
   let blockRepo: any;
   let runRepo: any;
 
+  let dutyRepo: any;
+
   beforeEach(async () => {
     scheduleRepo = { findOne: jest.fn() };
     blockRepo = { find: jest.fn() };
@@ -65,6 +68,7 @@ describe('OperationReportGeneratorService', () => {
       find: jest.fn(),
       createQueryBuilder: jest.fn(),
     };
+    dutyRepo = { find: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,6 +76,7 @@ describe('OperationReportGeneratorService', () => {
         { provide: getRepositoryToken(Schedule), useValue: scheduleRepo },
         { provide: getRepositoryToken(BlockAssignment), useValue: blockRepo },
         { provide: getRepositoryToken(OptimizationRun), useValue: runRepo },
+        { provide: getRepositoryToken(DutyAssignment), useValue: dutyRepo },
       ],
     }).compile();
 
@@ -81,7 +86,7 @@ describe('OperationReportGeneratorService', () => {
   describe('generateReport', () => {
     it('throws when schedule is missing', async () => {
       scheduleRepo.findOne.mockResolvedValue(null);
-      await expect(service.generateReport(999)).rejects.toThrow();
+      await expect(service.generateReport(999, 16)).rejects.toThrow();
     });
 
     it('returns baseline-only report when no optimization run exists', async () => {
@@ -93,7 +98,7 @@ describe('OperationReportGeneratorService', () => {
         getOne: jest.fn().mockResolvedValue(null),
       });
 
-      const report = await service.generateReport(1);
+      const report = await service.generateReport(1, 16);
 
       expect(report.scheduleId).toBe(1);
       expect(report.scenarioComparison.optimized).toBeNull();
@@ -113,7 +118,7 @@ describe('OperationReportGeneratorService', () => {
         getOne: jest.fn().mockResolvedValue(completedRun()),
       });
 
-      const report = await service.generateReport(1);
+      const report = await service.generateReport(1, 16);
 
       expect(report.scenarioComparison.optimized).toBeTruthy();
       expect(report.scenarioComparison.optimized!.totalCost).toBe(4500);
@@ -142,7 +147,7 @@ describe('OperationReportGeneratorService', () => {
         getOne: jest.fn().mockResolvedValue(null),
       });
 
-      const report = await service.generateReport(1);
+      const report = await service.generateReport(1, 16);
 
       expect(report.metrics.unassignedTrips).toBe(2);
       expect(report.issues.some((i) => i.severity === 'critical')).toBe(true);
@@ -154,7 +159,7 @@ describe('OperationReportGeneratorService', () => {
       scheduleRepo.findOne.mockResolvedValue(baselineSchedule());
       runRepo.find.mockResolvedValue([]);
 
-      const out = await service.getHistoricalReports(1, 30);
+      const out = await service.getHistoricalReports(1, 16, 30);
 
       expect(out).toEqual([]);
     });
@@ -178,7 +183,7 @@ describe('OperationReportGeneratorService', () => {
       });
       runRepo.find.mockResolvedValue([day1Run1, day1Run2, day2Run]);
 
-      const out = await service.getHistoricalReports(1, 30);
+      const out = await service.getHistoricalReports(1, 16, 30);
 
       expect(out).toHaveLength(2);
       // Day 1: melhor é day1Run2 (4600 < 4800)
@@ -190,11 +195,48 @@ describe('OperationReportGeneratorService', () => {
     });
   });
 
+  describe('generatePDFReport', () => {
+    it('returns a Buffer that begins with PDF magic bytes', async () => {
+      scheduleRepo.findOne.mockResolvedValue(baselineSchedule());
+      runRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
+
+      const buf = await service.generatePDFReport(1, 16);
+
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect(buf.slice(0, 4).toString()).toBe('%PDF');
+    });
+  });
+
+  describe('generateExcelReport', () => {
+    it('returns a Buffer that begins with XLSX magic bytes (PK zip header)', async () => {
+      scheduleRepo.findOne.mockResolvedValue(baselineSchedule());
+      runRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
+
+      const buf = await service.generateExcelReport(1, 16);
+
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      // .xlsx is a ZIP — starts with PK\x03\x04
+      expect(buf[0]).toBe(0x50); // P
+      expect(buf[1]).toBe(0x4b); // K
+    });
+  });
+
   describe('compareReports', () => {
     it('returns null when no runs in window', async () => {
       runRepo.find.mockResolvedValue([]);
       const out = await service.compareReports(
         1,
+        16,
         new Date('2026-05-01'),
         new Date('2026-05-11'),
       );
@@ -211,6 +253,7 @@ describe('OperationReportGeneratorService', () => {
 
       const out = await service.compareReports(
         1,
+        16,
         new Date('2026-05-01'),
         new Date('2026-05-11'),
       );
@@ -222,6 +265,51 @@ describe('OperationReportGeneratorService', () => {
       expect(out!.bestDay.runId).toBe(32); // 4300 menor
       expect(out!.worstDay.runId).toBe(31); // 4700 maior
       expect(out!.costTrend).toBe(-200); // 4300 - 4500
+    });
+  });
+
+  describe('getDutyStats', () => {
+    const makeDuty = (dutyId: number, work_time: number, cost: number, overrides: any = {}) => ({
+      dutyId,
+      tripIds: [1, 2],
+      cost,
+      metadata: { work_time, spread_time: work_time + 30, overtime_minutes: 0, rest_violations: 0, shift_violations: 0, ...overrides },
+    });
+
+    it('throws NotFoundException when no duties exist', async () => {
+      dutyRepo.find.mockResolvedValue([]);
+      await expect(service.getDutyStats(1, 16)).rejects.toThrow();
+    });
+
+    it('returns correct summary for multiple duties', async () => {
+      dutyRepo.find.mockResolvedValue([
+        makeDuty(1, 300, 200),
+        makeDuty(2, 420, 280),
+        makeDuty(3, 480, 320),
+      ]);
+
+      const out = await service.getDutyStats(1, 16);
+
+      expect(out.totalDuties).toBe(3);
+      expect(out.duties).toHaveLength(3);
+      expect(out.summary.minWorkMinutes).toBe(300);
+      expect(out.summary.maxWorkMinutes).toBe(480);
+      expect(out.summary.avgWorkMinutes).toBeCloseTo(400, 0);
+      expect(out.summary.totalCost).toBeCloseTo(800, 0);
+      expect(out.summary.giniWorkTime).toBeGreaterThanOrEqual(0);
+      expect(out.summary.giniWorkTime).toBeLessThanOrEqual(1);
+    });
+
+    it('includes rest/shift violations in summary totals', async () => {
+      dutyRepo.find.mockResolvedValue([
+        makeDuty(1, 300, 100, { rest_violations: 2, shift_violations: 1 }),
+        makeDuty(2, 360, 120, { rest_violations: 0, shift_violations: 0 }),
+      ]);
+
+      const out = await service.getDutyStats(1, 16);
+
+      expect(out.summary.totalRestViolations).toBe(2);
+      expect(out.summary.totalShiftViolations).toBe(1);
     });
   });
 });

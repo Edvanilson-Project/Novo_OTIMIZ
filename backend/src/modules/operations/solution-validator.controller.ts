@@ -5,14 +5,19 @@ import {
   UseGuards,
   Param,
   ParseIntPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SolutionValidatorService } from './solution-validator.service';
+import { TenantContext } from '../../common/context/tenant-context';
 
 @Controller('audits')
 @UseGuards(JwtAuthGuard)
 export class SolutionValidatorController {
-  constructor(private readonly validatorService: SolutionValidatorService) {}
+  constructor(
+    private readonly validatorService: SolutionValidatorService,
+    private readonly tenantContext: TenantContext,
+  ) {}
 
   /**
    * POST /api/v1/audits/validate
@@ -62,10 +67,8 @@ export class SolutionValidatorController {
   async validateSchedule(
     @Param('scheduleId', ParseIntPipe) scheduleId: number,
   ) {
-    // TODO: Carregar resultado do banco e validar
-    return {
-      valid: false,
-      message: 'Not yet implemented - fetch from database first',
-    };
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new ForbiddenException('Empresa não identificada no contexto autenticado.');
+    return this.validatorService.validateScheduleById(scheduleId, companyId);
   }
 }

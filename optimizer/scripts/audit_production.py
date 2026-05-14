@@ -1,3 +1,4 @@
+import os
 import requests
 import json
 import time
@@ -6,8 +7,10 @@ import sys
 # OTIMIZ Production Audit Script
 # Final validation for World Class Deployment
 
-BASE_URL = "http://localhost:8000/api/v1"
-AUTH_KEY = "internal-key-123456"
+BASE_URL = os.environ.get("OPTIMIZER_BASE_URL", "http://localhost:8000/api/v1")
+AUTH_KEY = os.environ.get("INTERNAL_OPTIMIZER_KEY", "")
+if not AUTH_KEY:
+    sys.exit("ERROR: INTERNAL_OPTIMIZER_KEY env var is required")
 
 def print_banner(title):
     print("\n" + "="*60)

@@ -3,10 +3,41 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
+import { DutyAssignment } from '../../database/entities/duty-assignment.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
 } from '../../database/entities/optimization-run.entity';
+
+export interface DutyStat {
+  dutyId: number;
+  workMinutes: number;
+  spreadMinutes: number;
+  cost: number;
+  overtimeMinutes: number;
+  restViolations: number;
+  shiftViolations: number;
+  tripCount: number;
+}
+
+export interface DutyStatsReport {
+  scheduleId: number;
+  totalDuties: number;
+  duties: DutyStat[];
+  summary: {
+    avgWorkMinutes: number;
+    minWorkMinutes: number;
+    maxWorkMinutes: number;
+    p5WorkMinutes: number;
+    p95WorkMinutes: number;
+    giniWorkTime: number;
+    totalCost: number;
+    avgCost: number;
+    totalRestViolations: number;
+    totalShiftViolations: number;
+    totalOvertimeMinutes: number;
+  };
+}
 
 export interface ReportMetrics {
   totalTrips: number;
@@ -53,15 +84,17 @@ export class OperationReportGeneratorService {
     private blockRepo: Repository<BlockAssignment>,
     @InjectRepository(OptimizationRun)
     private runRepo: Repository<OptimizationRun>,
+    @InjectRepository(DutyAssignment)
+    private dutyRepo: Repository<DutyAssignment>,
   ) {}
 
   /**
    * Gera relatório para o schedule baseline + melhor run completed para esse baseline
    * (escolhe a de menor totalCost). Recomendações vêm de issues mensurados — não há números fabricados.
    */
-  async generateReport(scheduleId: number): Promise<OperationReport> {
+  async generateReport(scheduleId: number, companyId: number): Promise<OperationReport> {
     const schedule = await this.scheduleRepo.findOne({
-      where: { id: scheduleId },
+      where: { id: scheduleId, companyId },
       relations: ['blocks'],
     });
     if (!schedule) throw new NotFoundException(`Schedule ${scheduleId} not found`);
@@ -73,6 +106,7 @@ export class OperationReportGeneratorService {
     const bestRun = await this.runRepo
       .createQueryBuilder('run')
       .where('run.baselineScheduleId = :baselineId', { baselineId: scheduleId })
+      .andWhere('run.companyId = :companyId', { companyId })
       .andWhere('run.status = :status', { status: OptimizationRunStatus.COMPLETED })
       .orderBy(`(run.metrics->>'totalCost')::float`, 'ASC')
       .getOne();
@@ -121,12 +155,12 @@ export class OperationReportGeneratorService {
    * Histórico real: para cada DIA dentro da janela, traz a melhor run COMPLETED para o baseline.
    * Sem ruído sintético. Se um dia não teve otimização, ele não aparece no array.
    */
-  async getHistoricalReports(scheduleId: number, days: number = 30): Promise<OperationReport[]> {
+  async getHistoricalReports(scheduleId: number, companyId: number, days: number = 30): Promise<OperationReport[]> {
     const start = new Date();
     start.setDate(start.getDate() - days);
 
     const schedule = await this.scheduleRepo.findOne({
-      where: { id: scheduleId },
+      where: { id: scheduleId, companyId },
       relations: ['blocks'],
     });
     if (!schedule) return [];
@@ -135,6 +169,7 @@ export class OperationReportGeneratorService {
     const runs = await this.runRepo.find({
       where: {
         baselineScheduleId: scheduleId,
+        companyId,
         status: OptimizationRunStatus.COMPLETED,
         completedAt: Between(start, new Date()),
       },
@@ -188,10 +223,11 @@ export class OperationReportGeneratorService {
   /**
    * Estatísticas REAIS sobre runs no intervalo. Retorna null se não há dados — sem fabricar.
    */
-  async compareReports(scheduleId: number, startDate: Date, endDate: Date) {
+  async compareReports(scheduleId: number, companyId: number, startDate: Date, endDate: Date) {
     const runs = await this.runRepo.find({
       where: {
         baselineScheduleId: scheduleId,
+        companyId,
         status: OptimizationRunStatus.COMPLETED,
         completedAt: Between(startDate, endDate),
       },
@@ -202,10 +238,18 @@ export class OperationReportGeneratorService {
     const costs = runs.map((r) => Number(r.metrics?.totalCost ?? 0));
     const vehicles = runs.map((r) => Number(r.metrics?.numVehicles ?? 0));
     const violations = runs.map((r) => Number(r.metrics?.cctViolations ?? 0));
+    const utilizations = runs.map((r) => {
+      const total = Number(r.metrics?.totalTrips ?? 0);
+      const unassigned = Number(r.metrics?.unassignedTrips ?? 0);
+      const assigned = total - unassigned;
+      const v = Number(r.metrics?.numVehicles ?? 0);
+      return v > 0 ? Math.min(100, (assigned / v) * 20) : 0;
+    });
 
     const avgCost = costs.reduce((a, b) => a + b, 0) / costs.length;
     const avgVehicles = vehicles.reduce((a, b) => a + b, 0) / vehicles.length;
     const avgViolations = violations.reduce((a, b) => a + b, 0) / violations.length;
+    const avgUtilization = utilizations.reduce((a, b) => a + b, 0) / utilizations.length;
     const costTrend = costs.length >= 2 ? costs[costs.length - 1] - costs[0] : 0;
 
     const bestRunIdx = costs.indexOf(Math.min(...costs));
@@ -219,7 +263,7 @@ export class OperationReportGeneratorService {
       averageCost: avgCost,
       averageVehicles: avgVehicles,
       averageViolations: avgViolations,
-      averageUtilization: null, // derivada — não medida diretamente nas runs (TODO computar a partir de trips/vehicle)
+      averageUtilization: Math.round(avgUtilization * 100) / 100,
       costTrend,
       bestDay: {
         runId: bestRun.id,
@@ -236,14 +280,176 @@ export class OperationReportGeneratorService {
     };
   }
 
-  async generatePDFReport(scheduleId: number): Promise<Buffer> {
-    const report = await this.generateReport(scheduleId);
-    return Buffer.from(JSON.stringify(report, null, 2));
+  async getDutyStats(scheduleId: number, companyId: number): Promise<DutyStatsReport> {
+    const duties = await this.dutyRepo.find({
+      where: { scheduleId, companyId },
+      order: { dutyId: 'ASC' },
+    });
+
+    if (!duties.length) {
+      throw new NotFoundException(`Nenhuma jornada encontrada para o schedule ${scheduleId}`);
+    }
+
+    const stats: DutyStat[] = duties.map((d) => {
+      const m = (d.metadata ?? {}) as Record<string, any>;
+      return {
+        dutyId: d.dutyId,
+        workMinutes: Number(m.work_time ?? 0),
+        spreadMinutes: Number(m.spread_time ?? 0),
+        cost: d.cost ?? 0,
+        overtimeMinutes: Number(m.overtime_minutes ?? 0),
+        restViolations: Number(m.rest_violations ?? 0),
+        shiftViolations: Number(m.shift_violations ?? 0),
+        tripCount: Array.isArray(d.tripIds) ? d.tripIds.length : 0,
+      };
+    });
+
+    const workValues = stats.map((s) => s.workMinutes).sort((a, b) => a - b);
+    const n = workValues.length;
+    const avg = n > 0 ? workValues.reduce((a, b) => a + b, 0) / n : 0;
+    const p5 = workValues[Math.floor(n * 0.05)] ?? workValues[0] ?? 0;
+    const p95 = workValues[Math.floor(n * 0.95)] ?? workValues[n - 1] ?? 0;
+
+    // Gini coefficient on sorted work times
+    let gini = 0;
+    if (n > 1 && avg > 0) {
+      let sumAbs = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          sumAbs += Math.abs(workValues[i] - workValues[j]);
+        }
+      }
+      gini = sumAbs / (2 * n * n * avg);
+    }
+
+    return {
+      scheduleId,
+      totalDuties: n,
+      duties: stats,
+      summary: {
+        avgWorkMinutes: Math.round(avg * 10) / 10,
+        minWorkMinutes: workValues[0] ?? 0,
+        maxWorkMinutes: workValues[n - 1] ?? 0,
+        p5WorkMinutes: p5,
+        p95WorkMinutes: p95,
+        giniWorkTime: Math.round(gini * 1000) / 1000,
+        totalCost: stats.reduce((s, d) => s + d.cost, 0),
+        avgCost: n > 0 ? stats.reduce((s, d) => s + d.cost, 0) / n : 0,
+        totalRestViolations: stats.reduce((s, d) => s + d.restViolations, 0),
+        totalShiftViolations: stats.reduce((s, d) => s + d.shiftViolations, 0),
+        totalOvertimeMinutes: stats.reduce((s, d) => s + d.overtimeMinutes, 0),
+      },
+    };
   }
 
-  async generateExcelReport(scheduleId: number): Promise<Buffer> {
-    const report = await this.generateReport(scheduleId);
-    return Buffer.from(JSON.stringify(report, null, 2));
+  async generatePDFReport(scheduleId: number, companyId: number): Promise<Buffer> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const PDFDocument = require('pdfkit') as typeof import('pdfkit');
+    const report = await this.generateReport(scheduleId, companyId);
+    const m = report.metrics;
+
+    return new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      doc.fontSize(18).font('Helvetica-Bold').text('Relatório Operacional', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(11).font('Helvetica').text(
+        `Schedule #${report.scheduleId}  •  Gerado em ${new Date(report.generatedAt).toLocaleString('pt-BR')}`,
+        { align: 'center' },
+      );
+      doc.moveDown(1);
+
+      doc.fontSize(13).font('Helvetica-Bold').text('Métricas Gerais');
+      doc.moveDown(0.3);
+      doc.fontSize(10).font('Helvetica');
+      const rows: [string, string | number][] = [
+        ['Total de Viagens', m.totalTrips],
+        ['Viagens Alocadas', m.assignedTrips],
+        ['Viagens Não Alocadas', m.unassignedTrips],
+        ['Custo Total', `R$ ${m.totalCost.toFixed(2)}`],
+        ['Custo por Viagem', `R$ ${m.costPerTrip.toFixed(2)}`],
+        ['Veículos Utilizados', m.vehiclesUsed],
+        ['Utilização Média', `${m.averageUtilization.toFixed(1)}%`],
+      ];
+      for (const [label, value] of rows) {
+        doc.text(`${label}: ${value}`);
+      }
+      doc.moveDown(1);
+
+      if (report.scenarioComparison.optimized) {
+        doc.fontSize(13).font('Helvetica-Bold').text('Comparação com Melhor Run');
+        doc.moveDown(0.3);
+        doc.fontSize(10).font('Helvetica');
+        doc.text(`Economia: R$ ${report.scenarioComparison.savings.toFixed(2)} (${report.scenarioComparison.savingsPercent.toFixed(1)}%)`);
+        doc.text(`Algoritmo: ${report.algorithm ?? '-'}`);
+        doc.moveDown(1);
+      }
+
+      if (report.issues.length > 0) {
+        doc.fontSize(13).font('Helvetica-Bold').text('Alertas');
+        doc.moveDown(0.3);
+        doc.fontSize(10).font('Helvetica');
+        for (const issue of report.issues) {
+          doc.text(`[${issue.severity.toUpperCase()}] ${issue.message}`);
+        }
+        doc.moveDown(1);
+      }
+
+      if (report.recommendations.length > 0) {
+        doc.fontSize(13).font('Helvetica-Bold').text('Recomendações');
+        doc.moveDown(0.3);
+        doc.fontSize(10).font('Helvetica');
+        for (const rec of report.recommendations) {
+          doc.text(`• ${rec}`);
+        }
+      }
+
+      doc.end();
+    });
+  }
+
+  async generateExcelReport(scheduleId: number, companyId: number): Promise<Buffer> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const XLSX = require('xlsx') as typeof import('xlsx');
+    const report = await this.generateReport(scheduleId, companyId);
+    const m = report.metrics;
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1 — Métricas
+    const metricsData = [
+      ['Métrica', 'Valor'],
+      ['Schedule ID', report.scheduleId],
+      ['Gerado em', new Date(report.generatedAt).toISOString()],
+      ['Total de Viagens', m.totalTrips],
+      ['Viagens Alocadas', m.assignedTrips],
+      ['Viagens Não Alocadas', m.unassignedTrips],
+      ['Custo Total (R$)', m.totalCost],
+      ['Custo por Viagem (R$)', m.costPerTrip],
+      ['Veículos Utilizados', m.vehiclesUsed],
+      ['Utilização Média (%)', m.averageUtilization],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metricsData), 'Métricas');
+
+    // Sheet 2 — Alertas
+    const issuesData: (string | number)[][] = [['Severidade', 'Mensagem']];
+    for (const issue of report.issues) {
+      issuesData.push([issue.severity.toUpperCase(), issue.message]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(issuesData), 'Alertas');
+
+    // Sheet 3 — Recomendações
+    const recsData: (string | number)[][] = [['Recomendação']];
+    for (const rec of report.recommendations) {
+      recsData.push([rec]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(recsData), 'Recomendações');
+
+    return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
 
   private metricsFromSchedule(schedule: Schedule, blocks: BlockAssignment[]): ReportMetrics {

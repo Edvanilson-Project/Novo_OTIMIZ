@@ -124,9 +124,18 @@ class Settings(BaseSettings):
 
     # ── Segurança Interna (Security Bridge) ──────────────────────────────────
     internal_security_key: str = Field(
-        default="internal-key-123456",
+        default="",
         validation_alias=AliasChoices("INTERNAL_OPTIMIZER_KEY", "internal_security_key"),
     )
+
+    @field_validator("internal_security_key", mode="after")
+    @classmethod
+    def reject_known_default_key(cls, v: str) -> str:
+        if not v or v == "internal-key-123456":
+            raise ValueError(
+                "INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)"
+            )
+        return v
 
     @field_validator("debug", mode="before")
     @classmethod

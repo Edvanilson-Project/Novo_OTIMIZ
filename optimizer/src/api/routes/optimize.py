@@ -139,6 +139,7 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             "vehicle_types": [v.model_dump(mode="json") for v in body.vehicle_types],
             "algorithm": body.algorithm.value if hasattr(body.algorithm, "value") else str(body.algorithm),
             "depot_id": body.depot_id,
+            "depot_ids": body.depot_ids,
             "time_budget_s": body.time_budget_s,
             "line_id": body.line_id,
             "company_id": body.company_id,

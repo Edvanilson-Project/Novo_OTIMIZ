@@ -49,7 +49,11 @@ export class OptimizationService implements OnModuleInit {
     private configService: ConfigService,
     private tenantContext: TenantContext,
   ) {
-    this.INTERNAL_KEY = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY') || 'internal-key-123456';
+    const key = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY');
+    if (!key || key === 'internal-key-123456') {
+      throw new Error('INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)');
+    }
+    this.INTERNAL_KEY = key;
   }
 
   async onModuleInit() {
@@ -91,6 +95,7 @@ export class OptimizationService implements OnModuleInit {
       vspParamsOverride?: Record<string, any>;
       cctParamsOverride?: Record<string, any>;
       skipTenantLock?: boolean;
+      depotIds?: number[];
     },
   ) {
     // 0. Tenant Lock: Verificar se já existe uma otimização em andamento.
@@ -247,6 +252,7 @@ export class OptimizationService implements OnModuleInit {
         vsp_params: vspParams,
         time_budget_s: options?.optimizationParamsOverride?.time_budget_s ?? params?.time_budget_s ?? null,
         algorithm: algorithm || params?.algorithm_preference || 'hybrid_pipeline',
+        depot_ids: options?.depotIds?.length ? options.depotIds : null,
         company_id: companyId,
         run_id: schedule.id,
         request_metadata: {

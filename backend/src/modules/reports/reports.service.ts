@@ -122,10 +122,10 @@ export class ReportsService {
     return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
-  async compareOptimizations(runId1: number, runId2: number) {
+  async compareOptimizations(runId1: number, runId2: number, companyId: number) {
     const [run1, run2] = await Promise.all([
-      this.scheduleRepo.findOne({ where: { id: runId1 } }),
-      this.scheduleRepo.findOne({ where: { id: runId2 } }),
+      this.scheduleRepo.findOne({ where: { id: runId1, companyId } }),
+      this.scheduleRepo.findOne({ where: { id: runId2, companyId } }),
     ]);
 
     if (!run1) throw new NotFoundException(`Schedule #${runId1} não encontrado`);

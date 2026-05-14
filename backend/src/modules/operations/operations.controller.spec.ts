@@ -30,6 +30,7 @@ describe('OperationsController', () => {
       16,
       'hybrid_pipeline',
       'strict',
+      { depotIds: undefined },
     );
   });
 
@@ -61,6 +62,7 @@ describe('OperationsController', () => {
       16,
       'hybrid_pipeline',
       'optimized',
+      { depotIds: undefined },
     );
   });
 

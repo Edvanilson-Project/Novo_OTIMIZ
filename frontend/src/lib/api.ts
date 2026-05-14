@@ -126,7 +126,8 @@ export const operationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
   getLatestSchedule: () => apiClient.get('/operations/latest-schedule').then((r) => r.data),
-  optimize: (data?: object) => apiClient.post('/operations/optimize', data ?? {}).then((r) => r.data),
+  optimize: (data?: { algorithm?: string; operational_quality_mode?: string; depot_ids?: number[] }) =>
+    apiClient.post('/operations/optimize', data ?? {}).then((r) => r.data),
   reassignTrip: (data: object) => apiClient.patch('/operations/reassign-trip', data).then((r) => r.data),
   evaluateDelta: (data: object) => apiClient.post('/operations/evaluate-delta', data).then((r) => r.data),
   evaluateBaseline: (data: object) => apiClient.post('/operations/evaluate-baseline', data).then((r) => r.data),
@@ -181,6 +182,15 @@ export const customReportsApi = {
 export const auditApi = {
   find: (params?: { entity?: string; days?: number; page?: number; limit?: number }) =>
     apiClient.get('/audit', { params }).then((r) => r.data),
+  validateSchedule: (scheduleId: number) =>
+    apiClient.post(`/audits/${scheduleId}/validate`).then((r) => r.data as {
+      valid: boolean;
+      errorCount: number;
+      warningCount: number;
+      errors: Array<{ type: string; severity: string; detail: string; dutyId?: number; vehicleId?: number; suggestedFix?: string }>;
+      warnings: Array<{ type: string; severity: string; detail: string; dutyId?: number; suggestedFix?: string }>;
+      stats: { totalTrips: number; allocatedTrips: number; unallocatedTrips: number; allocationPercentage: number; totalVehicles: number; totalDuties: number; totalOperatorHours: number; avgDutyHours: number };
+    }),
 };
 
 // ─── What-if (avaliação de cenários) ─────────────────────────────────────────
@@ -222,6 +232,8 @@ export const operationReportingApi = {
     apiClient.get(`/operations/reporting/historical/${scheduleId}`, { params: { days } }).then((r) => r.data),
   compare: (scheduleId: ID, compareWith?: ID) =>
     apiClient.get(`/operations/reporting/compare/${scheduleId}`, { params: { compareWith } }).then((r) => r.data),
+  getDutyStats: (scheduleId: ID) =>
+    apiClient.get(`/operations/reporting/duties/${scheduleId}`).then((r) => r.data),
   exportPdfUrl: (scheduleId: ID) => `/api/operations/reporting/export-pdf/${scheduleId}`,
   exportExcelUrl: (scheduleId: ID) => `/api/operations/reporting/export-excel/${scheduleId}`,
 };

@@ -35,7 +35,7 @@ export class ReportsController {
     @Query('run1', ParseIntPipe) run1: number,
     @Query('run2', ParseIntPipe) run2: number,
   ) {
-    return this.reportsService.compareOptimizations(run1, run2);
+    return this.reportsService.compareOptimizations(run1, run2, this._requireCompany());
   }
 
   private _requireCompany(): number {
