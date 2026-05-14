@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User } from '../database/entities/user.entity';
+import { User, UserRole } from '../database/entities/user.entity';
 import { TenantContext } from '../../common/context/tenant-context';
+
+const ALLOWED_ROLES = Object.values(UserRole);
 
 @Injectable()
 export class UsersService {
@@ -41,12 +43,15 @@ export class UsersService {
     const exists = await this.repo.findOne({ where: { email: dto.email, companyId } });
     if (exists) throw new ConflictException('Já existe um usuário com este e-mail nesta empresa');
 
+    if (dto.role !== undefined && !ALLOWED_ROLES.includes(dto.role)) {
+      throw new UnprocessableEntityException(`Role inválida: ${dto.role}`);
+    }
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, 10) : '';
     const entity = this.repo.create({
       name: dto.name,
       email: dto.email,
       passwordHash,
-      role: dto.role ?? 'operator',
+      role: dto.role ?? UserRole.OPERATOR,
       companyId,
       isActive: dto.status === 'inactive' ? false : true,
     });
@@ -61,7 +66,12 @@ export class UsersService {
     if (dto.name !== undefined) user.name = dto.name;
     if (dto.email !== undefined) user.email = dto.email;
     if (dto.password) user.passwordHash = await bcrypt.hash(dto.password, 10);
-    if (dto.role !== undefined) user.role = dto.role;
+    if (dto.role !== undefined) {
+      if (!ALLOWED_ROLES.includes(dto.role)) {
+        throw new UnprocessableEntityException(`Role inválida: ${dto.role}`);
+      }
+      user.role = dto.role;
+    }
     if (dto.status !== undefined) user.isActive = dto.status !== 'inactive';
     return this.repo.save(user);
   }

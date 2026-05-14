@@ -21,20 +21,17 @@ export class TenantMiddleware implements NestMiddleware {
 
     if (token) {
       try {
-        const payload = this.jwtService.decode(token) as any;
+        // verify() valida a assinatura — decode() não valida e permitiria forjar companyId
+        const secret = process.env.JWT_SECRET;
+        const payload = secret
+          ? (this.jwtService.verify(token, { secret }) as any)
+          : null;
         if (payload && payload.companyId) {
           companyId = payload.companyId;
         }
-      } catch (err) {
-        // Token inválido, mas o middleware segue para que o AuthGuard trate as permissões
+      } catch {
+        // Token inválido/expirado — JwtAuthGuard rejeitará na camada de autorização
       }
-    }
-
-    // 2. Fallback para Header — habilitado apenas em testes de integração ou via flag explícita
-    //    (em produção sem JWT, JwtAuthGuard rejeitará a requisição mesmo se chegarmos aqui)
-    if (!companyId && process.env.NODE_ENV !== 'production') {
-      const companyIdStr = req.headers['x-company-id'] as string;
-      companyId = companyIdStr ? parseInt(companyIdStr, 10) : undefined;
     }
 
     // 3. Bypass dev: SOMENTE quando NODE_ENV=development, request veio de loopback (localhost)

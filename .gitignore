@@ -61,3 +61,7 @@ Thumbs.db
 .aider*
 .agents/
 skills-lock.json
+
+# Scripts de geração de token com segredos hardcoded
+generate_token*.js
+gen_token*.py
