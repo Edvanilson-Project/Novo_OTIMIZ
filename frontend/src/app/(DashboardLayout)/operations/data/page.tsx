@@ -17,7 +17,7 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import ParentCard from "@/app/components/shared/ParentCard";
-import { operationsApi, linesApi, terminalsApi } from "@/lib/api";
+import { operationsApi, linesApi, terminalsApi, gtfsApi } from "@/lib/api";
 import { minToHHMM } from "@/lib/format";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -106,6 +106,7 @@ export default function OperationsDataPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [gtfsUploading, setGtfsUploading] = useState(false);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
@@ -237,6 +238,29 @@ export default function OperationsDataPage() {
     if (!tripForm.returnStartTime || !tripForm.returnEndTime) return 0;
     return e >= s ? e - s : 1440 + e - s;
   }, [tripForm.returnStartTime, tripForm.returnEndTime]);
+
+  // ─── GTFS Import ─────────────────────────────────────────────────────────
+  const handleGtfsImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setGtfsUploading(true);
+    try {
+      const result = await gtfsApi.import(file);
+      const { imported, skipped, errors } = result;
+      const msg = `GTFS importado: ${imported.terminals} terminais, ${imported.lines} linhas, ${imported.trips} viagens` +
+        (skipped > 0 ? ` (${skipped} ignorados)` : '');
+      notify(msg, errors.length > 0 ? "warning" : "success");
+      if (errors.length > 0) console.warn('GTFS import errors:', errors);
+      fetchData();
+      fetchReferenceData();
+    } catch (error: any) {
+      const msg = error?.response?.data?.message || "Erro ao importar GTFS.";
+      notify(msg, "error");
+    } finally {
+      setGtfsUploading(false);
+      event.target.value = "";
+    }
+  };
 
   // ─── Upload ───────────────────────────────────────────────────────────────
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -641,6 +665,16 @@ export default function OperationsDataPage() {
                     <Button variant="outlined" startIcon={<IconPlus size={18} />} onClick={openCreateDriver} size="small">
                       Novo Motorista
                     </Button>
+                  )}
+                  {activeTab === 0 && (
+                    <Tooltip title="Importar arquivo GTFS (.zip) — cria terminais, linhas e viagens automaticamente">
+                      <Button variant="outlined" color="info" component="label"
+                        startIcon={gtfsUploading ? <CircularProgress size={18} color="inherit" /> : <IconUpload size={18} />}
+                        disabled={gtfsUploading} size="small">
+                        {gtfsUploading ? "Importando..." : "Importar GTFS"}
+                        <input type="file" hidden accept=".zip" onChange={handleGtfsImport} />
+                      </Button>
+                    </Tooltip>
                   )}
                   <Tooltip title="Baixar modelo de planilha para importação (CSV/Excel)">
                     <Button variant="outlined" color="secondary" startIcon={<IconDownload size={18} />}

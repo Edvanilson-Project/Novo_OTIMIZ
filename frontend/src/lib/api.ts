@@ -249,3 +249,13 @@ export const scenariosApi = {
   replayByFingerprint: (fingerprint: string) =>
     apiClient.post(`/operations/optimization-advanced/replay/${fingerprint}`).then((r) => r.data),
 };
+
+export const gtfsApi = {
+  import: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return apiClient.post('/gtfs/import', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data as { imported: { terminals: number; lines: number; trips: number }; skipped: number; errors: string[] });
+  },
+};

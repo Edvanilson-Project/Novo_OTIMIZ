@@ -32,6 +32,7 @@ import { LinesModule } from './modules/lines/lines.module';
 import { TerminalsModule } from './modules/terminals/terminals.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { CustomReportsModule } from './modules/custom-reports/custom-reports.module';
+import { GtfsModule } from './modules/gtfs/gtfs.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { Line } from './modules/database/entities/line.entity';
 import { Terminal } from './modules/database/entities/terminal.entity';
@@ -78,6 +79,7 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
     ReportsModule,
     CustomReportsModule,
     AuditModule,
+    GtfsModule,
     JwtModule.register({}),
     // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
     // (/optimize). Throttles podem ser sobrescritos por endpoint via @Throttle decorator.
