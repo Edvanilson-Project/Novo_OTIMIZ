@@ -171,11 +171,37 @@ def dispatch_algorithm(
 
     `csp_factory` e `set_covering_factory` são injetados pelo OptimizerService
     porque eles dependem de seu estado (evaluator, validator).
+
+    COMPORTAMENTO MULTI-DEPOT:
+      - `same_depot_required=True` é suportado em todos os algoritmos como filtro
+        hard: trips de depots diferentes nunca são agrupadas no mesmo bloco.
+      - Otimização de custo entre garagens (pull-out/pull-in multi-depot) é
+        exclusiva do MCNF. Para redes com múltiplas garagens e requisito de
+        minimizar deadhead entre elas, use AlgorithmType.MCNF.
+      - Algoritmos greedy, SA, tabu, genetic tratam depot_id como filtro único;
+        trips com depot_id diferente do bloco são descartadas (when same_depot_required=True).
     """
     # Unifica parâmetros dinâmicos de otimização na base do VSP e CCT
     if optimization_params:
         vsp_params.update(optimization_params)
         cct_params.update(optimization_params)
+
+    # Guardrail multi-depot: se há trips de depots distintos e same_depot_required=True
+    # com algoritmo não-MCNF, alertar que custo cross-depot não é otimizado.
+    if vsp_params.get("same_depot_required") and algorithm not in (
+        AlgorithmType.MCNF,
+        AlgorithmType.HYBRID_PIPELINE,
+        AlgorithmType.JOINT_SOLVER,
+    ):
+        unique_depots = {t.depot_id for t in trips if t.depot_id is not None}
+        if len(unique_depots) > 1:
+            logger.warning(
+                "[AlgorithmDispatcher] MULTI_DEPOT_LIMITED: %d depots distintos detectados "
+                "com algorithm=%s. same_depot_required aplicado como filtro hard. "
+                "Para otimização de custo entre garagens use algorithm=mcnf.",
+                len(unique_depots),
+                algorithm.value if hasattr(algorithm, "value") else algorithm,
+            )
 
     logger.info(
         "[AlgorithmDispatcher] algorithm=%s trips=%d budget=%ss",
