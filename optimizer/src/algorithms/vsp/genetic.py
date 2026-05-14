@@ -35,7 +35,8 @@ from ..utils import (
     quick_cost_sorted,
     quick_cost_from_trips,
     sort_block_trips,
-    is_connection_feasible
+    is_connection_feasible,
+    select_vehicle_type,
 )
 from .greedy import GreedyVSP, build_preferred_pairs
 
@@ -65,8 +66,10 @@ def _blocks_from_chromosome(
         block_trips = [trip_map[tid] for tid in seq if tid in trip_map]
         if block_trips:
             b = Block(id=start_id + i, trips=block_trips)
-            if vehicle_types:
-                b.vehicle_type_id = vehicle_types[0].id
+            _depot = block_trips[0].depot_id if block_trips else None
+            _vt = select_vehicle_type(vehicle_types, _depot)
+            if _vt:
+                b.vehicle_type_id = _vt.id
             blocks.append(b)
     return blocks
 

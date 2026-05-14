@@ -12,10 +12,38 @@ from __future__ import annotations
 from typing import Any, Dict, List, Tuple, Optional
 from collections import OrderedDict
 
-from ..domain.models import Block, Trip
+from ..domain.models import Block, Trip, VehicleType
 
 _EDGE_FEASIBILITY_CACHE: OrderedDict[Tuple[Any, ...], bool] = OrderedDict()
 _FEASIBILITY_CACHE: OrderedDict[Tuple[Any, ...], bool] = OrderedDict()
+
+
+def select_vehicle_type(
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int] = None,
+) -> Optional[VehicleType]:
+    """Seleciona o tipo de veículo mais adequado para um bloco.
+
+    Critérios (em ordem):
+    1. Se depot_id fornecido, prefere tipos cujo depot_id coincide.
+    2. Entre candidatos, escolhe o de menor fixed_cost.
+    3. Fallback: primeiro da lista (comportamento anterior).
+
+    Retorna None se a lista estiver vazia.
+    """
+    if not vehicle_types:
+        return None
+    if len(vehicle_types) == 1:
+        return vehicle_types[0]
+
+    # Candidatos compatíveis com o depot, ou todos se sem restrição de depot
+    if depot_id is not None:
+        depot_match = [v for v in vehicle_types if v.depot_id is None or v.depot_id == depot_id]
+        candidates = depot_match if depot_match else vehicle_types
+    else:
+        candidates = vehicle_types
+
+    return min(candidates, key=lambda v: (v.fixed_cost, v.id))
 
 
 def clear_feasibility_caches():

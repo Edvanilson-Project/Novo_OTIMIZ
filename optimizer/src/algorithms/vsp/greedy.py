@@ -18,7 +18,7 @@ _log = logging.getLogger(__name__)
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
-from ..utils import is_connection_feasible
+from ..utils import is_connection_feasible, select_vehicle_type
 
 settings = get_settings()
 
@@ -237,7 +237,9 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         charger_events: List[Tuple[int, int]] = []
         warnings: List[str] = []
 
-        vehicle = vehicle_types[0] if vehicle_types else None
+        # Tipo de veículo padrão (fallback para lógica de extensão de blocos existentes).
+        # Novos blocos usam select_vehicle_type(vehicle_types, depot_id) por depot.
+        vehicle = select_vehicle_type(vehicle_types)
         fixed_cost = float(
             self._p(
                 "fixed_vehicle_activation_cost",
@@ -648,26 +650,34 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                         warnings.append(f"FLEET_LIMIT_EXCEEDED max_vehicles={max_vehicles} T{trip.id}")
                         continue
                 else:
+                    blk_depot = trip.depot_id if trip.depot_id is not None else depot_id
+                    blk_vehicle = select_vehicle_type(vehicle_types, blk_depot)
+                    blk_fixed_cost = float(
+                        self._p(
+                            "fixed_vehicle_activation_cost",
+                            blk_vehicle.fixed_cost if blk_vehicle else settings.default_vehicle_fixed_cost,
+                        )
+                    )
                     blk = Block(id=self._next_block_id(), trips=[trip])
-                    if vehicle:
-                        blk.vehicle_type_id = vehicle.id
+                    if blk_vehicle:
+                        blk.vehicle_type_id = blk_vehicle.id
                     blk.meta.update(
                         {
-                            "start_depot_id": trip.depot_id if trip.depot_id is not None else depot_id,
-                            "end_depot_id": trip.depot_id if trip.depot_id is not None else depot_id,
-                            "activation_cost": fixed_cost,
+                            "start_depot_id": blk_depot,
+                            "end_depot_id": blk_depot,
+                            "activation_cost": blk_fixed_cost,
                             "connection_cost": 0.0,
                             "deadhead_minutes": 0,
                             "idle_minutes": 0,
-                            "energy_kwh": self._energy_need(trip, vehicle),
+                            "energy_kwh": self._energy_need(trip, blk_vehicle),
                             "pairing_score": 0.0,
                             "paired_connections_followed": 0,
                             "pair_break_connections": 0,
                         }
                     )
-                    if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
-                        blk.meta["soc_kwh"] = vehicle.battery_capacity_kwh - self._energy_need(trip, vehicle)
-                        if blk.meta["soc_kwh"] < vehicle.minimum_soc * vehicle.battery_capacity_kwh:
+                    if blk_vehicle and blk_vehicle.is_electric and blk_vehicle.battery_capacity_kwh > 0:
+                        blk.meta["soc_kwh"] = blk_vehicle.battery_capacity_kwh - self._energy_need(trip, blk_vehicle)
+                        if blk.meta["soc_kwh"] < blk_vehicle.minimum_soc * blk_vehicle.battery_capacity_kwh:
                             unassigned_trips.append(trip)
                             warnings.append(f"EV_SOC_INSUFFICIENT T{trip.id}")
                             continue

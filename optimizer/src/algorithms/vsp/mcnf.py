@@ -29,7 +29,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
-from ..utils import is_connection_feasible
+from ..utils import is_connection_feasible, select_vehicle_type
 from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
@@ -175,10 +175,12 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     filtered_trips = [t for t in block.trips if t.id not in assigned_trip_ids]
                     if not filtered_trips:
                         continue
+                    _depot = filtered_trips[0].depot_id if filtered_trips else None
+                    _vt = select_vehicle_type(vehicle_types, _depot)
                     block = Block(
                         id=block_id_counter,
                         trips=filtered_trips,
-                        vehicle_type_id=vehicle_types[0].id if vehicle_types else None,
+                        vehicle_type_id=_vt.id if _vt else None,
                     )
                     if block.trips:
                         block_id_counter += 1
@@ -240,7 +242,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         os blocos aos depots respeitando a capacidade. Se um depot exceder a capacidade,
         um aviso é gerado mas a otimalidade global do emparelhamento é mantida.
         """
-        vehicle = vehicle_types[0] if vehicle_types else None
+        vehicle = select_vehicle_type(vehicle_types)
         fixed_cost = float(self._p(
             "fixed_vehicle_activation_cost",
             vehicle.fixed_cost if vehicle else settings.default_vehicle_fixed_cost

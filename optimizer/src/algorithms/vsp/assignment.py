@@ -52,7 +52,7 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
-from ..utils import is_connection_feasible
+from ..utils import is_connection_feasible, select_vehicle_type
 from .greedy import build_preferred_pairs, pairing_stats
 
 _log = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         N = len(trips)
         _log.info(f"AssignmentVSP iniciado para {N} viagens (sparse N×N matching)")
 
-        vehicle = vehicle_types[0] if vehicle_types else None
+        vehicle = select_vehicle_type(vehicle_types, depot_id)
         fixed_cost = float(self._p(
             "fixed_vehicle_activation_cost",
             vehicle.fixed_cost if vehicle else settings.default_vehicle_fixed_cost,
