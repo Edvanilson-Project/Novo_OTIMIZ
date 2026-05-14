@@ -6,6 +6,7 @@ if (typeof (globalThis as any).crypto === 'undefined') {
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import type { Response } from 'express';
@@ -36,6 +37,30 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api/v1');
+
+  // Swagger — acessível em /api/v1/docs (apenas fora de produção)
+  if (process.env.NODE_ENV !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('OTIMIZ API')
+      .setDescription('API de otimização operacional de transporte coletivo urbano')
+      .setVersion('2.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'JWT')
+      .addTag('auth', 'Autenticação e sessão')
+      .addTag('operations', 'Planejamento e otimização de escalas')
+      .addTag('reporting', 'Relatórios e análises operacionais')
+      .addTag('reports', 'KPIs e histórico de otimização')
+      .addTag('vehicles', 'Frota e manutenção de veículos')
+      .addTag('lines', 'Linhas e terminais')
+      .addTag('parameters', 'Parâmetros da empresa')
+      .addTag('users', 'Gestão de usuários')
+      .addTag('gtfs', 'Importação GTFS')
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/v1/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+    console.log(`Swagger docs: http://localhost:${process.env.PORT || 3001}/api/v1/docs`);
+  }
 
   const port = process.env.PORT || 3001;
   await app.listen(port);

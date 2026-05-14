@@ -1,11 +1,14 @@
 import { Controller, Post, Get, Patch, Delete, Param, ParseIntPipe, Query, UseInterceptors, UploadedFile, Body, UseGuards, BadRequestException, Logger } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiQuery, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { OperationsService } from './operations.service';
 import { OptimizationService } from './optimization.service';
 import { TenantContext } from '../../common/context/tenant-context';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+@ApiTags('operations')
+@ApiBearerAuth('JWT')
 @Controller('operations')
 @UseGuards(JwtAuthGuard)
 export class OperationsController {
@@ -18,9 +21,12 @@ export class OperationsController {
   ) {}
 
   @Post('optimize')
-  // Otimização é cara em CPU (60-300s por run). Limitamos a 5 runs/5min por tenant
-  // (não por IP, mas no nível controller — throttle global de 30 req/s ainda aplica).
   @Throttle({ medium: { ttl: 300_000, limit: 5 } })
+  @ApiOperation({ summary: 'Iniciar otimização de escala', description: 'Envia job assíncrono ao optimizer. Retorna taskId para polling de status.' })
+  @ApiBody({ schema: { example: { algorithm: 'hybrid_pipeline', operational_quality_mode: 'balanced', depot_ids: [1, 2] } } })
+  @ApiResponse({ status: 201, description: 'Otimização iniciada — retorna { taskId }.' })
+  @ApiResponse({ status: 400, description: 'CompanyId divergente ou payload inválido.' })
+  @ApiResponse({ status: 429, description: 'Rate limit: máximo 5 otimizações por 5 minutos.' })
   async runOptimization(
     @Body() body: Record<string, any>,
     @Body('algorithm') algorithm?: string,
@@ -96,6 +102,8 @@ export class OperationsController {
   }
 
   @Get('latest-schedule')
+  @ApiOperation({ summary: 'Buscar última escala otimizada', description: 'Retorna o schedule mais recente com blocks, duties e trips.' })
+  @ApiResponse({ status: 200, description: 'Schedule completo com blocos e jornadas.' })
   async getLatestSchedule() {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
@@ -104,6 +112,10 @@ export class OperationsController {
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload de CSV de viagens ou motoristas' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' }, type: { type: 'string', enum: ['trips', 'drivers'] } } } })
+  @ApiResponse({ status: 201, description: 'Arquivo processado com sucesso.' })
   async uploadFile(
     @UploadedFile() file: { buffer: Buffer; originalname: string; mimetype: string },
     @Body('type') type: 'trips' | 'drivers',
@@ -115,6 +127,10 @@ export class OperationsController {
   }
 
   @Get('trips')
+  @ApiOperation({ summary: 'Listar viagens do tenant' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 500 })
+  @ApiResponse({ status: 200, description: 'Lista paginada de viagens.' })
   async getTrips(@Query('page') page: string, @Query('limit') limit: string) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');

@@ -1,17 +1,22 @@
 import { Controller, Post, Body, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import * as express from 'express';
 import { AuthService } from './auth.service';
 import { Public } from '../../common/decorators/roles.decorator';
 
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Public()
   @Post('login')
-  // Anti-brute-force: max 10 tentativas/minuto por IP. Sobrescreve o throttle global.
   @Throttle({ short: { ttl: 60_000, limit: 10 } })
+  @ApiOperation({ summary: 'Autenticar usuário', description: 'Retorna JWT e define cookie HttpOnly.' })
+  @ApiBody({ schema: { example: { email: 'admin@empresa.com', password: 'admin123' } } })
+  @ApiResponse({ status: 200, description: 'Login bem-sucedido — retorna access_token e dados do usuário.' })
+  @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
   async login(@Body() body: any, @Res({ passthrough: true }) response: express.Response) {
     const result = await this.authService.login(body.email, body.password);
 
@@ -32,6 +37,8 @@ export class AuthController {
 
   @Public()
   @Post('logout')
+  @ApiOperation({ summary: 'Encerrar sessão', description: 'Limpa o cookie de autenticação.' })
+  @ApiResponse({ status: 200, description: 'Logout realizado.' })
   async logout(@Res({ passthrough: true }) response: express.Response) {
     response.clearCookie('access_token');
     return { message: 'Logout realizado com sucesso' };
