@@ -35,7 +35,12 @@ interface OperationsMapProps {
   selectedTripId?: number | null;
   onSelectTerminal?: (terminal: MapTerminal) => void;
   onSelectTrip?: (trip: MapTripLine) => void;
+  /** Mapa de lineCode → cor (hex). Quando ausente, todas as polylines usam azul padrão. */
+  lineColors?: Record<string, string>;
 }
+
+const DEFAULT_TRIP_COLOR = '#1976d2';
+const SELECTED_COLOR = '#ff9800';
 
 function FitBounds({ points }: { points: Array<[number, number]> }) {
   const map = useMap();
@@ -57,6 +62,7 @@ export default function OperationsMap({
   selectedTripId = null,
   onSelectTerminal,
   onSelectTrip,
+  lineColors,
 }: OperationsMapProps) {
   const validTerminals = useMemo(
     () =>
@@ -105,6 +111,7 @@ export default function OperationsMap({
 
         {validTrips.map((trip) => {
           const isSelected = selectedTripId === trip.id;
+          const lineColor = lineColors && trip.lineCode ? lineColors[trip.lineCode] : undefined;
           return (
             <Polyline
               key={`trip-${trip.id}`}
@@ -113,9 +120,9 @@ export default function OperationsMap({
                 [trip.destinationLatitude as number, trip.destinationLongitude as number],
               ]}
               pathOptions={{
-                color: isSelected ? '#ff9800' : '#1976d2',
+                color: isSelected ? SELECTED_COLOR : lineColor ?? DEFAULT_TRIP_COLOR,
                 weight: isSelected ? 4 : 2,
-                opacity: isSelected ? 0.95 : 0.55,
+                opacity: isSelected ? 0.95 : 0.65,
               }}
               eventHandlers={onSelectTrip ? { click: () => onSelectTrip(trip) } : undefined}
             >

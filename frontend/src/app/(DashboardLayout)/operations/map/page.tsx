@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   Alert,
@@ -11,11 +11,13 @@ import {
   Divider,
   Drawer,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
   Select,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material';
 import { IconMapPin, IconX } from '@tabler/icons-react';
@@ -44,6 +46,28 @@ export default function OperationsMapPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedTerminal, setSelectedTerminal] = useState<MapTerminal | null>(null);
   const [selectedTrip, setSelectedTrip] = useState<MapTripLine | null>(null);
+  const [colorByLine, setColorByLine] = useState(true);
+
+  const lineStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of trips) {
+      if (t.lineCode) counts.set(t.lineCode, (counts.get(t.lineCode) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, count], i, arr) => ({
+        code,
+        count,
+        color: `hsl(${Math.round((i / Math.max(1, arr.length)) * 360)}, 70%, 45%)`,
+      }));
+  }, [trips]);
+
+  const lineColors = useMemo(() => {
+    if (!colorByLine) return undefined;
+    const map: Record<string, string> = {};
+    for (const { code, color } of lineStats) map[code] = color;
+    return map;
+  }, [colorByLine, lineStats]);
 
   useEffect(() => {
     (async () => {
@@ -150,20 +174,57 @@ export default function OperationsMapPage() {
 
       <Card variant="outlined" sx={{ mb: 2 }}>
         <CardContent>
-          <Stack sx={{ flexDirection: 'row', gap: 3, alignItems: 'center' }}>
+          <Stack sx={{ flexDirection: 'row', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
             <Stack sx={{ flexDirection: 'row', alignItems: 'center', gap: 1 }}>
               <IconMapPin size={18} color="#e53935" />
               <Typography variant="body2">
                 <strong>{terminalsWithCoords}</strong> de {terminals.length} terminais com coordenadas
               </Typography>
             </Stack>
-            {selectedScheduleId !== '' && (
+            {!!selectedScheduleId && (
               <Typography variant="body2">
                 <strong>{tripsWithCoords}</strong> de {trips.length} viagens com coordenadas
                 {tripsLoading ? ' (carregando…)' : ''}
               </Typography>
             )}
+            {!!selectedScheduleId && lineStats.length > 0 && (
+              <FormControlLabel
+                sx={{ ml: 'auto' }}
+                control={
+                  <Switch
+                    size="small"
+                    checked={colorByLine}
+                    onChange={(e) => setColorByLine(e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">Colorir por linha</Typography>}
+              />
+            )}
           </Stack>
+          {colorByLine && lineStats.length > 0 && (
+            <Box sx={{ mt: 1.5, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {lineStats.map(({ code, count, color }) => (
+                <Stack
+                  key={code}
+                  sx={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    px: 1,
+                    py: 0.25,
+                    borderRadius: 1,
+                    bgcolor: 'action.hover',
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  <Box sx={{ width: 12, height: 4, bgcolor: color, borderRadius: 0.5 }} />
+                  <Typography variant="caption">
+                    {code} · {count}
+                  </Typography>
+                </Stack>
+              ))}
+            </Box>
+          )}
         </CardContent>
       </Card>
 
@@ -191,6 +252,7 @@ export default function OperationsMapPage() {
               setSelectedTerminal(null);
               setSelectedTrip(t);
             }}
+            lineColors={lineColors}
           />
         </Box>
       )}
