@@ -31,6 +31,7 @@ import { UsersModule } from './modules/users/users.module';
 import { LinesModule } from './modules/lines/lines.module';
 import { TerminalsModule } from './modules/terminals/terminals.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { CustomReportsModule } from './modules/custom-reports/custom-reports.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { Line } from './modules/database/entities/line.entity';
 import { Terminal } from './modules/database/entities/terminal.entity';
@@ -39,6 +40,7 @@ import { Vehicle } from './modules/database/entities/vehicle.entity';
 import { VehicleMaintenance } from './modules/database/entities/vehicle-maintenance.entity';
 import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-availability-window.entity';
 import { OptimizationRun } from './modules/database/entities/optimization-run.entity';
+import { CustomReport } from './modules/database/entities/custom-report.entity';
 
 @Module({
   imports: [
@@ -53,7 +55,7 @@ import { OptimizationRun } from './modules/database/entities/optimization-run.en
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun],
+        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun, CustomReport],
         // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
         // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
@@ -64,7 +66,7 @@ import { OptimizationRun } from './modules/database/entities/optimization-run.en
         logging: false,
       }),
     }),
-    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun]),
+    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun, CustomReport]),
     AuthModule,
     ParametersModule,
     OperationsModule,
@@ -74,6 +76,7 @@ import { OptimizationRun } from './modules/database/entities/optimization-run.en
     TerminalsModule,
     VehiclesModule,
     ReportsModule,
+    CustomReportsModule,
     AuditModule,
     JwtModule.register({}),
     // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
