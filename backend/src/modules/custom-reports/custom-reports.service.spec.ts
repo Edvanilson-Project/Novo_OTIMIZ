@@ -130,6 +130,17 @@ describe('CustomReportsService', () => {
     });
   });
 
+  describe('toPdf', () => {
+    it('produz Buffer com header PDF válido', async () => {
+      const report: any = { id: 1, name: 'r1', description: 'desc', filters: { dateRangeDays: 30 } };
+      const payload = { generatedAt: '2026-05-14T12:00:00Z', filters: { dateRangeDays: 30 }, totalRuns: 10 };
+      const buf = await service.toPdf(report, payload);
+      expect(Buffer.isBuffer(buf)).toBe(true);
+      expect(buf.length).toBeGreaterThan(100);
+      expect(buf.subarray(0, 4).toString()).toBe('%PDF');
+    });
+  });
+
   describe('toCsv', () => {
     it('produz cabeçalho metric,value e linha para escalar', () => {
       const csv = service.toCsv({ totalRuns: 10, successRate: 80 });

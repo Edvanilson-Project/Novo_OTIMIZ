@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
+import PDFDocument from 'pdfkit';
 import { CustomReport, CustomReportFormat } from '../database/entities/custom-report.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
@@ -239,5 +240,46 @@ export class CustomReportsService {
     if (value == null) return '';
     const s = typeof value === 'string' ? value : JSON.stringify(value);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  async toPdf(report: CustomReport, payload: Record<string, any>): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 48, size: 'A4' });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      doc.fontSize(18).text(report.name, { align: 'left' });
+      if (report.description) {
+        doc.moveDown(0.3).fontSize(10).fillColor('#666').text(report.description);
+      }
+      doc.moveDown(0.5).fontSize(9).fillColor('#888')
+        .text(`Gerado em: ${new Date(payload.generatedAt ?? new Date()).toLocaleString('pt-BR')}`)
+        .text(`Janela: últimos ${payload.filters?.dateRangeDays ?? 30} dia(s)`);
+      doc.moveDown(0.8);
+
+      doc.fillColor('#000').fontSize(12).text('Métricas', { underline: true });
+      doc.moveDown(0.3).fontSize(10);
+
+      for (const [k, v] of Object.entries(payload)) {
+        if (k === 'generatedAt' || k === 'filters' || k === 'recentRuns') continue;
+        if (v == null) continue;
+        doc.text(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+      }
+
+      if (Array.isArray(payload.recentRuns) && payload.recentRuns.length > 0) {
+        doc.moveDown(0.8).fontSize(12).text('Execuções recentes', { underline: true });
+        doc.moveDown(0.3).fontSize(9);
+        for (const r of payload.recentRuns) {
+          const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString('pt-BR') : '—';
+          doc.text(
+            `#${r.id} · ${date} · ${r.status} · ${r.vehicles ?? '—'} veíc · ${r.crew ?? '—'} crew · R$ ${r.totalCost ?? '—'} · ${r.algorithm ?? '—'}`,
+          );
+        }
+      }
+
+      doc.end();
+    });
   }
 }

@@ -150,21 +150,21 @@ export default function CustomReportsPage() {
     }
   }
 
-  async function exportCsv(id: number) {
+  async function exportBlob(id: number, format: 'csv' | 'pdf') {
     try {
-      const response = await apiClient.get(`/custom-reports/${id}/export.csv`, {
+      const response = await apiClient.get(`/custom-reports/${id}/export.${format}`, {
         responseType: 'blob',
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `report-${id}.csv`);
+      link.setAttribute('download', `report-${id}.${format}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Falha ao exportar CSV.');
+      setError(e?.response?.data?.message || e?.message || `Falha ao exportar ${format.toUpperCase()}.`);
     }
   }
 
@@ -304,9 +304,17 @@ export default function CustomReportsPage() {
                       variant="outlined"
                       size="small"
                       startIcon={<IconDownload size={16} />}
-                      onClick={() => exportCsv(t.id)}
+                      onClick={() => exportBlob(t.id, 'csv')}
                     >
-                      Exportar CSV
+                      CSV
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<IconDownload size={16} />}
+                      onClick={() => exportBlob(t.id, 'pdf')}
+                    >
+                      PDF
                     </Button>
                   </CardActions>
                 </Card>

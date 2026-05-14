@@ -174,6 +174,7 @@ export const customReportsApi = {
   preview: (metrics: string[], filters: Record<string, any> = {}) =>
     apiClient.post<Record<string, any>>('/custom-reports/preview', { metrics, filters }).then((r) => r.data),
   exportCsvUrl: (id: ID) => `${API_BASE_URL}/custom-reports/${id}/export.csv`,
+  exportPdfUrl: (id: ID) => `${API_BASE_URL}/custom-reports/${id}/export.pdf`,
 };
 
 // ─── Audit Log ───────────────────────────────────────────────────────────────

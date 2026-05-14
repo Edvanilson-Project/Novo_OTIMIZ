@@ -61,4 +61,14 @@ export class CustomReportsController {
     res.setHeader('Content-Disposition', `attachment; filename="report-${id}.csv"`);
     res.send(csv);
   }
+
+  @Get(':id/export.pdf')
+  async exportPdf(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+    const report = await this.service.findOne(id);
+    const payload = await this.service.run(id);
+    const pdf = await this.service.toPdf(report, payload);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="report-${id}.pdf"`);
+    res.send(pdf);
+  }
 }
