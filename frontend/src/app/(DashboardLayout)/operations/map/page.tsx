@@ -16,6 +16,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Slider,
   Stack,
   Switch,
   Typography,
@@ -48,6 +49,7 @@ export default function OperationsMapPage() {
   const [selectedTrip, setSelectedTrip] = useState<MapTripLine | null>(null);
   const [colorByLine, setColorByLine] = useState(true);
   const [lineFilter, setLineFilter] = useState<Set<string>>(new Set());
+  const [timeRange, setTimeRange] = useState<[number, number]>([0, 1440]);
 
   const lineStats = useMemo(() => {
     const counts = new Map<string, number>();
@@ -63,15 +65,24 @@ export default function OperationsMapPage() {
       }));
   }, [trips]);
 
-  // Reset filtro quando troca schedule (linhas mudam)
+  // Reset filtros quando troca schedule
   useEffect(() => {
     setLineFilter(new Set());
+    setTimeRange([0, 1440]);
   }, [selectedScheduleId]);
 
+  const timeFilterActive = timeRange[0] > 0 || timeRange[1] < 1440;
+
   const filteredTrips = useMemo(() => {
-    if (lineFilter.size === 0) return trips;
-    return trips.filter((t) => t.lineCode && lineFilter.has(t.lineCode));
-  }, [trips, lineFilter]);
+    let result = trips;
+    if (lineFilter.size > 0) result = result.filter((t) => t.lineCode && lineFilter.has(t.lineCode));
+    if (timeRange[0] > 0 || timeRange[1] < 1440) {
+      result = result.filter(
+        (t) => t.startTime == null || (t.startTime >= timeRange[0] && t.startTime <= timeRange[1]),
+      );
+    }
+    return result;
+  }, [trips, lineFilter, timeRange]);
 
   const lineColors = useMemo(() => {
     if (!colorByLine) return undefined;
@@ -204,7 +215,7 @@ export default function OperationsMapPage() {
             {!!selectedScheduleId && (
               <Typography variant="body2">
                 <strong>{tripsWithCoords}</strong> de {filteredTrips.length} viagens
-                {lineFilter.size > 0 ? ` (filtrado de ${trips.length})` : ''}
+                {(lineFilter.size > 0 || timeFilterActive) ? ` (filtrado de ${trips.length})` : ''}
                 {' '}com coordenadas
                 {tripsLoading ? ' (carregando…)' : ''}
               </Typography>
@@ -268,6 +279,40 @@ export default function OperationsMapPage() {
                   limpar filtro
                 </Typography>
               )}
+            </Box>
+          )}
+          {!!selectedScheduleId && (
+            <Box sx={{ mt: 1.5, px: 0.5 }}>
+              <Stack sx={{ flexDirection: 'row', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <Typography variant="caption" color="textSecondary">
+                  Faixa horária: <strong>{minsToHHMM(timeRange[0])}</strong> – <strong>{minsToHHMM(timeRange[1])}</strong>
+                </Typography>
+                {timeFilterActive && (
+                  <Typography
+                    variant="caption"
+                    onClick={() => setTimeRange([0, 1440])}
+                    sx={{ cursor: 'pointer', textDecoration: 'underline', ml: 1 }}
+                  >
+                    resetar
+                  </Typography>
+                )}
+              </Stack>
+              <Slider
+                value={timeRange}
+                onChange={(_, v) => setTimeRange(v as [number, number])}
+                min={0}
+                max={1440}
+                step={15}
+                size="small"
+                marks={[
+                  { value: 0, label: '00:00' },
+                  { value: 360, label: '06:00' },
+                  { value: 720, label: '12:00' },
+                  { value: 1080, label: '18:00' },
+                  { value: 1440, label: '24:00' },
+                ]}
+                sx={{ color: timeFilterActive ? 'primary.main' : 'action.active' }}
+              />
             </Box>
           )}
         </CardContent>
@@ -361,6 +406,10 @@ function TerminalDetails({ terminal, trips }: { terminal: MapTerminal; trips: Ma
       </Box>
     </Stack>
   );
+}
+
+function minsToHHMM(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
 function formatMinutes(min: number | null | undefined): string {
