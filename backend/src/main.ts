@@ -8,11 +8,21 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { Response } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Security headers via Helmet
+  app.use(helmet({
+    // CSP permissivo o suficiente para o Swagger UI em dev (fontawesome, CDN swagger)
+    contentSecurityPolicy: process.env.NODE_ENV === 'production'
+      ? undefined  // helmet default estrito em produção
+      : false,     // desabilitado em dev para não bloquear Swagger UI
+    crossOriginEmbedderPolicy: false, // WebSocket do Socket.IO requer isso
+  }));
 
   // Configuração de Pipes globais para validação de DTOs
   app.useGlobalPipes(new ValidationPipe({
