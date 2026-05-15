@@ -11,7 +11,7 @@ const OUT_DIR = path.join(ROOT, "artifacts", "operational_quality_e2e");
 const BASE_URL = "http://127.0.0.1:3001/api/v1";
 const FRONTEND_URL = "http://127.0.0.1:3000/operations/planner";
 const CHROME_DEBUG_URL = "http://127.0.0.1:9222";
-const JWT_SECRET = "your_jwt_secret_here_min_32_chars";
+const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret_here_min_32_chars";
 const COMPANY_ID = 16;
 const SKIP_UI = process.env.SKIP_UI === "1";
 const USER = {
