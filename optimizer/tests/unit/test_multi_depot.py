@@ -1,14 +1,16 @@
 """
-Testes de multi-depósito no VSP Greedy.
+Testes de multi-depósito no VSP Greedy, SA e Tabu.
 
 Valida que `same_depot_required=True` impede que viagens de depósitos diferentes
-fiquem no mesmo bloco (veículo).
+fiquem no mesmo bloco (veículo) em todos os algoritmos.
 """
 from __future__ import annotations
 
 import pytest
 from src.domain.models import Trip, VehicleType, VSPSolution
 from src.algorithms.vsp.greedy import GreedyVSP
+from src.algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
+from src.algorithms.vsp.tabu_search import TabuSearchVSP
 
 
 def _vt() -> VehicleType:
@@ -126,6 +128,74 @@ class TestMultiDepotRestriction:
         assert len(sol.blocks) == 1
         assigned_ids = {t.id for b in sol.blocks for t in b.trips}
         assert 3 not in assigned_ids, "Viagem de depot 2 não deve aparecer no resultado"
+
+
+class TestSAMultiDepot:
+    """SA deve respeitar same_depot_required durante perturbações."""
+
+    def test_sa_does_not_mix_depots(self):
+        params = {
+            "min_layover_minutes": 5,
+            "same_depot_required": True,
+            "random_seed": 42,
+        }
+        trips = [
+            _trip(1, 360, 470, depot_id=1),
+            _trip(2, 480, 590, depot_id=1),
+            _trip(3, 360, 470, depot_id=2),
+            _trip(4, 480, 590, depot_id=2),
+        ]
+        sol = SimulatedAnnealingVSP(vsp_params=params).solve(trips, [_vt()])
+        for block in sol.blocks:
+            depots = {t.depot_id for t in block.trips if t.depot_id is not None}
+            assert len(depots) <= 1, f"SA misturou depósitos no bloco: {depots}"
+
+    def test_sa_groups_same_depot(self):
+        params = {
+            "min_layover_minutes": 5,
+            "same_depot_required": True,
+            "random_seed": 42,
+        }
+        trips = [
+            _trip(1, 360, 470, depot_id=1),
+            _trip(2, 480, 590, depot_id=1),
+        ]
+        sol = SimulatedAnnealingVSP(vsp_params=params).solve(trips, [_vt()])
+        assert len(sol.blocks) == 1
+
+
+class TestTabuMultiDepot:
+    """Tabu Search deve respeitar same_depot_required durante moves."""
+
+    def test_tabu_does_not_mix_depots(self):
+        params = {
+            "min_layover_minutes": 5,
+            "same_depot_required": True,
+            "random_seed": 42,
+        }
+        trips = [
+            _trip(1, 360, 470, depot_id=1),
+            _trip(2, 480, 590, depot_id=1),
+            _trip(3, 360, 470, depot_id=2),
+            _trip(4, 480, 590, depot_id=2),
+        ]
+        sol = TabuSearchVSP(vsp_params=params).solve(trips, [_vt()])
+        for block in sol.blocks:
+            depots = {t.depot_id for t in block.trips if t.depot_id is not None}
+            assert len(depots) <= 1, f"Tabu misturou depósitos no bloco: {depots}"
+
+    def test_tabu_groups_same_depot(self):
+        params = {
+            "min_layover_minutes": 5,
+            "same_depot_required": True,
+            "random_seed": 42,
+        }
+        trips = [
+            _trip(1, 360, 470, depot_id=1),
+            _trip(2, 480, 590, depot_id=1),
+        ]
+        sol = TabuSearchVSP(vsp_params=params).solve(trips, [_vt()])
+        assert len(sol.blocks) == 1
 
 
 class TestMultiDepotMeta:

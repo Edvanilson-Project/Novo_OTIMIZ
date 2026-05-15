@@ -37,12 +37,18 @@ def _blocks_are_feasible(
     strict_zero_gap_validation: bool = False,
     strict_operational_mode: bool = False,
     strict_hard_constraints: bool = False,
+    same_depot_required: bool = False,
 ) -> bool:
     """Verifica viabilidade dos blocos usando trip_map."""
     for block in state:
         if not block:
             continue
-        
+
+        if same_depot_required:
+            depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
+            if len(depots) > 1:
+                return False
+
         for i in range(len(block) - 1):
             if not is_connection_feasible(
                 trip_map[block[i]],
@@ -56,7 +62,7 @@ def _blocks_are_feasible(
                 strict_hard_constraints=strict_hard_constraints,
             ):
                 return False
-    
+
     return True
 
 
@@ -213,7 +219,8 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         strict_zgv = bool(self.vsp_params.get("strict_zero_gap_validation", False))
         strict_som = bool(self.vsp_params.get("strict_operational_mode", False))
         strict_shc = bool(self.vsp_params.get("strict_hard_constraints", False))
-        
+        same_depot_req = bool(self.vsp_params.get("same_depot_required", False))
+
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
@@ -274,6 +281,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 strict_zero_gap_validation=strict_zgv,
                 strict_operational_mode=strict_som,
                 strict_hard_constraints=strict_shc,
+                same_depot_required=same_depot_req,
             )
             if not neighbours:
                 stale_count += 1
