@@ -1858,7 +1858,7 @@ class OptimizerService:
                 )
             except Exception as exc:
                 primary_error = exc
-                logger.warning("[SCALE] chunk[%d] primary hybrid failed: %s", chunk_index, exc)
+                logger.warning("[SCALE] chunk[%d] primary hybrid failed: %s", chunk_index, exc, exc_info=True)
 
             def run_fallback(reason: str) -> Optional[OptimizationResult]:
                 fallback_cct = dict(base_chunk_cct)

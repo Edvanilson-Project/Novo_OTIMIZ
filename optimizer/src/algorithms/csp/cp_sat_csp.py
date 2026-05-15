@@ -113,7 +113,9 @@ class CPSatCSP(SetPartitioningCSP):
                 else:
                     ok, _, data = self.greedy._can_extend(duty, task)
                     if not ok:
-                        duties.append(self.greedy.finalize_selected_duties([duty], original_blocks=blocks).duties[0])
+                        finalized = self.greedy.finalize_selected_duties([duty], original_blocks=blocks)
+                        if finalized.duties:
+                            duties.append(finalized.duties[0])
                         duty = Duty(id=self._next_duty_id())
                         self.greedy._apply_block(duty, task, {
                             "new_work": self.greedy._block_drive(task),

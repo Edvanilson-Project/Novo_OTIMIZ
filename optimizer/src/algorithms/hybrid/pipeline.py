@@ -465,14 +465,20 @@ class HybridPipeline(BaseAlgorithm):
                 )
         from ..joint_opt import joint_duty_vehicle_swap
         t_phase = time.perf_counter()
-        csp_final, vsp_sol = joint_duty_vehicle_swap(
-            csp_final,
-            vsp_sol,
-            trips,
-            vehicle_types,
-            self.cct_params,
-            {**kwargs, "vsp_params": self.vsp_params},
-        )
+        try:
+            csp_final, vsp_sol = joint_duty_vehicle_swap(
+                csp_final,
+                vsp_sol,
+                trips,
+                vehicle_types,
+                self.cct_params,
+                {**kwargs, "vsp_params": self.vsp_params},
+            )
+        except (IndexError, KeyError) as exc:
+            logger.warning(
+                "[PIPELINE] joint_duty_vehicle_swap falhou (%s: %s) — mantendo CSP/VSP do pré-swap",
+                type(exc).__name__, exc, exc_info=True,
+            )
         phase_timings_ms["joint_swap_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         # ── Benchmark final e decisão de regressão ──────────────────────────
         if 'baseline_metrics' in locals() and baseline_metrics:

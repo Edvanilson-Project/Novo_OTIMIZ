@@ -302,8 +302,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                 else:
                     ok, _, data = self.greedy._can_extend(duty, task)
                     if not ok:
-                        finalized = self.greedy.finalize_selected_duties([duty], original_blocks=blocks).duties[0]
-                        duties.append(finalized)
+                        finalized_sol = self.greedy.finalize_selected_duties([duty], original_blocks=blocks)
+                        if finalized_sol.duties:
+                            duties.append(finalized_sol.duties[0])
                         duty = Duty(id=self._next_duty_id())
                         self.greedy._apply_block(
                             duty,
