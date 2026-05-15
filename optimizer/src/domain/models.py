@@ -752,3 +752,40 @@ class NominalRosteringSolution:
     logs: List[str] = field(default_factory=list)
     algorithm: str = "nominal_assignment_pulp"
     meta: Dict[str, Any] = field(default_factory=dict)
+
+
+# ── Weekly Rostering (escala semanal 7 dias) ──────────────────────────────────
+
+@dataclass
+class WeeklyAssignment:
+    """Atribuição de um motorista a uma jornada em um dia específico da semana."""
+    operator_id: str
+    day_index: int        # 0=segunda … 6=domingo
+    duty_id: int
+    duty_minutes: int     # duração da jornada em minutos
+    duty_start: int       # start_time em minutos desde meia-noite
+    duty_end: int         # end_time em minutos desde meia-noite
+
+
+@dataclass
+class OperatorWeeklySchedule:
+    """Escala semanal de um motorista: quais dias trabalha e métricas."""
+    operator_id: str
+    assignments: List[WeeklyAssignment] = field(default_factory=list)
+    total_minutes: int = 0
+    days_worked: int = 0
+    days_off: List[int] = field(default_factory=list)   # índices dos dias de folga
+    weekly_cost: float = 0.0
+
+
+@dataclass
+class WeeklyRosterSolution:
+    """Resultado da escala semanal completa."""
+    schedules: List[OperatorWeeklySchedule] = field(default_factory=list)
+    unassigned_by_day: Dict[int, List[int]] = field(default_factory=dict)  # day -> duty_ids
+    fairness_gini: float = 0.0     # Gini das horas semanais por motorista (0=perfeito)
+    total_minutes_assigned: int = 0
+    elapsed_ms: float = 0.0
+    algorithm: str = "weekly_cp_sat"
+    feasible: bool = True
+    meta: Dict[str, Any] = field(default_factory=dict)

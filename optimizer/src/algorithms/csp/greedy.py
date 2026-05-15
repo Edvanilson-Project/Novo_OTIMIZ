@@ -17,6 +17,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 _log = logging.getLogger(__name__)
+_WARNED_SPREAD_CONFIGS: set = set()  # evita repetição do warning por config
 
 from ...core.config import get_settings
 from ...domain.interfaces import ICSPAlgorithm
@@ -232,11 +233,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 self.min_break, self.mandatory_break_after,
             )
         if self.max_shift > 0 and self.max_spread_soft > self.max_shift:
-            _log.warning(
-                "[CONFIG] max_spread_soft (%d) > max_shift hard (%d) — penalty soft "
-                "inerte (hard rejeita antes do soft penalizar).",
-                self.max_spread_soft, self.max_shift,
-            )
+            key = (self.max_spread_soft, self.max_shift)
+            if key not in _WARNED_SPREAD_CONFIGS:
+                _WARNED_SPREAD_CONFIGS.add(key)
+                _log.warning(
+                    "[CONFIG] max_spread_soft (%d) > max_shift hard (%d) — penalty soft "
+                    "inerte (hard rejeita antes do soft penalizar).",
+                    self.max_spread_soft, self.max_shift,
+                )
 
         self._extension_diagnostics = self._empty_extension_diagnostics()
 

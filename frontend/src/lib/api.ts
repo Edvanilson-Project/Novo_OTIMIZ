@@ -6,15 +6,9 @@ const API_BASE_URL =
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
-});
-
-// Injeta JWT em todas as requisições
-apiClient.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('otimiz_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  // withCredentials envia o cookie HttpOnly definido pelo backend em /auth/login.
+  // O token não é lido via JS — fica protegido contra XSS.
+  withCredentials: true,
 });
 
 // Redireciona para login em 401 (exceto na própria página de login)
@@ -23,7 +17,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       if (!window.location.pathname.includes('/auth/')) {
-        localStorage.removeItem('otimiz_token');
+        clearSession();
         window.location.href = '/auth/login';
       }
     }
@@ -44,24 +38,24 @@ export interface SessionUser {
 }
 
 // ─── Sessão ──────────────────────────────────────────────────────────────────
-export function saveSession(accessToken: string, user: SessionUser) {
+// O token JWT não é armazenado em JS — viaja exclusivamente via cookie HttpOnly
+// definido pelo backend. Aqui guardamos apenas metadados não-sensíveis do usuário.
+export function saveSession(_accessToken: string, user: SessionUser) {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('otimiz_token', accessToken);
-  localStorage.setItem('otimiz_user', JSON.stringify(user));
+  sessionStorage.setItem('otimiz_user', JSON.stringify(user));
 }
 
 export function getSessionUser(): SessionUser | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem('otimiz_user');
+    const raw = sessionStorage.getItem('otimiz_user');
     return raw ? (JSON.parse(raw) as SessionUser) : null;
   } catch { return null; }
 }
 
 export function clearSession() {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem('otimiz_token');
-  localStorage.removeItem('otimiz_user');
+  sessionStorage.removeItem('otimiz_user');
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────

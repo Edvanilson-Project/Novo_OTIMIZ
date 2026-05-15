@@ -1,17 +1,26 @@
+"""
+Gerador de JWT para desenvolvimento/testes.
+Requer JWT_SECRET via variável de ambiente — nunca hardcoded.
+"""
 import jwt
+import os
+import sys
 import time
 
+secret = os.environ.get("JWT_SECRET")
+if not secret:
+    print("Erro: JWT_SECRET não definido. Execute:", file=sys.stderr)
+    print("  export JWT_SECRET=<seu_segredo_de_producao>", file=sys.stderr)
+    sys.exit(1)
+
 payload = {
-    "id": 15,          # might be id instead of sub
-    "sub": 15,
-    "email": "admin@otimiz.com",
-    "companyId": 16,
-    "role": "super_admin",
+    "id": int(os.environ.get("USER_ID", "15")),
+    "sub": int(os.environ.get("USER_ID", "15")),
+    "email": os.environ.get("USER_EMAIL", "admin@otimiz.com"),
+    "companyId": int(os.environ.get("COMPANY_ID", "16")),
+    "role": os.environ.get("USER_ROLE", "super_admin"),
     "iat": int(time.time()),
-    "exp": int(time.time()) + 86400
+    "exp": int(time.time()) + 86400,
 }
-try:
-    token1 = jwt.encode(payload, "your_jwt_secret_here_min_32_chars", algorithm="HS256")
-    print(token1)
-except Exception as e:
-    pass
+token = jwt.encode(payload, secret, algorithm="HS256")
+print(token)
