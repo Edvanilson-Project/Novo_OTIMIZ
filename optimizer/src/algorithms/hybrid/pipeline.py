@@ -32,8 +32,10 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 evaluator = CostEvaluator()
 MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
-# CP-SAT handles significantly more than CBC/PuLP — limits raised accordingly
-DEFAULT_MAX_CSP_ILP_TRIPS = 600
+# CP-SAT handles significantly more than CBC/PuLP — limits raised accordingly.
+# Trip limit raised to 1500 so CP-SAT ILP polish runs at 1000v (194 greedy blocks,
+# problem size is determined by blocks not trips — the old 600-trip limit was overly conservative).
+DEFAULT_MAX_CSP_ILP_TRIPS = 1500
 DEFAULT_MAX_CSP_ILP_BLOCKS = 450
 DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 220
 DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS = 180
