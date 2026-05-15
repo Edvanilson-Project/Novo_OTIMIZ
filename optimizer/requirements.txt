@@ -12,8 +12,7 @@ numba>=0.59.0           # JIT compilation for performance (Optibus level)
 
 # ── ILP / Set Partitioning (CSP) ─────────────────────────────────────────────
 pulp>=2.9.0             # Linear Programming solver
-# PuLP suporta GLPK, CBC, HiGHS sem instalação separada
-# filelock removido (persistência agora é in-memory/cloud-ready)
+highspy>=1.7.0          # HiGHS solver — 5-10x mais rápido que CBC em MIP/LP
 
 # ── HTTP client (chamar o backend NestJS) ────────────────────────────────────
 httpx>=0.27.0

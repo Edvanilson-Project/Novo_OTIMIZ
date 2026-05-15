@@ -34,6 +34,17 @@ except ImportError:  # pragma: no cover
     _PULP_AVAILABLE = False
 
 
+def _make_solver(time_limit: int, threads: int = 1) -> "pulp.LpSolver":
+    """CBC (primary for binary MIP) with HiGHS as fallback if CBC unavailable."""
+    cbc = pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=0, keepFiles=False, threads=threads)
+    if cbc.available():
+        return cbc
+    try:
+        return pulp.HiGHS(timeLimit=time_limit, msg=0, threads=threads)
+    except Exception:
+        return cbc
+
+
 class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
     def __init__(self, vsp_params: Optional[Dict[str, Any]] = None, **params: Any):
         # Prioritize ilp_timeout_seconds from params, then vsp_params, then global settings
@@ -237,13 +248,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
             lp += pulp.lpSum(cost * y[index] for index, (_, cost) in enumerate(columns))
             for task_id in task_ids:
                 lp += pulp.lpSum(y[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1, f"cover_{task_id}"
-            lp.solve(pulp.PULP_CBC_CMD(
-                timeLimit=pricing_time_limit_s, 
-                msg=0, 
-                mip=False, 
-                keepFiles=False,
-                threads=settings.ilp_threads
-            ))
+            lp.solve(_make_solver(pricing_time_limit_s, threads=settings.ilp_threads))
             duals = {
                 task_id: float(lp.constraints[f"cover_{task_id}"].pi or 0.0)
                 for task_id in task_ids
@@ -262,12 +267,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
         for task_id in task_ids:
             prob += pulp.lpSum(x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1
-        prob.solve(pulp.PULP_CBC_CMD(
-            timeLimit=total_time_limit_s, 
-            msg=0, 
-            keepFiles=False,
-            threads=settings.ilp_threads
-        ))
+        prob.solve(_make_solver(total_time_limit_s, threads=settings.ilp_threads))
 
         if prob.status != pulp.constants.LpStatusOptimal:
             _log.warning("ILP solver status: %s — falling back to greedy CSP", pulp.LpStatus[prob.status])

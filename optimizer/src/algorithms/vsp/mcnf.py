@@ -25,6 +25,17 @@ except Exception:
     pulp = None
     _PULP_AVAILABLE = False
 
+
+def _make_solver(time_limit: int, threads: int = 1) -> "pulp.LpSolver":
+    """CBC (primary for binary MIP) with HiGHS as fallback if CBC unavailable."""
+    cbc = pulp.PULP_CBC_CMD(timeLimit=time_limit, msg=0, keepFiles=False, threads=threads)
+    if cbc.available():
+        return cbc
+    try:
+        return pulp.HiGHS(timeLimit=time_limit, msg=0, threads=threads)
+    except Exception:
+        return cbc
+
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
@@ -414,12 +425,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         
         milp_start = time.time()
         try:
-            solver = pulp.PULP_CBC_CMD(
-                msg=0, 
-                timeLimit=ilp_timeout, 
-                threads=settings.ilp_threads
-            )
-            prob.solve(solver)
+            prob.solve(_make_solver(ilp_timeout, threads=settings.ilp_threads))
             milp_end = time.time()
         except Exception as e:
             _log.exception("PuLP solver falhou: %s", e)
