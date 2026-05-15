@@ -12,6 +12,7 @@ from ...core.exceptions import InfeasibleProblemError
 from ...domain.models import OptimizationResult, Trip, VehicleType
 from ..base import BaseAlgorithm
 from ..csp.greedy import GreedyCSP
+from ..csp.cp_sat_csp import CPSatCSP
 from ..csp.set_partitioning import SetPartitioningCSP
 from ..evaluator import CostEvaluator
 from ..vsp.genetic import GeneticVSP
@@ -31,8 +32,9 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 evaluator = CostEvaluator()
 MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
-DEFAULT_MAX_CSP_ILP_TRIPS = 250
-DEFAULT_MAX_CSP_ILP_BLOCKS = 180
+# CP-SAT handles significantly more than CBC/PuLP — limits raised accordingly
+DEFAULT_MAX_CSP_ILP_TRIPS = 600
+DEFAULT_MAX_CSP_ILP_BLOCKS = 450
 DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 220
 DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS = 180
 
@@ -402,12 +404,12 @@ class HybridPipeline(BaseAlgorithm):
                     len(vsp_sol.blocks),
                 )
         else:
-            # Caso para escalas normais (<= 1500 blocos)
+            # Escala normal (<= 1500 blocos): greedy CSP + CP-SAT ILP polish
             t_phase = time.perf_counter()
             csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
             phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
             csp_final = csp_greedy
-            
+
             # Baseline para benchmark de qualidade
             from ..evaluator import CostEvaluator
             evaluator = CostEvaluator()
@@ -418,6 +420,49 @@ class HybridPipeline(BaseAlgorithm):
                 "violations": csp_greedy.cct_violations,
                 "total_cost": round(evaluator.total_cost(baseline_result, vehicle_types), 2)
             }
+
+            # CP-SAT ILP polish: melhora run-cutting dentro do orçamento restante.
+            # Antes só existia no branch >1500 blocos (onde nunca executava por limites conflitantes).
+            remaining_budget_s = max(0.0, self.time_budget_s - self._elapsed())
+            max_ilp_trips = int(self.vsp_params.get("max_csp_ilp_trips", DEFAULT_MAX_CSP_ILP_TRIPS) or DEFAULT_MAX_CSP_ILP_TRIPS)
+            max_ilp_blocks = int(self.vsp_params.get("max_csp_ilp_blocks", DEFAULT_MAX_CSP_ILP_BLOCKS) or DEFAULT_MAX_CSP_ILP_BLOCKS)
+            should_run_ilp = (
+                not self._check_timeout()
+                and remaining_budget_s >= MIN_REMAINING_BUDGET_FOR_ILP_S
+                and len(trips) <= max_ilp_trips
+                and len(vsp_sol.blocks) <= max_ilp_blocks
+            )
+            if should_run_ilp:
+                ilp_budget = max(1.0, min(remaining_budget_s * 0.5, 90.0))
+                ilp = CPSatCSP(vsp_params=self.vsp_params, **kwargs)
+                ilp.time_budget_s = ilp_budget
+                t_phase = time.perf_counter()
+                try:
+                    csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                    phase_timings_ms["csp_cpsat_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+                    ilp_better = (
+                        csp_ilp.duties
+                        and (csp_ilp.cct_violations, len(csp_ilp.uncovered_blocks or []), csp_ilp.num_crew)
+                        <= (csp_greedy.cct_violations, len(csp_greedy.uncovered_blocks or []), csp_greedy.num_crew)
+                    )
+                    if ilp_better:
+                        logger.info(
+                            "[PIPELINE] CP-SAT polish: crew %d→%d violations %d→%d uncovered %d→%d",
+                            csp_greedy.num_crew, csp_ilp.num_crew,
+                            csp_greedy.cct_violations, csp_ilp.cct_violations,
+                            len(csp_greedy.uncovered_blocks or []), len(csp_ilp.uncovered_blocks or []),
+                        )
+                        csp_final = csp_ilp
+                    else:
+                        logger.info("[PIPELINE] CP-SAT polish not better than greedy CSP — keeping greedy")
+                except Exception as e:
+                    logger.error("[PIPELINE] CP-SAT polish failed: %s — keeping greedy CSP", e)
+                    phase_timings_ms["csp_cpsat_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+            else:
+                logger.info(
+                    "[PIPELINE] Skipping CP-SAT polish: remaining=%.1fs trips=%d blocks=%d limits=(%d,%d)",
+                    remaining_budget_s, len(trips), len(vsp_sol.blocks), max_ilp_trips, max_ilp_blocks,
+                )
         from ..joint_opt import joint_duty_vehicle_swap
         t_phase = time.perf_counter()
         csp_final, vsp_sol = joint_duty_vehicle_swap(
