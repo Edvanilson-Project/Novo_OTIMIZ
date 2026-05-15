@@ -34,6 +34,7 @@ interface Trip {
   destinationId: number;
   distanceKm: number;
   direction?: string;
+  depotId?: number | null;
 }
 
 interface Driver {
@@ -80,6 +81,8 @@ interface TripFormState {
   isReliefPoint: boolean;
   midTripReliefPointId: number | null;
   midTripReliefOffsetMinutes: number | null;
+  // Multi-depot
+  depotId: number | null;
 }
 
 const EMPTY_TRIP: TripFormState = {
@@ -89,6 +92,7 @@ const EMPTY_TRIP: TripFormState = {
   returnStartTime: "14:00", returnEndTime: "22:00",
   returnDuration: 0, returnOriginId: 0, returnDestinationId: 0, returnDistanceKm: 0,
   isReliefPoint: false, midTripReliefPointId: null, midTripReliefOffsetMinutes: null,
+  depotId: null,
 };
 
 const EMPTY_DRIVER: Omit<Driver, "id"> = {
@@ -325,6 +329,7 @@ export default function OperationsDataPage() {
       isReliefPoint: !!(row as any).isReliefPoint,
       midTripReliefPointId: (row as any).midTripReliefPointId ?? null,
       midTripReliefOffsetMinutes: (row as any).midTripReliefOffsetMinutes ?? null,
+      depotId: row.depotId ?? null,
     });
     setTripDialog(true);
   };
@@ -390,6 +395,7 @@ export default function OperationsDataPage() {
         isReliefPoint: tripForm.isReliefPoint,
         midTripReliefPointId: tripForm.midTripReliefPointId,
         midTripReliefOffsetMinutes: tripForm.midTripReliefOffsetMinutes,
+        depotId: tripForm.depotId,
       };
       if (tripForm.roundTrip) {
         payload.returnStartTime = tripForm.returnStartTime;
@@ -898,6 +904,30 @@ export default function OperationsDataPage() {
                   Ponto intermediário definido, mas falta o offset. Optimizer ignorará split.
                 </Alert>
               )}
+            </Stack>
+
+            {/* ── Depósito (multi-depot) ── opcional */}
+            <Divider />
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                Depósito (opcional)
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Associar a viagem a um depósito específico ativa otimização multi-depot:
+                veículos só servem viagens do mesmo depósito.
+              </Typography>
+              <TextField
+                size="small"
+                type="number"
+                label="ID do Depósito"
+                slotProps={{ htmlInput: { min: 1 } }}
+                value={tripForm.depotId ?? ""}
+                onChange={e => setTripForm(f => ({
+                  ...f,
+                  depotId: e.target.value === "" ? null : Number(e.target.value),
+                }))}
+                helperText="Deixe vazio para sem restrição de depósito"
+              />
             </Stack>
           </Stack>
         </DialogContent>
