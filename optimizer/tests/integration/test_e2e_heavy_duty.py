@@ -78,7 +78,10 @@ def test_e2e_heavy_duty_charter_api_load():
         "wait_for_completion": True
     }
 
-    response = client.post("/optimize/", json=payload, headers={"X-Internal-Key": "internal-key-123456"})
+    response = client.post(
+        "/optimize/", json=payload,
+        headers={"X-Internal-Key": os.environ.get("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")},
+    )
     
     assert response.status_code == 200, f"A API colapsou sob carga: {response.text}"
     

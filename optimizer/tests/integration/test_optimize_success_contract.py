@@ -63,7 +63,10 @@ def test_optimize_success_response_exposes_audit_contract():
         "wait_for_completion": True,
     }
 
-    response = client.post("/optimize/", json=payload, headers={"X-Internal-Key": "internal-key-123456"})
+    response = client.post(
+        "/optimize/", json=payload,
+        headers={"X-Internal-Key": os.environ.get("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")},
+    )
 
     assert response.status_code == 200, response.text
     data = response.json()
