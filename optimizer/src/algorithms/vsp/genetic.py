@@ -182,33 +182,38 @@ def _repair_chromosome(
             sorted_missing = sorted(missing, key=lambda tid: (trip_map[tid].start_time, tid))
         else:
             sorted_missing = sorted(missing)
+        same_depot_req = bool(kwargs.get("same_depot_required", False))
         if repaired and trip_map:
             # Insere cada trip no bloco cujo último trip termina mais perto antes dela
             for tid in sorted_missing:
                 t_start = trip_map[tid].start_time
+                trip_depot = trip_map[tid].depot_id if tid in trip_map else None
                 best_idx = None
                 best_gap = float("inf")
                 for i, seq in enumerate(repaired):
                     last_tid = seq[-1]
-                    if last_tid in trip_map:
-                        if is_connection_feasible(
-                            trip_map[last_tid],
-                            trip_map[tid],
-                            min_layover=kwargs.get("min_gap", 8),
-                            min_break=kwargs.get("min_break", 30),
-                            enforce_min_interval=kwargs.get("enforce_min_interval", False),
-                            connection_tolerance=kwargs.get("connection_tolerance", 0),
-                        ):
-                            # We don't have the exact gap here since is_connection_feasible returns bool
-                            # For repair heuristic, we'll just take the first feasible block
-                            best_idx = i
-                            break
+                    if last_tid not in trip_map:
+                        continue
+                    # Depot check: skip block if depot mismatch when required
+                    if same_depot_req and trip_depot is not None:
+                        block_depot = trip_map[seq[0]].depot_id if trip_map[seq[0]].depot_id is not None else None
+                        if block_depot is not None and block_depot != trip_depot:
+                            continue
+                    if is_connection_feasible(
+                        trip_map[last_tid],
+                        trip_map[tid],
+                        min_layover=kwargs.get("min_gap", 8),
+                        min_break=kwargs.get("min_break", 30),
+                        enforce_min_interval=kwargs.get("enforce_min_interval", False),
+                        connection_tolerance=kwargs.get("connection_tolerance", 0),
+                    ):
+                        best_idx = i
+                        break
                 if best_idx is not None:
                     repaired[best_idx].append(tid)
                 else:
-                    # Nenhum bloco termina antes desta trip → menor bloco
-                    smallest = min(range(len(repaired)), key=lambda i: len(repaired[i]))
-                    repaired[smallest].append(tid)
+                    # No compatible block found — create new block (depot isolation)
+                    repaired.append([tid])
         elif repaired:
             smallest = min(range(len(repaired)), key=lambda i: len(repaired[i]))
             repaired[smallest].extend(sorted_missing)
@@ -380,6 +385,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
         min_break = int(self.vsp_params.get("min_break_minutes", 30) or 30)
         enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", False))
         connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0) or 0)
+        same_depot_req = bool(self.vsp_params.get("same_depot_required", False))
 
         fit_fn = lambda c: _fitness(
             c,
@@ -439,6 +445,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                 min_break=int(min_break) if min_break is not None else 30,
                 enforce_min_interval=enforce_min_interval,
                 connection_tolerance=connection_tolerance,
+                same_depot_required=same_depot_req,
             )
             population.append(variant)
 
@@ -468,6 +475,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                     min_break=min_break,
                     enforce_min_interval=enforce_min_interval,
                     connection_tolerance=connection_tolerance,
+                    same_depot_required=same_depot_req,
                 )
                 new_pop.append(_mutate(
                     c1,
@@ -477,6 +485,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                     min_break=int(min_break) if min_break is not None else 30,
                     enforce_min_interval=enforce_min_interval,
                     connection_tolerance=connection_tolerance,
+                    same_depot_required=same_depot_req,
                 ))
                 if len(new_pop) < self.pop_size:
                     new_pop.append(_mutate(
@@ -487,6 +496,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                         min_break=int(min_break) if min_break is not None else 30,
                         enforce_min_interval=enforce_min_interval,
                         connection_tolerance=connection_tolerance,
+                        same_depot_required=same_depot_req,
                     ))
 
             population = new_pop

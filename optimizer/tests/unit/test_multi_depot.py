@@ -11,6 +11,7 @@ from src.domain.models import Trip, VehicleType, VSPSolution
 from src.algorithms.vsp.greedy import GreedyVSP
 from src.algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
 from src.algorithms.vsp.tabu_search import TabuSearchVSP
+from src.algorithms.vsp.genetic import GeneticVSP
 
 
 def _vt() -> VehicleType:
@@ -196,6 +197,27 @@ class TestTabuMultiDepot:
         ]
         sol = TabuSearchVSP(vsp_params=params).solve(trips, [_vt()])
         assert len(sol.blocks) == 1
+
+
+class TestGeneticMultiDepot:
+    """Genetic VSP deve respeitar same_depot_required no repair/crossover/mutate."""
+
+    def test_genetic_does_not_mix_depots(self):
+        params = {
+            "min_layover_minutes": 5,
+            "same_depot_required": True,
+            "random_seed": 42,
+        }
+        trips = [
+            _trip(1, 360, 470, depot_id=1),
+            _trip(2, 480, 590, depot_id=1),
+            _trip(3, 360, 470, depot_id=2),
+            _trip(4, 480, 590, depot_id=2),
+        ]
+        sol = GeneticVSP(vsp_params=params).solve(trips, [_vt()])
+        for block in sol.blocks:
+            depots = {t.depot_id for t in block.trips if t.depot_id is not None}
+            assert len(depots) <= 1, f"Genetic misturou depósitos no bloco: {depots}"
 
 
 class TestMultiDepotMeta:
