@@ -375,6 +375,10 @@ def test_hybrid_pipeline_skips_vsp_metaheuristics_for_scaled_instances(monkeypat
     baseline_vsp = VSPSolution(blocks=baseline_blocks, algorithm="mcnf_vsp")
 
     monkeypatch.setattr("src.algorithms.hybrid.pipeline.MCNFVSP.solve", lambda self, *args, **kwargs: baseline_vsp)
+    # For n≥500, pipeline also runs GreedyVSP to pick the best VSP baseline.
+    # n=229 is below that threshold so GreedyVSP won't be called, but mock it
+    # defensively to prevent accidental real-execution if the threshold changes.
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.GreedyVSP.solve", lambda self, *args, **kwargs: baseline_vsp)
     monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_cost", lambda *args, **kwargs: 0.0)
     monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_hard_issue_count", lambda *args, **kwargs: 0)
 
@@ -396,6 +400,7 @@ def test_hybrid_pipeline_skips_vsp_metaheuristics_for_scaled_instances(monkeypat
 
     result = HybridPipeline(time_budget_s=30.0, cct_params={}, vsp_params={}).solve(trips, _vehicle())
 
+    # Both MCNF and Greedy return the same mock (equal blocks/cost) — MCNF kept (no strict improvement).
     assert result.vsp.algorithm == "mcnf_vsp"
     assert baseline_vsp.meta["performance"]["vsp_metaheuristics_skipped"]["reason"] == "instance_scale_guard"
 

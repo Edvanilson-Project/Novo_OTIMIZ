@@ -150,14 +150,42 @@ class HybridPipeline(BaseAlgorithm):
                 max_metaheuristic_trips,
                 max_metaheuristic_blocks,
             )
+            # A grandes escalas (n≥500), MCNF fragmenta excessivamente comparado ao greedy.
+            # Abaixo de 500 trips, MCNF e greedy produzem blocos similares; mantemos MCNF
+            # pois o greedy pode criar blocos de longa duração em horários pico (manhã+tarde).
+            mcnf_block_count = best_vehicles
+            if n >= 500:
+                t_phase = time.perf_counter()
+                greedy_vsp = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+                phase_timings_ms["vsp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+                greedy_issues = _vsp_hard_issue_count(greedy_vsp, self.vsp_params)
+                greedy_cost = _vsp_cost(greedy_vsp, self.vsp_params, cached_pairs)
+                greedy_acceptable = (greedy_issues == 0) if strict_hard else (greedy_issues <= best_issues)
+                greedy_better = (
+                    greedy_acceptable
+                    and (
+                        greedy_issues < best_issues
+                        or (greedy_issues == best_issues and len(greedy_vsp.blocks) < best_vehicles)
+                        or (greedy_issues == best_issues and len(greedy_vsp.blocks) == best_vehicles and greedy_cost < best_cost)
+                    )
+                )
+                logger.info(
+                    "[PIPELINE] scale greedy: %d blocks cost=%.0f issues=%d (mcnf: %d blocks) → %s",
+                    len(greedy_vsp.blocks), greedy_cost, greedy_issues, mcnf_block_count,
+                    "greedy selected" if greedy_better else "mcnf kept",
+                )
+                if greedy_better:
+                    best_vsp = greedy_vsp
+                    best_vehicles = len(greedy_vsp.blocks)
             best_vsp.meta.setdefault("performance", {})
             best_vsp.meta["performance"]["vsp_metaheuristics_skipped"] = {
                 "reason": "instance_scale_guard",
                 "trip_count": n,
-                "block_count": len(best_vsp.blocks),
+                "block_count": best_vehicles,
                 "max_trips": max_metaheuristic_trips,
                 "max_blocks": max_metaheuristic_blocks,
-                "selected_vsp_algorithm": getattr(best_vsp, "algorithm", "mcnf_vsp"),
+                "selected_vsp_algorithm": getattr(best_vsp, "algorithm", "greedy_vsp"),
+                "mcnf_blocks": mcnf_block_count,
             }
             return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
