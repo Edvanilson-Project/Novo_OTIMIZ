@@ -256,6 +256,12 @@ export const scenariosApi = {
     apiClient.post(`/operations/optimization-advanced/replay/${fingerprint}`).then((r) => r.data),
 };
 
+// ─── Weekly Rostering ─────────────────────────────────────────────────────────
+export const weeklyRosteringApi = {
+  solve: (body: object) =>
+    apiClient.post('/optimizer/rostering/weekly', body).then((r) => r.data),
+};
+
 export const gtfsApi = {
   import: (file: File) => {
     const fd = new FormData();

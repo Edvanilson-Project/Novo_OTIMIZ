@@ -14,6 +14,7 @@ import {
   IconTruck,
   IconCalendarTime,
   IconReportAnalytics,
+  IconCalendarStats,
 } from "@tabler/icons-react";
 import { uniqueId } from "lodash";
 
@@ -68,6 +69,12 @@ const Menuitems: MenuitemsType[] = [
     title: "Planejador (Gantt)",
     icon: IconCalendarTime,
     href: "/operations/planner",
+  },
+  {
+    id: uniqueId(),
+    title: "Escala Semanal",
+    icon: IconCalendarStats,
+    href: "/operations/rostering",
   },
   {
     id: uniqueId(),
