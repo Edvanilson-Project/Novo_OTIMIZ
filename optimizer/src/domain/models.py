@@ -15,6 +15,7 @@ class AlgorithmType(str, Enum):
     SIMULATED_ANNEALING = "simulated_annealing"
     TABU_SEARCH = "tabu_search"
     SET_PARTITIONING = "set_partitioning"
+    CP_SAT = "cp_sat"
     MCNF = "mcnf"
     JOINT_SOLVER = "joint_solver"
     HYBRID_PIPELINE = "hybrid_pipeline"

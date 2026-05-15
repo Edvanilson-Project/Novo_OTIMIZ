@@ -43,6 +43,7 @@ from .operational_quality_helpers import (
     summarize_operational_quality as _module_summarize_operational_quality,
 )
 
+from ..algorithms.csp.cp_sat_csp import CPSatCSP
 from ..algorithms.csp.greedy import GreedyCSP
 from ..algorithms.csp.set_partitioning_optimized import SetPartitioningOptimizedCSP
 from ..algorithms.evaluator import CostEvaluator
@@ -3527,4 +3528,10 @@ class OptimizerService:
         return GreedyCSP(vsp_params=vsp_params, **full_params)
 
     def _make_set_covering_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any]):
-        return SetPartitioningOptimizedCSP(vsp_params=vsp_params, **cct_params)
+        # CP-SAT (OR-Tools) preferido por ser mais rápido em scheduling.
+        # Fallback automático para PuLP/CBC se ortools não estiver instalado.
+        try:
+            from ortools.sat.python import cp_model as _  # noqa: F401
+            return CPSatCSP(vsp_params=vsp_params, **cct_params)
+        except ImportError:
+            return SetPartitioningOptimizedCSP(vsp_params=vsp_params, **cct_params)

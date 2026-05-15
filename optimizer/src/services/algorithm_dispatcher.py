@@ -225,7 +225,7 @@ def dispatch_algorithm(
         return _run_sa(**common_kwargs, csp_factory=csp_factory)
     if algorithm == AlgorithmType.TABU_SEARCH:
         return _run_ts(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.SET_PARTITIONING:
+    if algorithm in (AlgorithmType.SET_PARTITIONING, AlgorithmType.CP_SAT):
         return _run_sp(**common_kwargs, csp_factory=csp_factory, set_covering_factory=set_covering_factory)
     if algorithm == AlgorithmType.MCNF:
         return _run_mcnf(**common_kwargs, csp_factory=csp_factory)
