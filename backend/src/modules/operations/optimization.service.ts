@@ -207,6 +207,7 @@ export class OptimizationService implements OnModuleInit {
             mid_trip_relief_offset_minutes: t.midTripReliefOffsetMinutes ?? null,
             mid_trip_relief_distance_ratio: t.midTripReliefDistanceRatio ?? null,
             mid_trip_relief_elevation_ratio: t.midTripReliefElevationRatio ?? null,
+            depot_id: t.depotId ?? null,
           };
         }),
         vehicle_types: this.buildVehicleTypesPayload(vehicleTypes, params),

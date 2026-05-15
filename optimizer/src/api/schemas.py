@@ -684,3 +684,53 @@ class AiChatRequest(BaseModel):
 class AiChatResponse(BaseModel):
     answer: str
     status: str = "ok"
+
+
+# ── Weekly Rostering ─────────────────────────────────────────────────────────
+
+class WeeklyDutyInput(BaseModel):
+    id: int
+    start_time: int = Field(description="Minutos desde meia-noite")
+    end_time: int = Field(description="Minutos desde meia-noite")
+    duration: int = Field(description="Duração em minutos")
+
+
+class WeeklyRosteringRequest(BaseModel):
+    daily_duties: Dict[int, List[WeeklyDutyInput]] = Field(
+        description="Mapa dia_index (0=seg…6=dom) → lista de jornadas"
+    )
+    operators: List[OperatorProfileInput] = Field(description="Motoristas disponíveis")
+    weekly_hour_limit_minutes: int = Field(2640, description="Limite semanal (44h CLT = 2640 min)")
+    min_days_off: int = Field(1, description="Dias mínimos de folga por semana (CLT Art. 67)")
+    min_inter_shift_rest_minutes: int = Field(660, description="Descanso mínimo entre dias consecutivos (11h CCT)")
+    time_budget_s: float = Field(60.0, description="Orçamento de tempo para CP-SAT")
+
+
+class WeeklyAssignmentOutput(BaseModel):
+    operator_id: str
+    day_index: int
+    duty_id: int
+    duty_minutes: int
+    duty_start: int
+    duty_end: int
+
+
+class OperatorWeeklyScheduleOutput(BaseModel):
+    operator_id: str
+    assignments: List[WeeklyAssignmentOutput]
+    total_minutes: int
+    days_worked: int
+    days_off: List[int]
+    weekly_cost: float
+
+
+class WeeklyRosteringResponse(BaseModel):
+    status: str = "ok"
+    schedules: List[OperatorWeeklyScheduleOutput]
+    unassigned_by_day: Dict[int, List[int]]
+    fairness_gini: float
+    total_minutes_assigned: int
+    elapsed_ms: float
+    algorithm: str
+    feasible: bool
+    meta: Dict[str, Any]

@@ -61,8 +61,9 @@ describe('VehicleMaintenanceService', () => {
   describe('scheduleMaintenance', () => {
     it('should schedule maintenance successfully', async () => {
       const vehicleId = 1;
+      const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // +30 dias
       const data = {
-        maintenanceDate: new Date('2026-05-15').toISOString(),
+        maintenanceDate: futureDate.toISOString(),
         maintenanceType: 'preventive',
         estimatedDurationHours: 4,
         cost: 500,
@@ -100,7 +101,7 @@ describe('VehicleMaintenanceService', () => {
     it('should throw error if maintenance already scheduled', async () => {
       const vehicleId = 1;
       const data = {
-        maintenanceDate: new Date('2026-05-15').toISOString(),
+        maintenanceDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
       maintenanceRepo.findOne.mockResolvedValue({

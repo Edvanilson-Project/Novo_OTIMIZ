@@ -68,4 +68,7 @@ export class Trip extends TenantBaseEntity {
 
   @Column({ type: 'float', nullable: true })
   midTripReliefElevationRatio: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  depotId: number | null;
 }

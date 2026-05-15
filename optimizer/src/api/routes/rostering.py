@@ -1,18 +1,23 @@
 import logging
 from fastapi import APIRouter, HTTPException
 from ..schemas import (
-    NominalRosteringRequest, 
-    NominalRosteringResponse, 
-    AssignmentOutput
+    NominalRosteringRequest,
+    NominalRosteringResponse,
+    AssignmentOutput,
+    WeeklyRosteringRequest,
+    WeeklyRosteringResponse,
+    WeeklyAssignmentOutput,
+    OperatorWeeklyScheduleOutput,
 )
 from ...services.rostering.solver import NominalRosteringSolver
+from ...services.rostering.weekly_solver import WeeklyRosteringSolver
 from ...domain.models import (
-    OperatorProfile, 
-    RosteringRule, 
-    Duty, 
-    Trip, 
+    OperatorProfile,
+    RosteringRule,
+    Duty,
+    Trip,
     DutySegment,
-    RuleType
+    RuleType,
 )
 
 router = APIRouter()
@@ -133,4 +138,87 @@ async def run_nominal_rostering(body: NominalRosteringRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Falha interna no motor de Rostering: {str(exc)}"
+        )
+
+
+@router.post(
+    "/weekly",
+    response_model=WeeklyRosteringResponse,
+    tags=["rostering"],
+    summary="Escala Semanal (Weekly Crew Rostering)",
+    description=(
+        "Atribui motoristas a jornadas em múltiplos dias da semana respeitando "
+        "CLT Art.67 (folga mínima), CLT 44h/semana e CCT 11h entre dias consecutivos. "
+        "Usa OR-Tools CP-SAT com fallback para greedy."
+    ),
+)
+async def run_weekly_rostering(body: WeeklyRosteringRequest):
+    logger.info(
+        "weekly_rostering_request: operators=%d, days=%d",
+        len(body.operators),
+        len(body.daily_duties),
+    )
+    try:
+        operators = [
+            OperatorProfile(
+                id=op.id,
+                name=op.name,
+                cp=op.cp,
+                last_shift_end=op.last_shift_end,
+                metadata=op.metadata,
+            )
+            for op in body.operators
+        ]
+
+        # WeeklyRosteringSolver usa getattr(duty, field, 0) — WeeklyDutyInput
+        # satisfaz essa interface diretamente (id, start_time, end_time, duration).
+        daily_duties: dict = {
+            int(day_idx): list(duty_list)
+            for day_idx, duty_list in body.daily_duties.items()
+        }
+
+        solver = WeeklyRosteringSolver(
+            weekly_hour_limit_minutes=body.weekly_hour_limit_minutes,
+            min_days_off=body.min_days_off,
+            min_inter_shift_rest_minutes=body.min_inter_shift_rest_minutes,
+            time_budget_s=body.time_budget_s,
+        )
+        sol = solver.solve(daily_duties, operators)
+
+        return WeeklyRosteringResponse(
+            status="ok",
+            schedules=[
+                OperatorWeeklyScheduleOutput(
+                    operator_id=s.operator_id,
+                    assignments=[
+                        WeeklyAssignmentOutput(
+                            operator_id=a.operator_id,
+                            day_index=a.day_index,
+                            duty_id=a.duty_id,
+                            duty_minutes=a.duty_minutes,
+                            duty_start=a.duty_start,
+                            duty_end=a.duty_end,
+                        )
+                        for a in s.assignments
+                    ],
+                    total_minutes=s.total_minutes,
+                    days_worked=s.days_worked,
+                    days_off=s.days_off,
+                    weekly_cost=s.weekly_cost,
+                )
+                for s in sol.schedules
+            ],
+            unassigned_by_day={k: v for k, v in sol.unassigned_by_day.items()},
+            fairness_gini=sol.fairness_gini,
+            total_minutes_assigned=sol.total_minutes_assigned,
+            elapsed_ms=sol.elapsed_ms,
+            algorithm=sol.algorithm,
+            feasible=sol.feasible,
+            meta=sol.meta,
+        )
+    except Exception as exc:
+        logger.exception("Erro crítico no processamento de Weekly Rostering")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Falha interna no motor de Weekly Rostering: {str(exc)}",
         )

@@ -3,7 +3,7 @@
     "label": "Pequena operadora (280v)",
     "n_trips": 62,
     "greedy": {
-      "elapsed_s": 0.07,
+      "elapsed_s": 0.04,
       "blocks": 18,
       "duties": 25,
       "cost": 24616.3,
@@ -12,7 +12,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 0.1,
+      "elapsed_s": 0.06,
       "blocks": 17,
       "duties": 25,
       "cost": 24710.38,
@@ -21,7 +21,7 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 42.92,
+      "elapsed_s": 42.91,
       "blocks": 17,
       "duties": 24,
       "cost": 24235.97,
@@ -52,10 +52,10 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 65.44,
+      "elapsed_s": 65.54,
       "blocks": 40,
-      "duties": 62,
-      "cost": 65512.15,
+      "duties": 63,
+      "cost": 66212.23,
       "violations": 0,
       "uncovered": 0,
       "cpsat_activated": true
@@ -65,7 +65,7 @@
     "label": "Grande operadora (1.400v)",
     "n_trips": 518,
     "greedy": {
-      "elapsed_s": 1.04,
+      "elapsed_s": 1.09,
       "blocks": 83,
       "duties": 131,
       "cost": 137735.4,
@@ -74,7 +74,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 2.49,
+      "elapsed_s": 2.63,
       "blocks": 81,
       "duties": 129,
       "cost": 134890.06,
@@ -83,7 +83,7 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 37.83,
+      "elapsed_s": 37.56,
       "blocks": 81,
       "duties": 129,
       "cost": 134890.06,
@@ -96,7 +96,7 @@
     "label": "Frota total estimada (1.400v, seed alt)",
     "n_trips": 518,
     "greedy": {
-      "elapsed_s": 0.9,
+      "elapsed_s": 0.88,
       "blocks": 81,
       "duties": 131,
       "cost": 139075.95,
@@ -105,7 +105,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 2.23,
+      "elapsed_s": 2.17,
       "blocks": 79,
       "duties": 133,
       "cost": 137852.62,
@@ -114,7 +114,7 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 33.38,
+      "elapsed_s": 32.56,
       "blocks": 79,
       "duties": 133,
       "cost": 137710.87,

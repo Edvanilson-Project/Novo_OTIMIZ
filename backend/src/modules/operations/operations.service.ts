@@ -313,6 +313,7 @@ export class OperationsService {
       midTripReliefOffsetMinutes: data.midTripReliefOffsetMinutes !== undefined && data.midTripReliefOffsetMinutes !== null && data.midTripReliefOffsetMinutes !== '' ? safeInt(data.midTripReliefOffsetMinutes) : null,
       midTripReliefDistanceRatio: data.midTripReliefDistanceRatio !== undefined && data.midTripReliefDistanceRatio !== null && data.midTripReliefDistanceRatio !== '' ? safeFloat(data.midTripReliefDistanceRatio) : null,
       midTripReliefElevationRatio: data.midTripReliefElevationRatio !== undefined && data.midTripReliefElevationRatio !== null && data.midTripReliefElevationRatio !== '' ? safeFloat(data.midTripReliefElevationRatio) : null,
+      depotId: data.depotId !== undefined && data.depotId !== null && data.depotId !== '' ? safeInt(data.depotId) : null,
     });
     const saved = await this.tripRepository.save(trip);
 
@@ -379,6 +380,7 @@ export class OperationsService {
       midTripReliefOffsetMinutes: data.midTripReliefOffsetMinutes !== undefined ? numOrNull(data.midTripReliefOffsetMinutes) : trip.midTripReliefOffsetMinutes,
       midTripReliefDistanceRatio: data.midTripReliefDistanceRatio !== undefined ? floatOrNull(data.midTripReliefDistanceRatio) : trip.midTripReliefDistanceRatio,
       midTripReliefElevationRatio: data.midTripReliefElevationRatio !== undefined ? floatOrNull(data.midTripReliefElevationRatio) : trip.midTripReliefElevationRatio,
+      depotId: data.depotId !== undefined ? numOrNull(data.depotId) : trip.depotId,
     });
     return this.tripRepository.save(trip);
   }
