@@ -80,13 +80,37 @@ Em servidor de produção com CPU mais rápida espera-se **2–4× melhor** que 
 
 ---
 
+## Benchmark Salvador-BA — dados bimodais (pico manhã/tarde)
+
+> Adicionado 2026-05-15 via `tests/benchmark_salvador.py`. Dados sintéticos realistas com
+> distribuição de pico real (40% 5h-9h, 25% 17h-21h). Não-uniformes — contrasta com seed=42 uniforme.
+
+| Cenário (n viagens)    | Algoritmo       | Blocos | Custo (R$) | Tempo |
+|------------------------|-----------------|--------|------------|-------|
+| Pequena (62v)          | greedy          | 18     | 24.616     | 0.0s  |
+| Pequena (62v)          | **branch_and_price** | **16** | **23.665** | **0.1s** |
+| Média (226v)           | greedy          | 47     | 69.938     | 0.3s  |
+| Média (226v)           | **branch_and_price** | **42** | **64.968** | **1.4s** |
+| Média (226v)           | hybrid_pipeline | 40     | 65.269     | 65.4s |
+| Grande (518v, iters=5) | greedy          | 83     | 137.735    | 1.1s  |
+| Grande (518v, iters=5) | **branch_and_price** | 82 | **131.176** | **11.5s** |
+| Grande (518v, iters=5) | mcnf            | 81     | 134.890    | 2.5s  |
+| Grande (518v, iters=5) | hybrid_pipeline | 81     | 134.890    | 37.1s |
+
+**Achado-chave (dados bimodais):** B&P lidera em custo total em todos os tamanhos.
+A 518v, vence mcnf em custo (−2.3%) mesmo com 1 bloco a mais (82 vs 81). Parâmetros
+recomendados para dados reais com 400-600v: `bp_max_pricing_iterations=5, bp_max_pricing_columns=2000`.
+
+---
+
 ## Recomendações por caso de uso
 
 | Cenário                                     | Algoritmo recomendado  |
 |---------------------------------------------|------------------------|
 | Resposta imediata (< 2s), qualquer tamanho  | `greedy`               |
-| Melhor custo, tamanhos pequenos (< 500v)    | `hybrid_pipeline` ou `genetic` |
-| Melhor custo, tamanhos médios (500–1500v)   | `hybrid_pipeline` (agora competitivo) |
+| Melhor custo total (qualquer tamanho ≤ 2000v) | `branch_and_price`  |
+| Consolidação máxima de blocos (< 300v)      | `branch_and_price`     |
+| Consolidação máxima de blocos (300-600v)    | `mcnf` ou `branch_and_price` (empate) |
 | Volumes grandes (> 1500v) com tempo apertado | `greedy` ou `assignment_vsp` |
 | Multi-depot com custo de deadhead explícito | `mcnf`                 |
 

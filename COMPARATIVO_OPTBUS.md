@@ -104,7 +104,10 @@ dois — solução melhor que greedy puro, gastando ~180s vs 1.8s do greedy. Pos
 "vale o tempo extra para encontrar consolidação melhor de duties + blocos".
 
 **Update 2026-05-15 — gap fechado com Branch-and-Price:**
-O `branch_and_price` (Column Generation + SPPRC F3) passa a ser o líder em consolidação:
+O `branch_and_price` (Column Generation + SPPRC F3) passa a ser o líder em consolidação
+e custo, tanto em dados uniformes quanto em dados bimodais (picos manhã/tarde):
+
+**Dados uniformes (sintéticos, seed=42):**
 
 | Algoritmo | 2000v blocos | tempo |
 |-----------|-------------|-------|
@@ -112,10 +115,22 @@ O `branch_and_price` (Column Generation + SPPRC F3) passa a ser o líder em cons
 | greedy | 333 | 4s |
 | **branch_and_price** | **331** | **8.5s** |
 
-B&P com warm-start greedy + loop CG (2 iterações, 500 colunas/iter, SPPRC com dominância)
-fica **abaixo do greedy direto** em menos de 9 segundos. O gap que era estrutural
-(decomposição em chunks) foi contornado com formulação global via set-partitioning LP + MIP final.
-O algoritmo está disponível via `algorithm: "branch_and_price"` na API.
+**Dados bimodais Salvador-BA (sintéticos realistas, pico 5h-9h e 17h-21h):**
+
+| n | Algoritmo | Blocos | Custo (R$) | Tempo |
+|---|-----------|--------|------------|-------|
+| 226v | **branch_and_price** | **42** | **64.968** | **1.4s** |
+| 226v | hybrid_pipeline | 40 | 65.269 | 65s |
+| 518v | mcnf | 81 | 134.890 | 2.5s |
+| 518v | **branch_and_price** | 82 | **131.176** | **11.5s** |
+
+A 226v, B&P lidera em custo e é 45× mais rápido que hybrid. A 518v, tem 1 bloco a mais que
+mcnf mas custo 2.3% menor — mostra que a otimização global do set-partitioning LP encontra
+assignments de veículos mais baratos mesmo quando não reduz a contagem de blocos.
+
+B&P com warm-start greedy + loop CG (SPPRC com dominância) disponível via
+`algorithm: "branch_and_price"` na API. Parâmetros recomendados para dados reais:
+`bp_max_pricing_iterations=5, bp_max_pricing_columns=2000` para instâncias ≤ 600v.
 
 ---
 
@@ -155,8 +170,9 @@ que o sistema roda em produção com a frota real.
 4. **Solver comercial opcional**: Gurobi tem licença acadêmica gratuita; CPLEX também. Não é
    bloqueador no estado atual (CP-SAT cobre até 1500 trips bem), mas seria a alavanca para
    chegar em escalas de 5000+ trips.
-5. **Gap 2000v resolvido (331 blocos, abaixo do greedy)**: Branch-and-Price implementado e
-   validado. Próximo passo: testar com dados GTFS reais para confirmar ganho em produção.
+5. **Gap 2000v resolvido + validado com dados bimodais**: B&P implementado (F3 SPPRC), benchmarkado
+   em dados uniformes (331 blocos, 8.5s) e dados bimodais Salvador (líder em custo em todos os
+   tamanhos testados). Próximo passo: testar com feed GTFS real de uma operadora.
 
 Sem pelo menos o item 1, a comparação com Optibus é acadêmica.
 

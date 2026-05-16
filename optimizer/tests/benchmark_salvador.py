@@ -180,13 +180,26 @@ def run_benchmark():
         print(f"--- {label} ({n} viagens) ---")
 
         row = {"label": label, "n_trips": n}
-        for algo, budget in [("greedy", 30), ("mcnf", 60), ("hybrid_pipeline", 120)]:
+        # B&P params calibrados com dados bimodais Salvador (benchmark 2026-05-15):
+        # a 518v empata blocos com greedy mas vence em custo; mais iters/cols para >400v
+        bp_iters = 5 if n < 300 else (5 if n < 600 else 3)
+        bp_cols = 1000 if n < 300 else (2000 if n < 600 else 1000)
+        bp_labels = 20 if n < 300 else (20 if n < 600 else 15)
+        vsp_params_bp = {**vsp_params, "bp_max_pricing_iterations": bp_iters,
+                         "bp_max_pricing_columns": bp_cols, "bp_max_labels_per_node": bp_labels}
+        algo_configs = [
+            ("greedy", 30, vsp_params),
+            ("branch_and_price", min(300, n // 2 + 60), vsp_params_bp),
+            ("mcnf", 60, vsp_params),
+            ("hybrid_pipeline", 120, vsp_params),
+        ]
+        for algo, budget, ap in algo_configs:
             t0 = time.perf_counter()
             try:
                 result = service.run(
                     trips=trips, vehicle_types=vt_salvador(),
                     algorithm=AlgorithmType(algo), time_budget_s=budget,
-                    vsp_params=vsp_params, cct_params={},
+                    vsp_params=ap, cct_params={},
                 )
                 elapsed = time.perf_counter() - t0
                 blocks = len(result.vsp.blocks) if result.vsp else 0
@@ -212,23 +225,28 @@ def run_benchmark():
         results.append(row)
         print()
 
-    # Análise de qualidade: hybrid vs greedy
+    # Análise de qualidade: todos os algoritmos vs greedy
     print(f"{'='*70}")
-    print("ANÁLISE DE QUALIDADE: hybrid_pipeline vs greedy")
+    print("ANÁLISE DE QUALIDADE: blocos e custo vs greedy")
     print(f"{'='*70}")
+    ALGOS = ["branch_and_price", "mcnf", "hybrid_pipeline"]
     for row in results:
-        if "greedy" not in row or "hybrid_pipeline" not in row:
+        g = row.get("greedy", {})
+        if "error" in g or not g:
             continue
-        g = row["greedy"]
-        h = row["hybrid_pipeline"]
-        if "error" in g or "error" in h:
-            continue
-        g_cost, h_cost = g["cost"], h["cost"]
-        diff_pct = (h_cost - g_cost) / max(1, g_cost) * 100
-        symbol = "✓ MELHORA" if diff_pct < -0.5 else ("≈ SIMILAR" if abs(diff_pct) <= 2 else "✗ PIORA")
-        cpsat_tag = " [CP-SAT ativo]" if h.get("cpsat_activated") else " [CP-SAT skip]"
-        print(f"  {row['label'][:30]:<30}  greedy={g_cost:>10,.0f}  hybrid={h_cost:>10,.0f}"
-              f"  diff={diff_pct:+.1f}%  {symbol}{cpsat_tag}")
+        g_cost, g_blocks = g["cost"], g["blocks"]
+        parts = [f"  {row['label'][:28]:<28}  greedy={g_blocks}b/R${g_cost:>8,.0f}"]
+        for algo in ALGOS:
+            r = row.get(algo, {})
+            if not r or "error" in r:
+                parts.append(f"  {algo}=ERR")
+                continue
+            db = r["blocks"] - g_blocks
+            dc = (r["cost"] - g_cost) / max(1, g_cost) * 100
+            sign_b = "+" if db > 0 else ""
+            sign_c = "+" if dc > 0 else ""
+            parts.append(f"  {algo}={r['blocks']}b({sign_b}{db}) {sign_c}{dc:.1f}%")
+        print("".join(parts))
 
     # Salvar resultado
     out_path = ROOT / "benchmark_salvador.json"
