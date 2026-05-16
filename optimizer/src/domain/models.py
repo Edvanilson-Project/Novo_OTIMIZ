@@ -21,6 +21,7 @@ class AlgorithmType(str, Enum):
     HYBRID_PIPELINE = "hybrid_pipeline"
     VCSP_PULP = "vcsp_pulp"
     ASSIGNMENT_VSP = "assignment_vsp"
+    BRANCH_AND_PRICE = "branch_and_price"
 
 
 class SolverPhase(str, Enum):

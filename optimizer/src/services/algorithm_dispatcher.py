@@ -15,6 +15,7 @@ from ..algorithms.hybrid.pipeline import HybridPipeline
 from ..algorithms.integrated.joint_solver import JointSolver
 from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
 from ..algorithms.vsp.assignment import AssignmentVSP
+from ..algorithms.vsp.branch_and_price import BranchAndPrice
 from ..algorithms.vsp.genetic import GeneticVSP
 from ..algorithms.vsp.greedy import GreedyVSP
 from ..algorithms.vsp.mcnf import MCNFVSP
@@ -154,6 +155,18 @@ def _run_assignment_vsp(
     return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
 
 
+def _run_branch_and_price(
+    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
+    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+) -> OptimizationResult:
+    csp = csp_factory(cct_params, vsp_params, optimization_params)
+    bp = BranchAndPrice(vsp_params=vsp_params)
+    bp.time_budget_s = time_budget_s
+    vsp_sol = bp.solve(trips, vehicle_types, depot_id)
+    return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
+
+
 def dispatch_algorithm(
     algorithm: AlgorithmType,
     *,
@@ -237,5 +250,7 @@ def dispatch_algorithm(
         return _run_vcsp_pulp(**common_kwargs)
     if algorithm == AlgorithmType.ASSIGNMENT_VSP:
         return _run_assignment_vsp(**common_kwargs, csp_factory=csp_factory)
+    if algorithm == AlgorithmType.BRANCH_AND_PRICE:
+        return _run_branch_and_price(**common_kwargs, csp_factory=csp_factory)
 
     raise InvalidAlgorithmError(str(algorithm))
