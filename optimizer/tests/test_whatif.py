@@ -16,12 +16,15 @@ import os
 # Garante que o módulo 'src' seja encontrado ao rodar pytest do diretório optimizer/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+os.environ.setdefault("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")
+
 import pytest
 from fastapi.testclient import TestClient
 
 from main import app  # type: ignore[import]
 
-client = TestClient(app, raise_server_exceptions=True, headers={"X-Internal-Key": "internal-key-123456"})
+_INTERNAL_KEY = os.environ.get("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")
+client = TestClient(app, raise_server_exceptions=True, headers={"X-Internal-Key": _INTERNAL_KEY})
 
 
 def _trip_ids_in(block: dict) -> set:

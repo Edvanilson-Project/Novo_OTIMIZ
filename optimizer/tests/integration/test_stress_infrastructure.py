@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from typing import List
 
@@ -49,7 +50,7 @@ async def test_infrastructure_stress_queueing():
     }
     
     headers = {
-        "X-Internal-Key": "internal-key-123456"
+        "X-Internal-Key": os.environ.get("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")
     }
 
     async def _send_request(client: httpx.AsyncClient, request_id: int) -> httpx.Response:

@@ -507,7 +507,12 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         master = MasterProblemLP()
         trip_by_id = {t.id: t for t in trips}
         for block in warm_start.blocks:
-            master.add_column([t.id for t in block.trips], fixed_cost)
+            # Incluir custo de energia EV nos blocos de warm-start
+            block_energy = (
+                sum(t.distance_km * kwh_per_km * energy_cost_per_kwh for t in block.trips)
+                if is_ev else 0.0
+            )
+            master.add_column([t.id for t in block.trips], fixed_cost + block_energy)
 
         pricing = PricingSubproblem(
             trips=trips,
