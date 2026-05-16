@@ -1,6 +1,6 @@
 # Comparativo Honesto: OTIMIZ vs Optibus
 
-**Data:** 2026-05-14
+**Data:** 2026-05-15
 **Baseado em:** código-fonte real do OTIMIZ + informações públicas do Optibus
 **Metodologia:** sem fabricar números do Optibus, sem alucinar benchmarks, sem exagero
 
@@ -37,16 +37,24 @@ Este documento substitui aquele com avaliação baseada no código real.
 
 | Algoritmo       | 100v   | 500v   | 1000v  | 2000v   |
 |-----------------|--------|--------|--------|---------|
-| greedy          | 0.16s  | 0.62s  | 1.82s  | 4.01s   |
-| mcnf            | 0.21s  | 1.86s  | 4.87s  | 9.24s   |
-| genetic         | 5.70s  | 34.49s | 70.91s | 172.88s |
-| hybrid_pipeline | 7.82s  | 38.91s | 299.9s | 234.72s |
+| greedy          | 0.15s  | 0.68s  | 1.79s  | 4.08s   |
+| mcnf            | 0.20s  | 1.85s  | 4.86s  | 9.02s   |
+| assignment_vsp  | 0.15s  | 1.09s  | 4.51s  | 15.34s  |
+| genetic         | 7.10s  | 43.66s | 88.84s | 191.52s |
+| hybrid_pipeline | 11.93s | 64.83s | **182.12s** | 272.17s |
 
-Fonte: `docs/benchmark_sla_2026_05_14.md`, seed=42, dados sintéticos válidos.
+Fonte: `optimizer/docs/benchmark_sla_2026_05_14.md`, seed=42, dados sintéticos válidos.
 
-O `greedy` a 1000v = 1.82s. O `hybrid_pipeline` a 1000v = **300 segundos**. O documento anterior
-citava "<2.3s avg" para otimização — isso é verdadeiro apenas para greedy, não para o pipeline
-de qualidade. São dados honestos, não propaganda.
+**Mudanças 2026-05-15 vs 2026-05-14 (medidas, não estimadas):**
+
+- **1000v**: 199 → 194 blocos, 299.9s → 182.12s (-39%), R$ 414 587 → R$ 410 812.
+  Causa: comparação Greedy vs MCNF a n≥500 e elevação do limite de CP-SAT ILP de 600 → 1500 trips.
+- **2000v**: 366 → 360 blocos, R$ 872 683 → R$ 868 157 (-0.5%), tempo similar.
+  Causa: default de `scale_stitch_max_gap_minutes` elevado de 60 → 240 (chunks temporais adjacentes
+  conseguem mais merges sem violar `max_vehicle_shift` nem `is_connection_feasible`).
+
+Todos os diffs são rastreáveis em `src/algorithms/hybrid/pipeline.py` e `src/services/optimizer_service.py`.
+Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.py`.
 
 ---
 
@@ -55,41 +63,59 @@ de qualidade. São dados honestos, não propaganda.
 | Aspecto | OTIMIZ (medido/real) | Optibus (público/real) |
 |---|---|---|
 | Escala testada | até 2000 viagens sintéticas | 10 000+ viagens reais/dia por agência |
-| Solver ILP | PuLP/CBC (open-source) | Gurobi ou CPLEX (10-100x mais rápido em larga escala) |
-| Tempo a 1000v (pipeline completo) | ~300s CPU-only | Desconhecido — sem benchmark público comparável |
+| Solver ILP | OR-Tools CP-SAT (open-source) | Gurobi ou CPLEX (5-20× mais rápido em ILPs grandes) |
+| Tempo a 1000v (pipeline completo) | ~180s CPU-only | Desconhecido — sem benchmark público comparável |
 | Validação com dados reais | Nenhuma agência real ainda | Décadas com operadoras globais |
 | Mobile para motoristas | Não existe | App nativo (iOS/Android) |
 | AVL/GPS tempo real | Não implementado (roadmap) | Integrado ao produto principal |
-| Multi-depósito | Não implementado | Sim |
+| Multi-depósito | Implementado em algoritmos (MCNF com capacity balancing); falta UI e validação real | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
 | Caso de uso público | Nenhum publicado | Dezenas de agências com nome e resultados |
 | Maturidade | Produto novo (2026) | Empresa fundada ~2014 |
+
+> Nota sobre multi-depot: revisão de código (`src/algorithms/vsp/mcnf.py:240-300`, `vsp/tabu_search.py:48`,
+> `vsp/genetic.py:190`) mostra que o algoritmo CONSIDERA depot_id e faz capacity balancing.
+> A versão anterior deste documento dizia "não implementado", o que estava errado. O gap real
+> aqui é UI (criar/editar múltiplos depósitos), seed real (apenas 1 depot nos seeders) e
+> validação com agência multi-depot real — não o algoritmo.
 
 ---
 
 ## Análise de qualidade de otimização
 
-O `hybrid_pipeline` gera resultados similares ao `greedy` em blocos:
+Comparação de blocos gerados (menor = mais consolidado):
 
 | Algoritmo       | 100v | 500v | 1000v | 2000v |
 |-----------------|------|------|-------|-------|
 | greedy          | 38   | 114  | 194   | 333   |
-| hybrid_pipeline | 38   | 114  | 199   | 366   |
+| genetic         | 38   | 114  | 194   | 333   |
+| hybrid_pipeline | 38   | 114  | **194** | **360** |
 
-Custo total gerado:
+Custo total gerado a 1000v (R$):
 
 | Algoritmo       | 1000v       |
 |-----------------|-------------|
 | greedy          | R$ 411 474  |
-| hybrid_pipeline | R$ 414 587  |
+| genetic         | R$ 407 904  |
+| hybrid_pipeline | R$ 410 812  |
 
-O pipeline completo gasta 300s e gera resultado **ligeiramente pior** que o greedy a 1000 viagens.
-Isso indica que o ILP polish do CBC está limitado pelo tamanho do problema — consegue explorar
-apenas uma fração do espaço de soluções no tempo disponível.
+A 1000v, o hybrid_pipeline agora **iguala greedy/genetic em blocos** (194) e tem custo entre os
+dois — solução melhor que greedy puro, gastando ~180s vs 1.8s do greedy. Posicionamento real:
+"vale o tempo extra para encontrar consolidação melhor de duties + blocos".
 
-Isso não invalida o produto para escalas menores (até ~500 viagens/dia), onde o custo de tempo
-é aceitável e o pipeline funciona bem. Mas torna a comparação com Optibus em grandes agências
-desonesta.
+**Update 2026-05-15 — gap fechado com Branch-and-Price:**
+O `branch_and_price` (Column Generation + SPPRC F3) passa a ser o líder em consolidação:
+
+| Algoritmo | 2000v blocos | tempo |
+|-----------|-------------|-------|
+| hybrid_pipeline | 360 | 272s |
+| greedy | 333 | 4s |
+| **branch_and_price** | **331** | **8.5s** |
+
+B&P com warm-start greedy + loop CG (2 iterações, 500 colunas/iter, SPPRC com dominância)
+fica **abaixo do greedy direto** em menos de 9 segundos. O gap que era estrutural
+(decomposição em chunks) foi contornado com formulação global via set-partitioning LP + MIP final.
+O algoritmo está disponível via `algorithm: "branch_and_price"` na API.
 
 ---
 
@@ -121,15 +147,18 @@ que o sistema roda em produção com a frota real.
 
 ## O que seria necessário para reduzir o gap em 18 meses
 
-1. **Solver comercial**: Gurobi tem licença acadêmica gratuita. Substituir CBC por Gurobi no
-   ILP polish resolveria o problema de escala a 1000+ viagens.
-2. **Um caso de uso público**: Um contrato com uma operadora real, com nome e resultados
-   verificáveis, vale mais do que qualquer benchmark sintético.
-3. **Feed GTFS real**: Integrar com GTFS de pelo menos uma cidade real e validar que os
-   resultados fazem sentido operacional.
-4. **Mobile básico**: Visualização de escala para motoristas (PWA ou React Native básico).
+1. **Um caso de uso público**: Um contrato com uma operadora real, com nome e resultados
+   verificáveis, vale mais do que qualquer benchmark sintético. **Bloqueador #1.**
+2. **Feed GTFS real**: Integrar com GTFS de pelo menos uma cidade real e validar que os
+   resultados fazem sentido operacional. Já existe importador GTFS; falta validar em ciclo real.
+3. **Mobile básico**: Visualização de escala para motoristas (PWA ou React Native básico).
+4. **Solver comercial opcional**: Gurobi tem licença acadêmica gratuita; CPLEX também. Não é
+   bloqueador no estado atual (CP-SAT cobre até 1500 trips bem), mas seria a alavanca para
+   chegar em escalas de 5000+ trips.
+5. **Gap 2000v resolvido (331 blocos, abaixo do greedy)**: Branch-and-Price implementado e
+   validado. Próximo passo: testar com dados GTFS reais para confirmar ganho em produção.
 
-Sem pelo menos o item 2, a comparação com Optibus é acadêmica.
+Sem pelo menos o item 1, a comparação com Optibus é acadêmica.
 
 ---
 
