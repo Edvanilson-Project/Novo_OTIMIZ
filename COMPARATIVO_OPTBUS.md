@@ -40,7 +40,7 @@ Este documento substitui aquele com avaliação baseada no código real.
   slack de apenas 5 minutos. Implementado em `algorithms/vsp/timetable_slack.py`.
 - **GTFS import**, what-if, comparação de cenários, Gini de equidade, P5/P95 por motorista.
 - **Custom reports builder** com exportação CSV e PDF (pdfkit).
-- **232 testes backend + 483 testes optimizer** — suite crescendo com B&P EV/CCT, JointBP, runParameterChangeReal, replay comparativo e admin benchmark.
+- **233 testes backend + 482 testes optimizer** — suite inclui B&P EV/CCT, JointBP, runParameterChangeReal, replay comparativo, admin benchmark, GTFS import (7 casos), multi-depot terminals.
 
 ### Benchmark real (hardware: AMD Ryzen 5 4600H, CPU-only, sem GPU)
 
@@ -80,16 +80,16 @@ Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.
 | Joint VSP+CSP simultâneo real | JointSolver sequencial (VSP→CSP com retry) | Modifica blocos durante crew scheduling (bidirecional) |
 | EV fleet (SoC, charging schedule) | SoC como recurso duro no B&P pricing (Sprint 2): recharge no gap, consumo por km, hard filter. Sem grid constraints. | SoC por rota, charging events, grid constraints, multi-depot charging |
 | Relief vehicle optimization | ReliefVehicleEstimator: detecta rendições no CSP, estima frota mínima (greedy earliest-finish), pico horário, custo total; sem otimização simultânea com VSP | Agrupa rendições, otimiza frota de rendição simultaneamente |
-| Multi-depósito | Implementado em algoritmos (MCNF com capacity balancing); falta UI e validação real | Produto maduro com operadoras multi-depot reais |
+| Multi-depósito | Algoritmos (MCNF, B&P) + UI completa: flag `isDepot`, endpoint `/terminals/depots`, depot selector em frota e planejador. Falta: validação com operadora real multi-depot | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
 | Caso de uso público | Nenhum publicado | Dezenas de agências com nome e resultados |
 | Maturidade | Produto novo (2026) | Empresa fundada ~2014 |
 
-> Nota sobre multi-depot: revisão de código (`src/algorithms/vsp/mcnf.py:240-300`, `vsp/tabu_search.py:48`,
-> `vsp/genetic.py:190`) mostra que o algoritmo CONSIDERA depot_id e faz capacity balancing.
-> A versão anterior deste documento dizia "não implementado", o que estava errado. O gap real
-> aqui é UI (criar/editar múltiplos depósitos), seed real (apenas 1 depot nos seeders) e
-> validação com agência multi-depot real — não o algoritmo.
+> Nota sobre multi-depot: algoritmos (MCNF, B&P) consideram depot_id com capacity balancing.
+> UI entregue em 2026-05-16: campo `isDepot` em Terminal (migração + toggle na página de terminais),
+> endpoint `GET /terminals/depots`, seed com 2 garagens reais (Salvador), seletor de depot em frota
+> e planejador. Seed cria GARAGEM-CENTRAL e GARAGEM-NORTE com veículos divididos entre elas.
+> Gap restante: validação com dados reais de uma operadora com múltiplos depósitos.
 
 ---
 

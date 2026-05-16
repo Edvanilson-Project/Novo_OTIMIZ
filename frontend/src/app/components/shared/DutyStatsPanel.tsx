@@ -66,11 +66,11 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
   return (
     <Card variant="outlined" sx={{ height: '100%' }}>
       <CardContent sx={{ pb: '12px !important' }}>
-        <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
           <Box sx={{ color: color ?? 'primary.main' }}>{icon}</Box>
           <Typography variant="caption" color="text.secondary">{label}</Typography>
         </Stack>
-        <Typography variant="h6" fontWeight={700}>{value}</Typography>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>{value}</Typography>
       </CardContent>
     </Card>
   );
@@ -102,20 +102,20 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
 
   return (
     <Box>
-      <Typography variant="h6" fontWeight={700} mb={2}>
+      <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
         Resumo de Jornadas — {data.totalDuties} jornadas
       </Typography>
 
       {/* KPI cards */}
-      <Grid container spacing={2} mb={3}>
-        <Grid item xs={6} sm={3}>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconClock size={20} />}
             label="Jornada Média"
             value={fmtMin(s.avgWorkMinutes)}
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconClock size={20} />}
             label="P5 / P95"
@@ -123,7 +123,7 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
             color="info.main"
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconScale size={20} />}
             label="Gini (equidade)"
@@ -131,7 +131,7 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
             color={s.giniWorkTime > 0.2 ? 'warning.main' : 'success.main'}
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconAlertTriangle size={20} />}
             label="Violações totais"
@@ -139,14 +139,14 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
             color={violations > 0 ? 'error.main' : 'success.main'}
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconCurrencyDollar size={20} />}
             label="Custo Total"
             value={`R$ ${s.totalCost.toFixed(0)}`}
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconCurrencyDollar size={20} />}
             label="Custo Médio/Jornada"
@@ -154,7 +154,7 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
             color="secondary.main"
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconClock size={20} />}
             label="Horas Extras Totais"
@@ -162,7 +162,7 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
             color={s.totalOvertimeMinutes > 0 ? 'warning.main' : 'success.main'}
           />
         </Grid>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{ xs: 6, sm: 3 }}>
           <KpiCard
             icon={<IconClock size={20} />}
             label="Min / Max"
@@ -173,7 +173,7 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
       </Grid>
 
       {/* Per-duty table */}
-      <Typography variant="subtitle1" fontWeight={600} mb={1}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
         Detalhe por Jornada
       </Typography>
       <TableContainer component={Card} variant="outlined" sx={{ maxHeight: 420 }}>
