@@ -10,7 +10,8 @@ describe('TerminalsController', () => {
 
   beforeEach(async () => {
     service = {
-      findAll: jest.fn().mockResolvedValue([{ id: 1, name: 'T1' }]),
+      findAll: jest.fn().mockResolvedValue([{ id: 1, name: 'T1' }, { id: 2, name: 'T2', isDepot: true }]),
+      findDepots: jest.fn().mockResolvedValue([{ id: 2, name: 'T2', isDepot: true }]),
       findOne: jest.fn().mockResolvedValue({ id: 1, name: 'T1' }),
       create: jest.fn().mockResolvedValue({ id: 2, name: 'T2' }),
       update: jest.fn().mockResolvedValue({ id: 1, name: 'Updated' }),
@@ -30,7 +31,7 @@ describe('TerminalsController', () => {
   it('findAll returns list', async () => {
     const result = await controller.findAll();
     expect(service.findAll).toHaveBeenCalled();
-    expect(result).toHaveLength(1);
+    expect(result).toHaveLength(2);
   });
 
   it('findOne returns terminal', async () => {
@@ -60,5 +61,12 @@ describe('TerminalsController', () => {
   it('remove calls service.remove', async () => {
     await controller.remove(1);
     expect(service.remove).toHaveBeenCalledWith(1);
+  });
+
+  it('findDepots returns only depot terminals', async () => {
+    const result = await controller.findDepots();
+    expect(service.findDepots).toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ isDepot: true });
   });
 });

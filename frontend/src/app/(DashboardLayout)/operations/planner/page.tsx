@@ -86,6 +86,7 @@ export default function PlannerPage() {
   const [schedule, setSchedule] = useState<any>(null);
   const [lines, setLines] = useState<any[]>([]);
   const [terminals, setTerminals] = useState<any[]>([]);
+  const [depots, setDepots] = useState<any[]>([]);
   const [parameters, setParameters] = useState<any>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hybrid_pipeline");
   const [selectedOperationalQualityMode, setSelectedOperationalQualityMode] = useState<OperationalQualityMode>("balanced");
@@ -179,16 +180,18 @@ export default function PlannerPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [scheduleRes, linesRes, terminalsRes, paramsRes] = await Promise.all([
+      const [scheduleRes, linesRes, terminalsRes, depotsRes, paramsRes] = await Promise.all([
         operationsApi.getLatestSchedule(),
         linesApi.getAll({ companyId }),
         terminalsApi.getAll({ companyId }),
+        terminalsApi.getDepots().catch(() => []),
         parametersApi.get().catch(() => null),
       ]);
 
       setSchedule(scheduleRes);
       setLines(linesRes);
       setTerminals(terminalsRes);
+      setDepots(depotsRes);
       if (paramsRes) {
         setParameters(paramsRes);
         const preferredAlgorithm = paramsRes.algorithm_preference || paramsRes.preferred_algorithm;
@@ -542,14 +545,14 @@ export default function PlannerPage() {
                   </FormControl>
                 </Tooltip>
 
-                {terminals.length > 0 && (
-                  <Tooltip title="Filtra a otimização para incluir apenas viagens destes depots. Vazio = todos os depots.">
+                {depots.length > 0 && (
+                  <Tooltip title="Selecione garagens específicas para otimização multi-depot. Vazio = todas as garagens.">
                     <FormControl size="small" sx={{ minWidth: 200, maxWidth: 280, flex: { xs: 1, md: 'none' } }}>
-                      <InputLabel>Depots (opcional)</InputLabel>
+                      <InputLabel>Garagens (opcional)</InputLabel>
                       <Select
                         multiple
                         value={selectedDepotIds}
-                        label="Depots (opcional)"
+                        label="Garagens (opcional)"
                         onChange={(e) => {
                           const v = e.target.value;
                           setSelectedDepotIds(typeof v === 'string' ? v.split(',').map(Number) : v as number[]);
@@ -557,13 +560,13 @@ export default function PlannerPage() {
                         disabled={optimizing}
                         renderValue={(selected) =>
                           (selected as number[])
-                            .map((id) => terminals.find((t: any) => t.id === id)?.name ?? id)
+                            .map((id) => depots.find((d: any) => d.id === id)?.name ?? id)
                             .join(', ')
                         }
                       >
-                        {terminals.map((terminal: any) => (
-                          <MenuItem key={terminal.id} value={terminal.id}>
-                            {terminal.name}
+                        {depots.map((depot: any) => (
+                          <MenuItem key={depot.id} value={depot.id}>
+                            {depot.name}
                           </MenuItem>
                         ))}
                       </Select>

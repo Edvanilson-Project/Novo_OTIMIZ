@@ -77,6 +77,7 @@ export const linesApi = {
 // ─── Terminals ───────────────────────────────────────────────────────────────
 export const terminalsApi = {
   getAll: (params?: object) => apiClient.get('/terminals', { params }).then((r) => r.data),
+  getDepots: () => apiClient.get('/terminals/depots').then((r) => r.data),
   getById: (id: ID) => apiClient.get(`/terminals/${id}`).then((r) => r.data),
   create: (data: object) => apiClient.post('/terminals', data).then((r) => r.data),
   update: (id: ID, data: object) => apiClient.patch(`/terminals/${id}`, data).then((r) => r.data),

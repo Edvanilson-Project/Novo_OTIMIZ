@@ -33,7 +33,7 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { vehiclesApi } from '@/lib/api';
+import { vehiclesApi, terminalsApi } from '@/lib/api';
 
 interface VehicleType {
   id: number;
@@ -58,6 +58,7 @@ interface Vehicle {
 export default function FleetManagementPage() {
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [depots, setDepots] = useState<{ id: number; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [openTypeDialog, setOpenTypeDialog] = useState(false);
   const [openVehicleDialog, setOpenVehicleDialog] = useState(false);
@@ -90,12 +91,14 @@ export default function FleetManagementPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [types, vehicles] = await Promise.all([
+      const [types, vehicleList, depotList] = await Promise.all([
         vehiclesApi.getTypes(),
         vehiclesApi.getAll(),
+        terminalsApi.getDepots().catch(() => []),
       ]);
       setVehicleTypes(types);
-      setVehicles(vehicles);
+      setVehicles(vehicleList);
+      setDepots(depotList);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
     } finally {
@@ -334,6 +337,21 @@ export default function FleetManagementPage() {
                   {type.name} ({type.capacity} pass.)
                 </MenuItem>
               ))}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Garagem (Depot)</InputLabel>
+            <Select
+              value={vehicleForm.depotId}
+              label="Garagem (Depot)"
+              onChange={e => setVehicleForm({ ...vehicleForm, depotId: e.target.value as number })}
+            >
+              {depots.map(depot => (
+                <MenuItem key={depot.id} value={depot.id}>{depot.name}</MenuItem>
+              ))}
+              {depots.length === 0 && (
+                <MenuItem disabled value={1}>Nenhuma garagem cadastrada</MenuItem>
+              )}
             </Select>
           </FormControl>
           <TextField

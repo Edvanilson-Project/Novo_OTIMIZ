@@ -17,6 +17,11 @@ export class TerminalsService {
     return this.repo.find({ where: { companyId }, order: { name: 'ASC' } });
   }
 
+  findDepots(): Promise<Terminal[]> {
+    const companyId = this.tenantContext.getCompanyId();
+    return this.repo.find({ where: { companyId, isDepot: true }, order: { name: 'ASC' } });
+  }
+
   async findOne(id: number): Promise<Terminal> {
     const companyId = this.tenantContext.getCompanyId();
     const terminal = await this.repo.findOne({ where: { id, companyId } });
