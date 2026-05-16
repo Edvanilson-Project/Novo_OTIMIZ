@@ -2338,7 +2338,11 @@ class OptimizerService:
         if not blocks:
             return [], {}, {"attempted": 0, "accepted": 0, "rejected": 0}
 
-        max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 60) or 60)
+        # Default elevado de 60→240min após diagnóstico 2026-05-15: 60 era conservador demais
+        # para chunks temporais adjacentes. 240min ainda é seguro porque a viabilidade do bloco
+        # combinado é validada por max_vehicle_shift (960min hard) + is_connection_feasible.
+        # Medido em seed=42 a 2000v: 366→360 blocos, custo -0.5%, tempo +1%.
+        max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 240) or 240)
         max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960)
         min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
