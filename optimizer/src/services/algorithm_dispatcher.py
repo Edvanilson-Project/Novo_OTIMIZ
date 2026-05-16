@@ -21,6 +21,7 @@ from ..algorithms.vsp.greedy import GreedyVSP
 from ..algorithms.vsp.mcnf import MCNFVSP
 from ..algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..algorithms.vsp.tabu_search import TabuSearchVSP
+from ..algorithms.vsp.timetable_slack import TimetableSlackOptimizer
 from ..core.config import get_settings
 from ..core.exceptions import InvalidAlgorithmError
 from ..domain.interfaces import ICSPAlgorithm
@@ -223,6 +224,27 @@ def dispatch_algorithm(
         effective_time_budget_s,
     )
 
+    # Timetable Slack Optimization: pré-processamento que ajusta start_times
+    # dentro de janelas de tolerância para reduzir PVR (análogo ao Optibus 2024).
+    slack_minutes = int(vsp_params.get("timetable_slack_minutes", 0) or 0)
+    timetable_meta: dict = {}
+    if slack_minutes > 0:
+        step = int(vsp_params.get("timetable_slack_step_minutes", 5) or 5)
+        tso = TimetableSlackOptimizer(
+            slack_minutes=slack_minutes,
+            step_minutes=step,
+            min_layover=int(vsp_params.get("min_layover_minutes", 8) or 8),
+        )
+        trips, timetable_meta = tso.optimize(trips, vehicle_types, depot_id, vsp_params)
+        logger.info(
+            "[TimetableSlack] PVR %d→%d (−%d, −%.1f%%), %d trips ajustadas",
+            timetable_meta.get("pvr_before", 0),
+            timetable_meta.get("pvr_after", 0),
+            timetable_meta.get("pvr_reduction", 0),
+            timetable_meta.get("pvr_reduction_pct", 0.0),
+            timetable_meta.get("trips_adjusted", 0),
+        )
+
     common_kwargs = dict(
         trips=trips, vehicle_types=vehicle_types, depot_id=depot_id,
         time_budget_s=effective_time_budget_s,
@@ -231,26 +253,32 @@ def dispatch_algorithm(
     )
 
     if algorithm == AlgorithmType.GREEDY:
-        return _run_greedy(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.GENETIC:
-        return _run_genetic(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.SIMULATED_ANNEALING:
-        return _run_sa(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.TABU_SEARCH:
-        return _run_ts(**common_kwargs, csp_factory=csp_factory)
-    if algorithm in (AlgorithmType.SET_PARTITIONING, AlgorithmType.CP_SAT):
-        return _run_sp(**common_kwargs, csp_factory=csp_factory, set_covering_factory=set_covering_factory)
-    if algorithm == AlgorithmType.MCNF:
-        return _run_mcnf(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.JOINT_SOLVER:
-        return _run_joint(**common_kwargs)
-    if algorithm == AlgorithmType.HYBRID_PIPELINE:
-        return _run_hybrid(**common_kwargs)
-    if algorithm == AlgorithmType.VCSP_PULP:
-        return _run_vcsp_pulp(**common_kwargs)
-    if algorithm == AlgorithmType.ASSIGNMENT_VSP:
-        return _run_assignment_vsp(**common_kwargs, csp_factory=csp_factory)
-    if algorithm == AlgorithmType.BRANCH_AND_PRICE:
-        return _run_branch_and_price(**common_kwargs, csp_factory=csp_factory)
+        result = _run_greedy(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.GENETIC:
+        result = _run_genetic(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.SIMULATED_ANNEALING:
+        result = _run_sa(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.TABU_SEARCH:
+        result = _run_ts(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm in (AlgorithmType.SET_PARTITIONING, AlgorithmType.CP_SAT):
+        result = _run_sp(**common_kwargs, csp_factory=csp_factory, set_covering_factory=set_covering_factory)
+    elif algorithm == AlgorithmType.MCNF:
+        result = _run_mcnf(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.JOINT_SOLVER:
+        result = _run_joint(**common_kwargs)
+    elif algorithm == AlgorithmType.HYBRID_PIPELINE:
+        result = _run_hybrid(**common_kwargs)
+    elif algorithm == AlgorithmType.VCSP_PULP:
+        result = _run_vcsp_pulp(**common_kwargs)
+    elif algorithm == AlgorithmType.ASSIGNMENT_VSP:
+        result = _run_assignment_vsp(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.BRANCH_AND_PRICE:
+        result = _run_branch_and_price(**common_kwargs, csp_factory=csp_factory)
+    else:
+        raise InvalidAlgorithmError(str(algorithm))
 
-    raise InvalidAlgorithmError(str(algorithm))
+    if timetable_meta:
+        if result.meta is None:
+            result.meta = {}
+        result.meta["timetable_slack"] = timetable_meta
+    return result

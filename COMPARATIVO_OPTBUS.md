@@ -29,9 +29,14 @@ Este documento substitui aquele com avaliação baseada no código real.
 - **Algoritmos VSP reais**: greedy, genetic, tabu search, MCNF, simulated annealing, assignment_vsp.
 - **Algoritmos CSP reais**: greedy, set partitioning via PuLP/CBC (ILP real, não heurística).
 - **Hybrid pipeline**: Greedy -> Local Search -> Metaheurística -> ILP Polish.
+- **Branch-and-Price (F4)**: Column Generation + SPPRC + Ryan-Foster branching. Líder em custo total
+  em dados uniformes e bimodais. 2000v: 331 blocos em 8.5s (vs greedy 333, hybrid 360).
+- **Timetable Slack Optimization**: `timetable_slack_minutes` — ajusta start_times dentro de janelas
+  de tolerância para reduzir PVR. Análogo ao recurso Optibus 2024. Benchmark 62v: −5.6% PVR com
+  slack de apenas 5 minutos. Implementado em `algorithms/vsp/timetable_slack.py`.
 - **GTFS import**, what-if, comparação de cenários, Gini de equidade, P5/P95 por motorista.
 - **Custom reports builder** com exportação CSV e PDF (pdfkit).
-- **221 testes backend + 342 testes optimizer** — cobertura razoável para produto novo.
+- **221 testes backend + 449 testes optimizer** — suite crescendo com B&P e timetable slack.
 
 ### Benchmark real (hardware: AMD Ryzen 5 4600H, CPU-only, sem GPU)
 
@@ -68,6 +73,9 @@ Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.
 | Validação com dados reais | Nenhuma agência real ainda | Décadas com operadoras globais |
 | Mobile para motoristas | Não existe | App nativo (iOS/Android) |
 | AVL/GPS tempo real | Não implementado (roadmap) | Integrado ao produto principal |
+| Joint VSP+CSP simultâneo real | JointSolver sequencial (VSP→CSP com retry) | Modifica blocos durante crew scheduling (bidirecional) |
+| EV fleet (SoC, charging schedule) | Infra existe (VehicleType.is_electric); B&P ignora SoC | SoC por rota, charging events, grid constraints |
+| Relief vehicle optimization | is_relief_point existe; agrupamento de rendições não otimizado | Agrupa rendições, otimiza frota de rendição simultaneamente |
 | Multi-depósito | Implementado em algoritmos (MCNF com capacity balancing); falta UI e validação real | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
 | Caso de uso público | Nenhum publicado | Dezenas de agências com nome e resultados |
