@@ -79,7 +79,7 @@ Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.
 | AVL/GPS tempo real | Não implementado (roadmap) | Integrado ao produto principal |
 | Joint VSP+CSP simultâneo real | JointSolver sequencial (VSP→CSP com retry) | Modifica blocos durante crew scheduling (bidirecional) |
 | EV fleet (SoC, charging schedule) | SoC como recurso duro no B&P pricing (Sprint 2): recharge no gap, consumo por km, hard filter. Sem grid constraints. | SoC por rota, charging events, grid constraints, multi-depot charging |
-| Relief vehicle optimization | is_relief_point existe; agrupamento de rendições não otimizado | Agrupa rendições, otimiza frota de rendição simultaneamente |
+| Relief vehicle optimization | ReliefVehicleEstimator: detecta rendições no CSP, estima frota mínima (greedy earliest-finish), pico horário, custo total; sem otimização simultânea com VSP | Agrupa rendições, otimiza frota de rendição simultaneamente |
 | Multi-depósito | Implementado em algoritmos (MCNF com capacity balancing); falta UI e validação real | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
 | Caso de uso público | Nenhum publicado | Dezenas de agências com nome e resultados |

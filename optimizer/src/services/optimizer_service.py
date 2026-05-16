@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .ai_service import AiService
 from .algorithm_dispatcher import dispatch_algorithm
 from ..algorithms.ev.soc_tracker import EVSoCTracker
+from ..algorithms.relief.estimator import ReliefVehicleEstimator
 from .parameter_normalization import (
     align_vsp_params_with_cct as _module_align_vsp_params_with_cct,
     as_dict as _module_as_dict,
@@ -573,6 +574,14 @@ class OptimizerService:
                 result.meta["ev_soc_report"] = soc_report.to_dict()
             except Exception as _e:  # noqa: BLE001
                 logger.warning("EVSoCTracker falhou: %s", _e)
+
+        # Relief vehicle estimate (quando há jornadas CSP com rendições entre motoristas)
+        if result.csp and result.csp.duties:
+            try:
+                rv_est = ReliefVehicleEstimator()
+                result.meta["relief_vehicle_estimate"] = rv_est.estimate(result.csp).to_dict()
+            except Exception as _e:  # noqa: BLE001
+                logger.warning("ReliefVehicleEstimator falhou: %s", _e)
 
         result.meta["roster_count"] = result.csp.meta.get("roster_count", 0)
         result.meta["operational_time_reports"] = summarize_operational_time_reports(result.csp.duties or [])
