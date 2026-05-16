@@ -19,6 +19,8 @@ import {
   IconAlertTriangle,
   IconRoute,
   IconScale,
+  IconCar,
+  IconBolt,
 } from "@tabler/icons-react";
 
 const pulseGlow = keyframes`
@@ -121,6 +123,23 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
     null;
   const fairnessGini = fairness?.work_time?.gini ?? null;
   const dutiesBelow50 = fairness?.imbalance?.duties_below_50pct_avg ?? 0;
+
+  // Rendições de motoristas (ReliefVehicleEstimator)
+  const reliefEst =
+    schedule?.metadata?.relief_vehicle_estimate ??
+    schedule?.resultSummary?.metadata?.relief_vehicle_estimate ??
+    null;
+  const reliefEvents = reliefEst?.total_events ?? null;
+  const reliefVehicles = reliefEst?.min_vehicles ?? null;
+  const reliefPeakHour = reliefEst?.peak_hour != null ? `${reliefEst.peak_hour}h` : null;
+
+  // EV SoC report
+  const evSoc =
+    schedule?.metadata?.ev_soc_report ??
+    schedule?.resultSummary?.metadata?.ev_soc_report ??
+    null;
+  const evEnergyKwh = evSoc?.total_energy_kwh ?? null;
+  const evBlocksMidCharge = evSoc?.blocks_needing_mid_charge ?? null;
 
   let totalMinutes = 0;
   let totalTrips = schedule?.totalTrips ?? schedule?.resultSummary?.total_trips ?? 0;
@@ -246,6 +265,72 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                     : theme.palette.success.main
                 }
                 isError={Number(fairnessGini) > 0.3}
+              />
+            </Box>
+          </Tooltip>
+        </Grid>
+      )}
+      {reliefEvents !== null && (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          <Tooltip
+            arrow
+            title={
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  <strong>Rendições de motoristas</strong> detectadas nas jornadas.
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  {reliefVehicles} veículo(s) de apoio estimado(s) (greedy earliest-finish).
+                </Typography>
+                {reliefPeakHour && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                    Pico de rendições: {reliefPeakHour}.
+                  </Typography>
+                )}
+              </Box>
+            }
+          >
+            <Box>
+              <KPICard
+                title="Rendições"
+                value={`${reliefEvents} (${reliefVehicles} apoio)`}
+                changeKey={`relief-${reliefEvents}-${scheduleVersion}`}
+                icon={<IconCar size="24" />}
+                color={reliefEvents > 0 ? theme.palette.warning.main : theme.palette.success.main}
+              />
+            </Box>
+          </Tooltip>
+        </Grid>
+      )}
+      {evEnergyKwh !== null && (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          <Tooltip
+            arrow
+            title={
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  <strong>Energia consumida</strong> pela frota elétrica.
+                </Typography>
+                {evBlocksMidCharge != null && evBlocksMidCharge > 0 && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: "orange" }}>
+                    ⚠ {evBlocksMidCharge} bloco(s) precisam de recarga intermediária.
+                  </Typography>
+                )}
+              </Box>
+            }
+          >
+            <Box>
+              <KPICard
+                title="Energia EV"
+                value={`${Number(evEnergyKwh).toFixed(1)} kWh`}
+                changeKey={`ev-${evEnergyKwh}-${scheduleVersion}`}
+                icon={<IconBolt size="24" />}
+                color={
+                  evBlocksMidCharge != null && evBlocksMidCharge > 0
+                    ? theme.palette.warning.main
+                    : theme.palette.info.main
+                }
+                isError={evBlocksMidCharge != null && evBlocksMidCharge > 0}
               />
             </Box>
           </Tooltip>

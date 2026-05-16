@@ -493,3 +493,58 @@ class TestCCTDrivingConstraint:
         sol = BranchAndPrice(vsp_params={"bp_max_driving_minutes": 330}).solve(trips, vts)
         meta = sol.meta.get("branch_and_price", {})
         assert meta.get("cct_driving_constrained") is True
+
+
+class TestChargerLocationEV:
+
+    def test_charger_location_allows_full_recharge(self):
+        """EV com charger_location_id no destino recarga total em gap curto."""
+        # sem charge_rate_kw → normalmente sem recarga; mas dest=99 é charger → recarga total
+        # Trip1 consome 40kWh (40km) → soc=60; gap=5min ao terminal 99 → recarga total
+        # Trip2 consome 40kWh (40km) → soc=60. Sem charger: [1,2] seria filtrado (soc=60-40=20 OK?)
+        # Usar trip2 que drena mais para tornar diferença clara: 70kWh sem recarga = infeasible
+        # gap=10 ≥ min_layover=8 → conexão permitida pela infraestrutura
+        trips = [
+            make_trip(1, 0, 60, dest=99, distance_km=40.0),
+            make_trip(2, 70, 130, origin=99, distance_km=70.0),  # precisa de recarga total
+        ]
+        duals = {1: 500.0, 2: 500.0}  # rc = 800 - 500 + arc - 500 < 0 → coluna entra
+        sub = PricingSubproblem(
+            trips=trips,
+            fixed_cost=800.0,
+            is_ev=True,
+            battery_kwh=100.0,
+            minimum_soc_kwh=0.0,
+            charge_rate_kw=0.0,
+            kwh_per_km=1.0,
+            charger_location_ids={99},
+        )
+        cols = sub.find_columns(duals=duals)
+        paths = [tuple(sorted(c[0])) for c in cols]
+        assert (1, 2) in paths
+
+    def test_no_charger_location_drains_and_filters(self):
+        """Sem charger_location: SoC insuficiente filtra conexão entre trips pesadas."""
+        ev_vt_no_charger = VehicleType(
+            id=1, name="EV", passenger_capacity=60, fixed_cost=800.0,
+            is_electric=True, battery_capacity_kwh=100.0, minimum_soc=0.0,
+            charge_rate_kw=0.0, energy_cost_per_kwh=0.0,
+            charger_location_ids=[],
+        )
+        trips = [
+            make_trip(1, 0, 60, dest=99, distance_km=40.0),
+            make_trip(2, 65, 125, origin=99, distance_km=70.0),  # 70kWh > 60 restante
+        ]
+        sub = PricingSubproblem(
+            trips=trips,
+            fixed_cost=800.0,
+            is_ev=True,
+            battery_kwh=100.0,
+            minimum_soc_kwh=0.0,
+            charge_rate_kw=0.0,
+            kwh_per_km=1.0,
+            charger_location_ids=set(),
+        )
+        cols = sub.find_columns(duals={})
+        paths = [tuple(sorted(c[0])) for c in cols]
+        assert (1, 2) not in paths  # filtrado por SoC insuficiente

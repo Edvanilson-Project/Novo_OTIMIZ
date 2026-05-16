@@ -216,6 +216,7 @@ class VehicleTypeInput(BaseModel):
     minimum_soc: float = 0.15
     charge_rate_kw: float = 0.0
     energy_cost_per_kwh: float = 0.0
+    charger_location_ids: List[int] = Field(default_factory=list)
     depot_id: Optional[int] = None
 
 

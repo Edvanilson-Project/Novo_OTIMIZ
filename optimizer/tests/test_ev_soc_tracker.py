@@ -23,10 +23,10 @@ def make_non_ev_vt():
     return VehicleType(id=1, name="Diesel", passenger_capacity=60, fixed_cost=800.0)
 
 
-def make_trip(id_, start, end, dist_km=10.0):
+def make_trip(id_, start, end, dist_km=10.0, origin_id=1, destination_id=2):
     t = Trip(id=id_, line_id=1, start_time=start, end_time=end,
-             origin_id=1, destination_id=2, duration=end - start,
-             distance_km=dist_km)
+             origin_id=origin_id, destination_id=destination_id,
+             duration=end - start, distance_km=dist_km)
     t.deadhead_times = {}
     return t
 
@@ -114,6 +114,50 @@ class TestEVSoCTracker:
         assert report.total_energy_kwh == pytest.approx(50.0)
         assert report.total_energy_cost == pytest.approx(150.0)
         assert len(report.blocks) == 2
+
+    def test_charger_location_full_recharge(self):
+        """Trip que termina em local com carregador faz recarga completa no gap."""
+        # battery=100, trip1 consome 40kWh → soc=60. Gap=5min (insuficiente a 0kW normal),
+        # mas destination_id=99 está nos charger_location_ids → recarga completa.
+        vt = VehicleType(
+            id=1, name="EV", passenger_capacity=60, fixed_cost=1200.0,
+            is_electric=True, battery_capacity_kwh=100.0,
+            minimum_soc=0.0, charge_rate_kw=0.0,  # sem taxa normal
+            energy_cost_per_kwh=1.0,
+            charger_location_ids=[99],
+        )
+        tracker = EVSoCTracker(vt, kwh_per_km=1.0)
+        trips = [
+            make_trip(1, 0, 60, dist_km=40.0, destination_id=99),   # vai ao carregador
+            make_trip(2, 65, 125, dist_km=10.0, origin_id=99),      # parte do carregador
+        ]
+        sol = make_solution([make_block(1, trips)])
+        report = tracker.track(sol)
+        b = report.blocks[0]
+        # Após trip1: soc=60; no gap (dest=99=charger) → recarga completa → soc=100
+        # Após trip2: soc=100-10=90
+        assert b.trips[0].energy_recharged_kwh == pytest.approx(40.0)
+        assert b.soc_end_kwh == pytest.approx(90.0)
+
+    def test_charger_location_no_effect_without_gap(self):
+        """Sem gap, charger location não recarrega nada."""
+        vt = VehicleType(
+            id=1, name="EV", passenger_capacity=60, fixed_cost=1200.0,
+            is_electric=True, battery_capacity_kwh=100.0,
+            minimum_soc=0.0, charge_rate_kw=0.0,
+            energy_cost_per_kwh=0.0,
+            charger_location_ids=[99],
+        )
+        tracker = EVSoCTracker(vt, kwh_per_km=1.0)
+        trips = [
+            make_trip(1, 0, 60, dist_km=20.0, destination_id=99),
+            make_trip(2, 60, 120, dist_km=10.0, origin_id=99),  # gap=0
+        ]
+        sol = make_solution([make_block(1, trips)])
+        report = tracker.track(sol)
+        b = report.blocks[0]
+        assert b.trips[0].energy_recharged_kwh == pytest.approx(0.0)
+        assert b.soc_end_kwh == pytest.approx(70.0)  # 100-20-10
 
     def test_to_dict_structure(self):
         """to_dict deve incluir todos os campos esperados."""

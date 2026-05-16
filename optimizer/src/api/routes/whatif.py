@@ -186,6 +186,7 @@ def _dict_to_vehicle_type(data: Dict[str, Any]) -> VehicleType:
         minimum_soc=data.get("minimum_soc", 0.15),
         charge_rate_kw=data.get("charge_rate_kw", 0.0),
         energy_cost_per_kwh=data.get("energy_cost_per_kwh", 0.0),
+        charger_location_ids=list(data.get("charger_location_ids") or []),
         depot_id=data.get("depot_id"),
     )
 

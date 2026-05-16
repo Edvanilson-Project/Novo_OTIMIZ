@@ -119,6 +119,8 @@ class EVSoCTracker:
         self.energy_cost_per_kwh = float(vehicle.energy_cost_per_kwh)
         self.kwh_per_km = float(kwh_per_km)
         self.charge_efficiency = float(charge_efficiency)
+        # Depósitos/terminais com carregador → recarga completa independente de tempo
+        self.charger_location_ids: set = set(getattr(vehicle, "charger_location_ids", []) or [])
 
     def track(self, solution: VSPSolution) -> EVFleetSoCReport:
         """Gera relatório SoC para todos os blocos da solução."""
@@ -168,8 +170,17 @@ class EVSoCTracker:
             gap = 0
             recharged = 0.0
             if i < len(trips) - 1:
-                gap = trips[i + 1].start_time - trip.end_time
-                if gap > 0 and self.charge_rate_kw > 0:
+                nxt_trip = trips[i + 1]
+                gap = nxt_trip.start_time - trip.end_time
+                at_charger = bool(
+                    self.charger_location_ids and (
+                        trip.destination_id in self.charger_location_ids
+                        or nxt_trip.origin_id in self.charger_location_ids
+                    )
+                )
+                if at_charger and gap > 0:
+                    recharged = max(0.0, self.battery_kwh - soc_after_trip)
+                elif gap > 0 and self.charge_rate_kw > 0:
                     max_charge = gap / 60.0 * self.charge_rate_kw * self.charge_efficiency
                     recharged = min(max_charge, self.battery_kwh - soc_after_trip)
                     recharged = max(0.0, recharged)

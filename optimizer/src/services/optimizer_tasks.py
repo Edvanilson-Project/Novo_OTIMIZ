@@ -85,6 +85,7 @@ def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
         minimum_soc=float(d.get("minimum_soc", 0.15)),
         charge_rate_kw=float(d.get("charge_rate_kw", 0.0)),
         energy_cost_per_kwh=float(d.get("energy_cost_per_kwh", 0.0)),
+        charger_location_ids=list(d.get("charger_location_ids") or []),
         depot_id=d.get("depot_id"),
     )
 

@@ -275,6 +275,7 @@ class PricingSubproblem:
         charge_rate_kw: float = 0.0,
         energy_cost_per_kwh: float = 0.0,
         kwh_per_km: float = _DEFAULT_EV_KWH_PER_KM,
+        charger_location_ids: Optional[Set[int]] = None,
         # Sprint 2+3: CCT driving constraint
         max_driving_minutes: int = _DEFAULT_MAX_DRIVING_MINUTES,
         min_break_minutes: int = _DEFAULT_MIN_BREAK_MINUTES,
@@ -297,6 +298,7 @@ class PricingSubproblem:
         self.charge_rate_kw = float(charge_rate_kw)
         self.energy_cost_per_kwh = float(energy_cost_per_kwh)
         self.kwh_per_km = float(kwh_per_km)
+        self.charger_location_ids: Set[int] = set(charger_location_ids or [])
         self.max_driving_minutes = int(max_driving_minutes)
         self.min_break_minutes = int(min_break_minutes)
         self._successors: Dict[int, List[Trip]] = self._build_successors()
@@ -387,7 +389,15 @@ class PricingSubproblem:
                 nxt_energy_cost = nxt_kwh * self.energy_cost_per_kwh
                 gap_is_break = (self.max_driving_minutes > 0
                                 and gap_minutes >= self.min_break_minutes)
-                max_recharge = (gap_minutes / 60.0 * self.charge_rate_kw
+                # Recharge at charger depot = full battery restore regardless of time
+                at_charger = self.is_ev and bool(
+                    self.charger_location_ids and (
+                        trip.destination_id in self.charger_location_ids
+                        or nxt.origin_id in self.charger_location_ids
+                    )
+                )
+                max_recharge = (float('inf') if at_charger
+                                else gap_minutes / 60.0 * self.charge_rate_kw
                                 if self.is_ev else 0.0)
 
                 new_labels: list = []
@@ -493,6 +503,7 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         charge_rate_kw = float(getattr(vehicle, "charge_rate_kw", 0.0)) if vehicle else 0.0
         energy_cost_per_kwh = float(getattr(vehicle, "energy_cost_per_kwh", 0.0)) if vehicle else 0.0
         kwh_per_km = float(self._p("ev_kwh_per_km", _DEFAULT_EV_KWH_PER_KM))
+        charger_locs: Set[int] = set(getattr(vehicle, "charger_location_ids", []) or []) if vehicle else set()
 
         # CCT driving constraint (0 = disabled)
         max_driving_minutes = int(self._p("bp_max_driving_minutes", _DEFAULT_MAX_DRIVING_MINUTES))
@@ -528,6 +539,7 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
             charge_rate_kw=charge_rate_kw,
             energy_cost_per_kwh=energy_cost_per_kwh,
             kwh_per_km=kwh_per_km,
+            charger_location_ids=charger_locs,
             max_driving_minutes=max_driving_minutes,
             min_break_minutes=min_break_minutes,
         )
