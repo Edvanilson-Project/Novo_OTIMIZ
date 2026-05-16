@@ -1,11 +1,10 @@
 """
 VSP via Branch-and-Price (column generation).
 
-STATUS: F4 — Ryan-Foster branching (uma camada) sobre LP fracionário pós-pricing.
-        Herda F3: pricing SPPRC com dominância, warm-start greedy, MIP final CBC.
-        F4 adiciona: detecção de LP fracionário + branching TOGETHER/APART em
-        uma camada (sem árvore B&B completa). Cobre casos onde CBC não integra
-        o LP relaxado no MIP final.
+STATUS: F4+EV+CCT — Ryan-Foster branching + EV-aware pricing + CCT driving constraint.
+        F4: Ryan-Foster (1 camada) sobre LP fracionário.
+        EV (Sprint 2): label 6D com SoC como recurso. Dominância 4D.
+        CCT (Sprint 2+3): driving_continuous como recurso duro no pricing.
         Ver docs/column_generation_plan.md para plano completo.
 
 Formulação:
@@ -15,13 +14,13 @@ Formulação:
               x_p ∈ {0,1}
 
 Master (LP relaxado):  x_p ∈ [0,1] — expõe duais π_i.
-Pricing (F3):          SPPRC com dominância — label=(rc_acum, shift_usado, path).
-                       Label A domina B no mesmo nó se rc_A ≤ rc_B E shift_A ≤ shift_B.
-                       Processa em ordem topológica (start_time). O(n * L) vs O(n * b^d).
+Pricing (SPPRC):       Label 6D = (rc, shift, cost, path_ids, soc_kwh, drv_minutes).
+                       Dominância 4D: rc↓, shift↓, soc↑, drv↓.
+                       EV: SoC propagado (recharge no gap, consumo na trip). Hard filter.
+                       CCT: drv_continuous resetado após break ≥ min_break. Hard filter.
 MIP final:             CBC com todas colunas acumuladas → solução inteira.
-Ryan-Foster (F4):      Se LP fracionário após todos os rounds, escolhe par (i,j) com
-                       maior fracionaridade. Resolve MIP em TOGETHER(i,j) e APART(i,j).
-                       Retorna ramo com menor blocos (desempate: menor custo).
+Ryan-Foster (F4):      Se LP fracionário, resolve MIP em TOGETHER/APART sobre par mais
+                       fracionário. Aceita ramo se melhora (blocos, custo).
 """
 from __future__ import annotations
 
@@ -51,6 +50,12 @@ _DEFAULT_MIN_LAYOVER = 8
 _DEFAULT_MAX_VEHICLE_SHIFT = 960
 _DEFAULT_MAX_PRICING_ITERS = 5
 _DEFAULT_MAX_PRICING_COLUMNS = 2000
+_DEFAULT_EV_KWH_PER_KM = 1.8     # kWh/km típico ônibus elétrico
+_DEFAULT_MAX_DRIVING_MINUTES = 0  # 0 = desabilitado (sem restrição CCT no pricing)
+_DEFAULT_MIN_BREAK_MINUTES = 30   # pausa mínima para resetar condução contínua (CLT)
+
+# Índices dos elementos do label SPPRC (6-tupla)
+_I_RC, _I_SHIFT, _I_COST, _I_PATH, _I_SOC, _I_DRV = 0, 1, 2, 3, 4, 5
 
 
 def _make_solver(time_limit: int, threads: int = 1) -> "pulp.LpSolver":
@@ -235,20 +240,23 @@ class MasterProblemLP:
 
 
 class PricingSubproblem:
-    """Pricing via SPPRC com dominância (F3).
+    """Pricing via SPPRC com dominância 4D (EV+CCT aware).
 
     Algoritmo: DP em ordem topológica (start_time).
-    Label = (rc_acumulado, shift_usado, custo_coluna, path_trip_ids).
+    Label 6D = (rc, shift, cost, path_ids, soc_kwh, drv_minutes).
 
     Dominância: label A domina B no mesmo nó se:
-        rc_A ≤ rc_B  E  shift_A ≤ shift_B
-    Labels dominados são descartados — pruning que BFS enumerativo (F2) não fazia.
+        rc_A ≤ rc_B  E  shift_A ≤ shift_B  E  soc_A ≥ soc_B  E  drv_A ≤ drv_B
 
-    Complexidade: O(n * L) onde L = labels não-dominados por nó (tipicamente
-    muito menor que branching^depth do BFS).
+    EV: soc propagado — recarrega no gap a charge_rate_kw, consome kwh_per_km*dist.
+        Labels com soc < minimum_soc_kwh são descartados (hard filter).
+    CCT: drv acumulado desde o último break. Reseta quando gap ≥ min_break_minutes.
+        Labels com drv > max_driving_minutes são descartados (hard filter).
+
+    Para não-EV: soc = float('inf') → dimensão soc sempre satisfeita.
+    Para CCT desabilitado: drv = 0 → dimensão drv sempre satisfeita.
     """
 
-    # Máximo de sucessores por nó — evita fan-out explosivo em instâncias densas
     _MAX_SUCCESSORS_PER_NODE = 30
 
     def __init__(
@@ -259,7 +267,17 @@ class PricingSubproblem:
         idle_cost: float = _DEFAULT_IDLE_COST,
         min_layover: int = _DEFAULT_MIN_LAYOVER,
         max_vehicle_shift: int = _DEFAULT_MAX_VEHICLE_SHIFT,
-        max_labels_per_node: int = 0,  # 0 = auto-escala pelo tamanho da instância
+        max_labels_per_node: int = 0,
+        # Sprint 2: EV params
+        is_ev: bool = False,
+        battery_kwh: float = 0.0,
+        minimum_soc_kwh: float = 0.0,
+        charge_rate_kw: float = 0.0,
+        energy_cost_per_kwh: float = 0.0,
+        kwh_per_km: float = _DEFAULT_EV_KWH_PER_KM,
+        # Sprint 2+3: CCT driving constraint
+        max_driving_minutes: int = _DEFAULT_MAX_DRIVING_MINUTES,
+        min_break_minutes: int = _DEFAULT_MIN_BREAK_MINUTES,
     ) -> None:
         self._trips = sorted(trips, key=lambda t: t.start_time)
         self._by_id: Dict[int, Trip] = {t.id: t for t in self._trips}
@@ -270,10 +288,17 @@ class PricingSubproblem:
         self.max_vehicle_shift = int(max_vehicle_shift)
         n = len(self._trips)
         if max_labels_per_node <= 0:
-            # Auto-escala: instâncias maiores → menos labels para economizar memória
             self.max_labels_per_node = max(5, min(50, 5000 // max(1, n)))
         else:
             self.max_labels_per_node = int(max_labels_per_node)
+        self.is_ev = bool(is_ev)
+        self.battery_kwh = float(battery_kwh)
+        self.minimum_soc_kwh = float(minimum_soc_kwh)
+        self.charge_rate_kw = float(charge_rate_kw)
+        self.energy_cost_per_kwh = float(energy_cost_per_kwh)
+        self.kwh_per_km = float(kwh_per_km)
+        self.max_driving_minutes = int(max_driving_minutes)
+        self.min_break_minutes = int(min_break_minutes)
         self._successors: Dict[int, List[Trip]] = self._build_successors()
 
     def _build_successors(self) -> Dict[int, List[Trip]]:
@@ -299,21 +324,18 @@ class PricingSubproblem:
         return deadhead * self.deadhead_cost + idle * self.idle_cost
 
     @staticmethod
-    def _dominates(a: Tuple[float, int], b: Tuple[float, int]) -> bool:
-        """True se label a (rc, shift) domina label b."""
-        return a[0] <= b[0] and a[1] <= b[1]
+    def _dominates(a: tuple, b: tuple) -> bool:
+        """True se label a domina b (rc↓, shift↓, soc↑, drv↓)."""
+        return (a[_I_RC] <= b[_I_RC] and a[_I_SHIFT] <= b[_I_SHIFT]
+                and a[_I_SOC] >= b[_I_SOC] and a[_I_DRV] <= b[_I_DRV])
 
-    def _prune(self, labels: List[Tuple[float, int, float, Tuple[int, ...]]]) -> List[Tuple[float, int, float, Tuple[int, ...]]]:
-        """Remove labels dominados. label = (rc, shift, cost, path_ids)."""
+    def _prune(self, labels: list) -> list:
+        """Remove labels dominados. label = (rc, shift, cost, path_ids, soc, drv)."""
         if len(labels) <= 1:
             return labels
-        kept: List[Tuple[float, int, float, Tuple[int, ...]]] = []
-        for lbl in sorted(labels, key=lambda x: (x[0], x[1])):
-            dominated = any(
-                self._dominates((k[0], k[1]), (lbl[0], lbl[1])) and k is not lbl
-                for k in kept
-            )
-            if not dominated:
+        kept: list = []
+        for lbl in sorted(labels, key=lambda x: (x[_I_RC], x[_I_SHIFT])):
+            if not any(self._dominates(k, lbl) and k is not lbl for k in kept):
                 kept.append(lbl)
         return kept[:self.max_labels_per_node]
 
@@ -324,29 +346,35 @@ class PricingSubproblem:
     ) -> List[Tuple[List[int], float]]:
         """Devolve até max_columns (trip_ids, custo) com reduced cost < -1e-5.
 
-        Usa SPPRC com dominância em ordem topológica. Labels de um nó são
-        liberados da memória imediatamente após a propagação — pico de memória
-        é O(fan-out × max_labels_per_node) em vez de O(n × max_labels_per_node).
+        Label 6D: (rc, shift, cost, path_ids, soc_kwh, drv_minutes).
+        EV: soc propagado (recharge no gap, consumo na trip). Hard filter.
+        CCT: drv resetado após break ≥ min_break_minutes. Hard filter.
+        Memória: labels liberados após propagação — pico O(fan-out × max_labels).
         """
-        # Label: (rc_acumulado, shift_usado, custo_coluna, path_ids_tuple)
-        # Inicialização lazy: label inicial criado ao processar o nó, não antes.
-        labels_at: Dict[int, List[Tuple[float, int, float, Tuple[int, ...]]]] = {}
+        labels_at: Dict[int, list] = {}
         results: List[Tuple[float, List[int], float]] = []
 
         for trip in self._trips:
-            # Criar label inicial para este nó (lazy — apenas quando chegamos aqui)
-            rc0 = self.fixed_cost - duals.get(trip.id, 0.0)
-            shift0 = trip.end_time - trip.start_time
             my_labels = labels_at.pop(trip.id, [])
-            my_labels.append((rc0, shift0, self.fixed_cost, (trip.id,)))
+
+            # Label inicial para este nó (início de um novo bloco)
+            trip_kwh_init = trip.distance_km * self.kwh_per_km if self.is_ev else 0.0
+            soc0 = (self.battery_kwh - trip_kwh_init) if self.is_ev else float('inf')
+            drv0 = trip.duration if self.max_driving_minutes > 0 else 0
+            if (not self.is_ev or soc0 >= self.minimum_soc_kwh) and \
+               (self.max_driving_minutes == 0 or drv0 <= self.max_driving_minutes):
+                energy_cost_init = trip_kwh_init * self.energy_cost_per_kwh
+                rc0 = self.fixed_cost + energy_cost_init - duals.get(trip.id, 0.0)
+                shift0 = trip.end_time - trip.start_time
+                my_labels.append((rc0, shift0, self.fixed_cost + energy_cost_init,
+                                   (trip.id,), soc0, drv0))
             my_labels = self._prune(my_labels)
 
             # Coletar colunas com rc < 0 que terminam neste nó
-            for rc, _shift, cost, path_ids in my_labels:
-                if rc < -1e-5:
-                    results.append((rc, list(path_ids), cost))
+            for lbl in my_labels:
+                if lbl[_I_RC] < -1e-5:
+                    results.append((lbl[_I_RC], list(lbl[_I_PATH]), lbl[_I_COST]))
                     if len(results) >= max_columns * 4:
-                        # Evitar acumulação excessiva antes do sort final
                         results.sort(key=lambda r: r[0])
                         results = results[:max_columns]
 
@@ -354,27 +382,47 @@ class PricingSubproblem:
             for nxt in self._successors.get(trip.id, []):
                 arc = self._arc_cost(trip, nxt)
                 nxt_dual = duals.get(nxt.id, 0.0)
-                new_labels: List[Tuple[float, int, float, Tuple[int, ...]]] = []
-                for rc, _shift, cost, path_ids in my_labels:
+                gap_minutes = nxt.start_time - trip.end_time
+                nxt_kwh = nxt.distance_km * self.kwh_per_km if self.is_ev else 0.0
+                nxt_energy_cost = nxt_kwh * self.energy_cost_per_kwh
+                gap_is_break = (self.max_driving_minutes > 0
+                                and gap_minutes >= self.min_break_minutes)
+                max_recharge = (gap_minutes / 60.0 * self.charge_rate_kw
+                                if self.is_ev else 0.0)
+
+                new_labels: list = []
+                for lbl in my_labels:
+                    rc, _shift, cost, path_ids, soc, drv = lbl
                     if nxt.id in path_ids:
                         continue
                     new_shift = nxt.end_time - self._by_id[path_ids[0]].start_time
                     if new_shift > self.max_vehicle_shift:
                         continue
-                    new_rc = rc + arc - nxt_dual
-                    new_cost = cost + arc
-                    new_labels.append((new_rc, new_shift, new_cost, path_ids + (nxt.id,)))
+                    if self.is_ev:
+                        recharged = min(max_recharge, self.battery_kwh - soc)
+                        new_soc = soc + max(0.0, recharged) - nxt_kwh
+                        if new_soc < self.minimum_soc_kwh:
+                            continue
+                    else:
+                        new_soc = float('inf')
+                    if self.max_driving_minutes > 0:
+                        new_drv = nxt.duration if gap_is_break else drv + nxt.duration
+                        if new_drv > self.max_driving_minutes:
+                            continue
+                    else:
+                        new_drv = 0
+                    new_rc = rc + arc + nxt_energy_cost - nxt_dual
+                    new_cost = cost + arc + nxt_energy_cost
+                    new_labels.append((new_rc, new_shift, new_cost,
+                                       path_ids + (nxt.id,), new_soc, new_drv))
 
                 if new_labels:
                     existing = labels_at.get(nxt.id, [])
-                    if existing:
-                        labels_at[nxt.id] = self._prune(existing + new_labels)
-                    else:
-                        labels_at[nxt.id] = self._prune(new_labels)
-            # labels de trip liberados pelo pop acima — memória liberada aqui
+                    labels_at[nxt.id] = self._prune(
+                        (existing + new_labels) if existing else new_labels
+                    )
 
         results.sort(key=lambda r: r[0])
-        # Remover duplicatas (mesmo path_ids) antes de retornar
         seen: Set[Tuple[int, ...]] = set()
         deduped = []
         for rc, trip_ids, cost in results:
@@ -437,6 +485,19 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         max_pricing_cols = int(self._p("bp_max_pricing_columns", _DEFAULT_MAX_PRICING_COLUMNS))
         max_labels_per_node = int(self._p("bp_max_labels_per_node", 50))
 
+        # EV params from vehicle type
+        is_ev = bool(getattr(vehicle, "is_electric", False)) if vehicle else False
+        battery_kwh = float(getattr(vehicle, "battery_capacity_kwh", 0.0)) if vehicle else 0.0
+        min_soc_frac = float(getattr(vehicle, "minimum_soc", 0.15)) if vehicle else 0.15
+        minimum_soc_kwh = battery_kwh * min_soc_frac
+        charge_rate_kw = float(getattr(vehicle, "charge_rate_kw", 0.0)) if vehicle else 0.0
+        energy_cost_per_kwh = float(getattr(vehicle, "energy_cost_per_kwh", 0.0)) if vehicle else 0.0
+        kwh_per_km = float(self._p("ev_kwh_per_km", _DEFAULT_EV_KWH_PER_KM))
+
+        # CCT driving constraint (0 = disabled)
+        max_driving_minutes = int(self._p("bp_max_driving_minutes", _DEFAULT_MAX_DRIVING_MINUTES))
+        min_break_minutes = int(self._p("bp_min_break_minutes", _DEFAULT_MIN_BREAK_MINUTES))
+
         # Warm-start: greedy produz partição válida como colunas iniciais
         warm_start = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
         if not warm_start.blocks:
@@ -456,6 +517,14 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
             min_layover=min_layover,
             max_vehicle_shift=max_vehicle_shift,
             max_labels_per_node=max_labels_per_node,
+            is_ev=is_ev,
+            battery_kwh=battery_kwh,
+            minimum_soc_kwh=minimum_soc_kwh,
+            charge_rate_kw=charge_rate_kw,
+            energy_cost_per_kwh=energy_cost_per_kwh,
+            kwh_per_km=kwh_per_km,
+            max_driving_minutes=max_driving_minutes,
+            min_break_minutes=min_break_minutes,
         )
 
         # Tempo reservado: 1/3 para LP rounds, 2/3 para MIP final
@@ -553,6 +622,8 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
                 "mip_status": master._lp_status,
                 "branching": rf_used,
                 "rf_pair": list(rf_pair) if rf_pair else None,
+                "ev_aware": is_ev,
+                "cct_driving_constrained": max_driving_minutes > 0,
             }
         }
         return sol

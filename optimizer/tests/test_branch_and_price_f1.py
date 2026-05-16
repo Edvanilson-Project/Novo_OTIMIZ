@@ -1,9 +1,10 @@
 """
-Branch-and-Price — testes F1, F3 (SPPRC pricing) e F4 (Ryan-Foster branching).
+Branch-and-Price — testes F1, F3 (SPPRC pricing), F4 (Ryan-Foster) e Sprint 2 (EV/CCT).
 
 F1: Master LP funcional sobre warm-start greedy.
-F3: Pricing via SPPRC com dominância + MIP final.
+F3: Pricing via SPPRC com dominância 4D + MIP final.
 F4: is_lp_integral, ryan_foster_pair, solve_mip_with_constraints (TOGETHER/APART).
+Sprint 2: EV SoC como recurso duro no pricing; CCT driving_continuous como recurso duro.
 
 Ver optimizer/docs/column_generation_plan.md §5.
 """
@@ -26,7 +27,7 @@ def make_vt(id_, fixed_cost=800.0):
     )
 
 
-def make_trip(id_, start, end, origin=1, dest=2, deadhead_times=None):
+def make_trip(id_, start, end, origin=1, dest=2, deadhead_times=None, distance_km=10.0):
     t = Trip(
         id=id_,
         line_id=1,
@@ -35,7 +36,7 @@ def make_trip(id_, start, end, origin=1, dest=2, deadhead_times=None):
         origin_id=origin,
         destination_id=dest,
         duration=end - start,
-        distance_km=10.0,
+        distance_km=distance_km,
     )
     t.deadhead_times = deadhead_times or {}
     return t
@@ -198,6 +199,10 @@ class TestBranchAndPriceIntegration:
         assert "pricing_rounds" in meta
         assert "columns_after_pricing" in meta
         assert meta["columns_after_pricing"] >= meta["columns_seeded"]
+        assert "ev_aware" in meta
+        assert "cct_driving_constrained" in meta
+        assert meta["ev_aware"] is False      # veículo padrão não é EV
+        assert meta["cct_driving_constrained"] is False  # sem restrição CCT por padrão
 
     def test_500v_smoke_valid_solution(self):
         """Smoke: não explode, cobre todas trips."""
@@ -347,3 +352,144 @@ class TestRyanFosterF4:
         covered = {t.id for b in sol.blocks for t in b.trips}
         all_ids = {t.id for t in trips}
         assert all_ids <= covered | {t.id for t in sol.unassigned_trips}
+
+
+# ─── Sprint 2: EV-Aware Pricing ──────────────────────────────────────────────
+
+def make_ev_vt(id_=1, battery_kwh=200.0, minimum_soc=0.1, charge_rate_kw=150.0,
+               energy_cost_per_kwh=1.5):
+    return VehicleType(
+        id=id_, name="EV-Bus", passenger_capacity=60, fixed_cost=1200.0,
+        is_electric=True, battery_capacity_kwh=battery_kwh,
+        minimum_soc=minimum_soc, charge_rate_kw=charge_rate_kw,
+        energy_cost_per_kwh=energy_cost_per_kwh,
+    )
+
+
+class TestEVAwarePricing:
+    """Sprint 2: SoC como recurso duro no pricing SPPRC."""
+
+    def test_ev_single_feasible_trip_generates_column(self):
+        """Trip com consumo dentro do limite de SoC deve gerar coluna."""
+        # 10km × 1.8 kWh/km = 18 kWh; SoC inicial 100 kWh → restam 82 > 10 kWh mínimo
+        trip = make_trip(1, 300, 360, distance_km=10.0)
+        ps = PricingSubproblem(
+            [trip], fixed_cost=100.0,
+            is_ev=True, battery_kwh=100.0, minimum_soc_kwh=10.0,
+            charge_rate_kw=50.0, energy_cost_per_kwh=2.0, kwh_per_km=1.8,
+        )
+        cols = ps.find_columns({1: 999.0}, max_columns=10)
+        assert any(1 in ids for ids, _ in cols), "Trip EV viável deve gerar coluna"
+
+    def test_ev_trip_drains_battery_filtered(self):
+        """Trip que esgota bateria abaixo do mínimo não deve gerar coluna."""
+        # 95km × 1.0 kWh/km = 95 kWh de 100 kWh → restam 5 < 10 kWh mínimo → inviável
+        trip = make_trip(1, 300, 360, distance_km=95.0)
+        ps = PricingSubproblem(
+            [trip], fixed_cost=100.0,
+            is_ev=True, battery_kwh=100.0, minimum_soc_kwh=10.0,
+            charge_rate_kw=0.0, energy_cost_per_kwh=0.0, kwh_per_km=1.0,
+        )
+        cols = ps.find_columns({1: 999.0}, max_columns=10)
+        assert not any(1 in ids for ids, _ in cols), "Trip EV com SoC insuficiente deve ser filtrada"
+
+    def test_ev_recharge_during_gap_enables_connection(self):
+        """Recarregamento suficiente no gap deve viabilizar a conexão."""
+        # t1 consome 40 kWh (bat 100→60); gap=8min a 100 kW = +13.3 kWh recarregados (bat→73.3)
+        # t2 consome 5 kWh → SoC final = 68.3 > 10 mínimo → viável
+        t1 = make_trip(1, 0, 60, distance_km=40.0)
+        t2 = make_trip(2, 68, 128, distance_km=5.0)
+        ps = PricingSubproblem(
+            [t1, t2], fixed_cost=100.0, min_layover=5,
+            is_ev=True, battery_kwh=100.0, minimum_soc_kwh=10.0,
+            charge_rate_kw=100.0, energy_cost_per_kwh=0.0, kwh_per_km=1.0,
+        )
+        cols = ps.find_columns({1: 999.0, 2: 999.0}, max_columns=10)
+        multi_trip = [ids for ids, _ in cols if len(ids) > 1]
+        assert multi_trip, "Recarregamento no gap deve viabilizar bloco t1→t2"
+
+    def test_ev_energy_cost_increases_column_cost(self):
+        """Custo da coluna EV deve incluir energy_cost_per_kwh × kWh consumidos."""
+        trip = make_trip(1, 300, 360, distance_km=10.0)
+        ps_ev = PricingSubproblem(
+            [trip], fixed_cost=100.0,
+            is_ev=True, battery_kwh=100.0, minimum_soc_kwh=0.0,
+            charge_rate_kw=0.0, energy_cost_per_kwh=5.0, kwh_per_km=1.0,
+        )
+        ps_nev = PricingSubproblem([trip], fixed_cost=100.0, is_ev=False)
+        cols_ev = ps_ev.find_columns({1: 999.0}, max_columns=10)
+        cols_nev = ps_nev.find_columns({1: 999.0}, max_columns=10)
+        if cols_ev and cols_nev:
+            cost_ev = next((c for ids, c in cols_ev if ids == [1]), None)
+            cost_nev = next((c for ids, c in cols_nev if ids == [1]), None)
+            if cost_ev is not None and cost_nev is not None:
+                # EV: fixed_cost(100) + energy(10km*1.0*5.0=50) = 150 vs 100 non-EV
+                assert cost_ev > cost_nev, "Custo EV deve incluir energia elétrica"
+
+    def test_ev_meta_in_solve(self):
+        """BranchAndPrice com veículo EV deve reportar ev_aware=True no meta."""
+        trips = [make_trip(1, 300, 360), make_trip(2, 380, 440), make_trip(3, 600, 660)]
+        vts = [make_ev_vt()]
+        sol = BranchAndPrice().solve(trips, vts)
+        meta = sol.meta.get("branch_and_price", {})
+        assert meta.get("ev_aware") is True
+
+
+# ─── Sprint 2+3: CCT Driving Constraint ──────────────────────────────────────
+
+class TestCCTDrivingConstraint:
+    """Restrição de condução contínua no pricing SPPRC."""
+
+    def test_cct_filters_long_driving_sequence(self):
+        """Sequência que excede max_driving_minutes deve ser filtrada."""
+        # 3 trips de 120 min → 360 min contínuos (gap=8 < break=30)
+        # max_driving=330 → 3ª trip excede → bloco (1,2,3) não deve existir
+        trips = [
+            make_trip(1, 0, 120),
+            make_trip(2, 128, 248),   # gap=8 < 30 → contínuo; acumulado=240
+            make_trip(3, 256, 376),   # gap=8 < 30 → contínuo; acumulado=360 > 330 → reject
+        ]
+        ps = PricingSubproblem(
+            trips, fixed_cost=100.0, min_layover=5,
+            max_driving_minutes=330, min_break_minutes=30,
+        )
+        cols = ps.find_columns({t.id: 999.0 for t in trips}, max_columns=50)
+        for ids, _ in cols:
+            assert set(ids) != {1, 2, 3}, "Bloco (1,2,3) viola CCT — não deve existir"
+
+    def test_cct_break_resets_driving_counter(self):
+        """Pausa ≥ min_break_minutes deve resetar o contador de condução."""
+        # t1: 200 min; gap=40 ≥ break=30 → reset; t2: 200 min < 330 → viável
+        trips = [
+            make_trip(1, 0, 200),
+            make_trip(2, 240, 440),   # gap=40 ≥ 30 → reset; 200 < 330 → OK
+        ]
+        ps = PricingSubproblem(
+            trips, fixed_cost=100.0, min_layover=5,
+            max_driving_minutes=330, min_break_minutes=30,
+        )
+        cols = ps.find_columns({t.id: 999.0 for t in trips}, max_columns=50)
+        multi = [ids for ids, _ in cols if len(ids) > 1]
+        assert multi, "Break resets counter → bloco t1→t2 deve ser viável"
+
+    def test_cct_disabled_allows_long_blocks(self):
+        """Sem restrição CCT (max_driving=0), blocos longos são permitidos."""
+        trips = [
+            make_trip(1, 0, 300),
+            make_trip(2, 308, 608),
+        ]
+        ps = PricingSubproblem(
+            trips, fixed_cost=100.0, min_layover=5,
+            max_driving_minutes=0,
+        )
+        cols = ps.find_columns({t.id: 999.0 for t in trips}, max_columns=50)
+        multi = [ids for ids, _ in cols if len(ids) > 1]
+        assert multi, "Sem CCT, bloco de 600 min de condução deve ser permitido"
+
+    def test_cct_meta_reported_in_solve(self):
+        """BranchAndPrice com bp_max_driving_minutes deve reportar cct=True."""
+        trips = [make_trip(1, 300, 360), make_trip(2, 380, 440)]
+        vts = [make_vt(1)]
+        sol = BranchAndPrice(vsp_params={"bp_max_driving_minutes": 330}).solve(trips, vts)
+        meta = sol.meta.get("branch_and_price", {})
+        assert meta.get("cct_driving_constrained") is True

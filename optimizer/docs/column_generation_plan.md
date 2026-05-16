@@ -78,6 +78,8 @@ Integração:
 | **F2** | _(pulado — fundido em F3)_ | — | ✅ DONE |
 | **F3** | SPPRC com dominância (label A domina B se rc≤ AND shift≤). Registro no dispatcher. Mem otimizada (del pós-prop, lazy init, cap=30 succ, auto-scale labels). | 1000v: B&P ≤ greedy. 18 testes passam em 2.3s. `algorithm="branch_and_price"` disponível na API. | ✅ DONE |
 | **F4** | Ryan-Foster branching (1 camada: TOGETHER/APART sobre par mais fracionário). `is_lp_integral`, `ryan_foster_pair`, `solve_mip_with_constraints`. Meta reporta `branching=True` e `rf_pair`. | 28 testes passam. LP fracionário → branching melhora solução se ramo viável e melhor que MIP direto. | ✅ DONE |
+| **Sprint 2 (EV)** | Label 6D: `(rc, shift, cost, path, soc_kwh, drv_min)`. Dominância 4D. SoC e driving como recursos duros no SPPRC. EV params lidos do VehicleType. CCT via `bp_max_driving_minutes`. Meta: `ev_aware`, `cct_driving_constrained`. | 37 testes passam (incl. 9 EV+CCT novos). `algorithm="branch_and_price"` + `is_electric=True` ou `bp_max_driving_minutes>0` ativa recursos. | ✅ DONE |
+| **Sprint 3 (JointBP)** | `JointBP` em `integrated/joint_bp.py`. B&P CCT-constrained para VSP → GreedyCSP sobre blocos CCT-viáveis. `algorithm="joint_bp"` na API. | JointBP produz blocos CCT-viáveis; CSP tem menos violações. AlgorithmType.JOINT_BP registrado. | ✅ DONE |
 | **F5** | Estabilização + acceleration (proximal, dual bounding, parallel pricing). | 100k+ viagens em ≤30 min. | 🔜 Futuro |
 
 ## 6. Riscos

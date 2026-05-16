@@ -12,6 +12,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from ..algorithms.hybrid.pipeline import HybridPipeline
+from ..algorithms.integrated.joint_bp import JointBP
 from ..algorithms.integrated.joint_solver import JointSolver
 from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
 from ..algorithms.vsp.assignment import AssignmentVSP
@@ -113,6 +114,17 @@ def _run_joint(
 ) -> OptimizationResult:
     budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
     return JointSolver(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(
+        trips, vehicle_types, depot_id
+    )
+
+
+def _run_joint_bp(
+    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
+    time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+) -> OptimizationResult:
+    budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+    return JointBP(time_budget_s=budget, cct_params=cct_params, vsp_params=vsp_params).solve(
         trips, vehicle_types, depot_id
     )
 
@@ -266,6 +278,8 @@ def dispatch_algorithm(
         result = _run_mcnf(**common_kwargs, csp_factory=csp_factory)
     elif algorithm == AlgorithmType.JOINT_SOLVER:
         result = _run_joint(**common_kwargs)
+    elif algorithm == AlgorithmType.JOINT_BP:
+        result = _run_joint_bp(**common_kwargs)
     elif algorithm == AlgorithmType.HYBRID_PIPELINE:
         result = _run_hybrid(**common_kwargs)
     elif algorithm == AlgorithmType.VCSP_PULP:

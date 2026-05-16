@@ -1,6 +1,6 @@
 # Comparativo Honesto: OTIMIZ vs Optibus
 
-**Data:** 2026-05-15
+**Data:** 2026-05-16
 **Baseado em:** código-fonte real do OTIMIZ + informações públicas do Optibus
 **Metodologia:** sem fabricar números do Optibus, sem alucinar benchmarks, sem exagero
 
@@ -29,14 +29,18 @@ Este documento substitui aquele com avaliação baseada no código real.
 - **Algoritmos VSP reais**: greedy, genetic, tabu search, MCNF, simulated annealing, assignment_vsp.
 - **Algoritmos CSP reais**: greedy, set partitioning via PuLP/CBC (ILP real, não heurística).
 - **Hybrid pipeline**: Greedy -> Local Search -> Metaheurística -> ILP Polish.
-- **Branch-and-Price (F4)**: Column Generation + SPPRC + Ryan-Foster branching. Líder em custo total
-  em dados uniformes e bimodais. 2000v: 331 blocos em 8.5s (vs greedy 333, hybrid 360).
+- **Branch-and-Price (F4+EV+CCT)**: Column Generation + SPPRC 6D + Ryan-Foster branching.
+  Label 6D: `(rc, shift, cost, path, soc_kwh, drv_min)`. Dominância 4D: rc↓, shift↓, soc↑, drv↓.
+  Ativo quando `is_electric=True` no VehicleType (SoC como recurso duro) ou `bp_max_driving_minutes>0`
+  (CCT como recurso duro no pricing). 2000v: 331 blocos em 8.5s (vs greedy 333, hybrid 360).
+- **JointBP (Sprint 3)**: `algorithm="joint_bp"` — B&P CCT-constrained para VSP; blocos produzidos
+  já são CCT-viáveis; GreedyCSP tem menos violações a corrigir. Diferença estrutural vs JointSolver.
 - **Timetable Slack Optimization**: `timetable_slack_minutes` — ajusta start_times dentro de janelas
   de tolerância para reduzir PVR. Análogo ao recurso Optibus 2024. Benchmark 62v: −5.6% PVR com
   slack de apenas 5 minutos. Implementado em `algorithms/vsp/timetable_slack.py`.
 - **GTFS import**, what-if, comparação de cenários, Gini de equidade, P5/P95 por motorista.
 - **Custom reports builder** com exportação CSV e PDF (pdfkit).
-- **221 testes backend + 449 testes optimizer** — suite crescendo com B&P e timetable slack.
+- **221 testes backend + 460 testes optimizer** — suite crescendo com B&P EV/CCT e JointBP.
 
 ### Benchmark real (hardware: AMD Ryzen 5 4600H, CPU-only, sem GPU)
 
@@ -74,7 +78,7 @@ Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.
 | Mobile para motoristas | Não existe | App nativo (iOS/Android) |
 | AVL/GPS tempo real | Não implementado (roadmap) | Integrado ao produto principal |
 | Joint VSP+CSP simultâneo real | JointSolver sequencial (VSP→CSP com retry) | Modifica blocos durante crew scheduling (bidirecional) |
-| EV fleet (SoC, charging schedule) | Infra existe (VehicleType.is_electric); B&P ignora SoC | SoC por rota, charging events, grid constraints |
+| EV fleet (SoC, charging schedule) | SoC como recurso duro no B&P pricing (Sprint 2): recharge no gap, consumo por km, hard filter. Sem grid constraints. | SoC por rota, charging events, grid constraints, multi-depot charging |
 | Relief vehicle optimization | is_relief_point existe; agrupamento de rendições não otimizado | Agrupa rendições, otimiza frota de rendição simultaneamente |
 | Multi-depósito | Implementado em algoritmos (MCNF com capacity balancing); falta UI e validação real | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
