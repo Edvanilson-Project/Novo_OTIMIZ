@@ -1,8 +1,9 @@
 """
-Branch-and-Price — testes F1 + F3 (SPPRC pricing).
+Branch-and-Price — testes F1, F3 (SPPRC pricing) e F4 (Ryan-Foster branching).
 
 F1: Master LP funcional sobre warm-start greedy.
 F3: Pricing via SPPRC com dominância + MIP final.
+F4: is_lp_integral, ryan_foster_pair, solve_mip_with_constraints (TOGETHER/APART).
 
 Ver optimizer/docs/column_generation_plan.md §5.
 """
@@ -186,13 +187,14 @@ class TestBranchAndPriceIntegration:
             f"B&P {bp_sol.num_vehicles} > greedy {greedy_sol.num_vehicles}"
         )
 
-    def test_meta_records_f3(self):
+    def test_meta_records_f4(self):
         trips = _synthetic_trips(n=20)
         vts = [make_vt(1)]
         sol = BranchAndPrice().solve(trips, vts)
         meta = sol.meta.get("branch_and_price", {})
-        assert meta.get("phase") == "F3"
-        assert meta.get("branching") is False
+        assert meta.get("phase") == "F4"
+        assert "branching" in meta
+        assert "rf_pair" in meta
         assert "pricing_rounds" in meta
         assert "columns_after_pricing" in meta
         assert meta["columns_after_pricing"] >= meta["columns_seeded"]
@@ -224,3 +226,124 @@ class TestBranchAndPriceIntegration:
         )
         covered = {t.id for b in bp_sol.blocks for t in b.trips}
         assert len(covered) == len(trips)
+
+
+class TestRyanFosterF4:
+    """F4: Ryan-Foster branching sobre LP fracionário."""
+
+    def _master_with_fractional(self) -> MasterProblemLP:
+        """Cria MasterProblemLP com x_values simulados como fracionários."""
+        m = MasterProblemLP()
+        # col 0: trips [1, 2], col 1: trips [2, 3], col 2: trips [1, 3]
+        m.add_column([1, 2], cost=100.0)
+        m.add_column([2, 3], cost=100.0)
+        m.add_column([1, 3], cost=100.0)
+        # Simular LP fracionário: cada coluna com valor 0.5
+        m._x_values = [0.5, 0.5, 0.5]
+        return m
+
+    def test_is_lp_integral_false_when_fractional(self):
+        m = self._master_with_fractional()
+        assert m.is_lp_integral() is False
+
+    def test_is_lp_integral_true_when_integer(self):
+        m = MasterProblemLP()
+        m.add_column([1, 2], cost=100.0)
+        m.add_column([3], cost=50.0)
+        m._x_values = [1.0, 1.0]
+        assert m.is_lp_integral() is True
+
+    def test_ryan_foster_pair_returns_pair_from_most_fractional(self):
+        m = self._master_with_fractional()
+        pair = m.ryan_foster_pair()
+        assert pair is not None
+        a, b = pair
+        assert a != b
+        # ambos devem ser trip_ids válidos (1, 2, ou 3)
+        assert a in (1, 2, 3) and b in (1, 2, 3)
+
+    def test_ryan_foster_pair_none_when_integral(self):
+        m = MasterProblemLP()
+        m.add_column([1, 2], cost=100.0)
+        m._x_values = [1.0]
+        assert m.ryan_foster_pair() is None
+
+    def test_ryan_foster_pair_none_for_singleton_fractional(self):
+        """LP fracionário mas só colunas de 1 trip — nenhum par possível."""
+        m = MasterProblemLP()
+        m.add_column([1], cost=50.0)
+        m.add_column([2], cost=50.0)
+        m._x_values = [0.5, 0.5]
+        assert m.ryan_foster_pair() is None
+
+    def test_solve_mip_together_excludes_violations(self):
+        """TOGETHER(1,2): colunas com só 1 ou só 2 são excluídas."""
+        m = MasterProblemLP()
+        # col 0: [1, 2] — OK para TOGETHER
+        # col 1: [1, 3] — viola TOGETHER(1,2): contém 1 mas não 2
+        # col 2: [2, 3] — viola TOGETHER(1,2): contém 2 mas não 1
+        # col 3: [3]    — OK (não contém nenhum dos dois)
+        m.add_column([1, 2], cost=100.0)
+        m.add_column([1, 3], cost=80.0)
+        m.add_column([2, 3], cost=80.0)
+        m.add_column([3], cost=50.0)
+        obj, sel = m.solve_mip_with_constraints(together=(1, 2), time_limit=10)
+        if sel:
+            for idx in sel:
+                tset = set(m.column_trips(idx))
+                # Nenhuma coluna selecionada pode violar TOGETHER(1,2)
+                assert not ((1 in tset) ^ (2 in tset)), (
+                    f"Coluna {idx} com trips {tset} viola TOGETHER(1,2)"
+                )
+
+    def test_solve_mip_apart_excludes_violations(self):
+        """APART(1,2): colunas com 1 e 2 juntos são excluídas."""
+        m = MasterProblemLP()
+        m.add_column([1, 2], cost=100.0)  # viola APART(1,2)
+        m.add_column([1, 3], cost=80.0)   # OK
+        m.add_column([2, 3], cost=80.0)   # OK
+        obj, sel = m.solve_mip_with_constraints(apart=(1, 2), time_limit=10)
+        if sel:
+            for idx in sel:
+                tset = set(m.column_trips(idx))
+                assert not (1 in tset and 2 in tset), (
+                    f"Coluna {idx} com trips {tset} viola APART(1,2)"
+                )
+
+    def test_solve_mip_infeasible_returns_empty(self):
+        """Se todos os trips exigem coluna que viola o constraint → (inf, []).
+
+        Nota: CBC pode retornar solução parcial mesmo quando infeasível
+        (cobertura incompleta). O teste verifica apenas que obj=inf OU sel=[].
+        """
+        m = MasterProblemLP()
+        # Só coluna com 1 e 2 juntos — APART(1,2) exclui tudo → impossível cobrir
+        m.add_column([1, 2], cost=100.0)
+        obj, sel = m.solve_mip_with_constraints(apart=(1, 2), time_limit=10)
+        # Deve ser inviável: sem colunas → obj=inf e sel=[]
+        assert obj == float("inf") and sel == []
+
+    def test_f4_branching_in_solve_meta(self):
+        """End-to-end: meta sempre inclui 'branching' e 'rf_pair' (F4)."""
+        trips = _synthetic_trips(n=50)
+        vts = [make_vt(1)]
+        sol = BranchAndPrice(vsp_params={
+            "bp_max_pricing_iterations": 2,
+            "bp_max_pricing_columns": 100,
+        }).solve(trips, vts)
+        meta = sol.meta.get("branch_and_price", {})
+        assert "branching" in meta
+        assert "rf_pair" in meta
+        assert meta.get("phase") == "F4"
+
+    def test_f4_coverage_when_rf_used(self):
+        """Se Ryan-Foster dispara, cobertura ainda deve ser total."""
+        trips = _synthetic_trips(n=100)
+        vts = [make_vt(1)]
+        sol = BranchAndPrice(vsp_params={
+            "bp_max_pricing_iterations": 3,
+            "bp_max_pricing_columns": 200,
+        }).solve(trips, vts)
+        covered = {t.id for b in sol.blocks for t in b.trips}
+        all_ids = {t.id for t in trips}
+        assert all_ids <= covered | {t.id for t in sol.unassigned_trips}

@@ -1,11 +1,12 @@
 """
 VSP via Branch-and-Price (column generation).
 
-STATUS: F3 — Pricing via SPPRC com dominância (Shortest Path with Resource Constraints).
-        Substitui BFS enumerativo de F2 por DP com poda de labels dominados.
-        Sem branching explícito — integridade obtida por MIP final.
-        Não registrado em algorithm_dispatcher.
-        Ver docs/column_generation_plan.md para plano completo e fases.
+STATUS: F4 — Ryan-Foster branching (uma camada) sobre LP fracionário pós-pricing.
+        Herda F3: pricing SPPRC com dominância, warm-start greedy, MIP final CBC.
+        F4 adiciona: detecção de LP fracionário + branching TOGETHER/APART em
+        uma camada (sem árvore B&B completa). Cobre casos onde CBC não integra
+        o LP relaxado no MIP final.
+        Ver docs/column_generation_plan.md para plano completo.
 
 Formulação:
 
@@ -18,6 +19,9 @@ Pricing (F3):          SPPRC com dominância — label=(rc_acum, shift_usado, pa
                        Label A domina B no mesmo nó se rc_A ≤ rc_B E shift_A ≤ shift_B.
                        Processa em ordem topológica (start_time). O(n * L) vs O(n * b^d).
 MIP final:             CBC com todas colunas acumuladas → solução inteira.
+Ryan-Foster (F4):      Se LP fracionário após todos os rounds, escolhe par (i,j) com
+                       maior fracionaridade. Resolve MIP em TOGETHER(i,j) e APART(i,j).
+                       Retorna ramo com menor blocos (desempate: menor custo).
 """
 from __future__ import annotations
 
@@ -153,6 +157,81 @@ class MasterProblemLP:
 
     def column_trips(self, index: int) -> List[int]:
         return list(self._columns[index][0])
+
+    # ------------------------------------------------------------------ F4
+
+    def is_lp_integral(self, tol: float = 1e-4) -> bool:
+        """True se todos os x_p da última solução LP estão em {0,1} (dentro de tol)."""
+        return all(v < tol or v > 1.0 - tol for v in self._x_values)
+
+    def ryan_foster_pair(self) -> Optional[Tuple[int, int]]:
+        """Seleciona par (i,j) Ryan-Foster a partir da solução LP fracionária.
+
+        Escolhe a coluna mais fracionária (x_p mais próximo de 0.5) que contém
+        ≥ 2 trips. Retorna os dois primeiros trip_ids dessa coluna.
+        Retorna None se LP for integral ou todas as colunas fracionárias forem singletoons.
+        """
+        candidates = [
+            (abs(v - 0.5), i, self._columns[i][0])
+            for i, v in enumerate(self._x_values)
+            if 1e-4 < v < 1.0 - 1e-4 and len(self._columns[i][0]) >= 2
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0])  # menor distância a 0.5 primeiro
+        _, _, trip_ids = candidates[0]
+        return (trip_ids[0], trip_ids[1])
+
+    def solve_mip_with_constraints(
+        self,
+        together: Optional[Tuple[int, int]] = None,
+        apart: Optional[Tuple[int, int]] = None,
+        time_limit: int = 60,
+    ) -> Tuple[float, List[int]]:
+        """Resolve MIP sobre colunas que satisfazem os constraints Ryan-Foster.
+
+        together=(i,j): coluna deve conter ambos ou nenhum dos trips i,j.
+        apart=(i,j):    coluna não pode conter ambos i e j.
+
+        Retorna (objective, selected_global_indices). Se inviável, retorna (inf, []).
+        """
+        if not _PULP_AVAILABLE:
+            raise RuntimeError("PuLP indisponível")
+
+        # Filtrar colunas que violam os constraints
+        valid: List[int] = []
+        for i, (trip_ids, _) in enumerate(self._columns):
+            tset = set(trip_ids)
+            if together:
+                a, b = together
+                if (a in tset) != (b in tset):
+                    continue
+            if apart:
+                a, b = apart
+                if a in tset and b in tset:
+                    continue
+            valid.append(i)
+
+        if not valid:
+            return (float("inf"), [])
+
+        sub_cols = [self._columns[i] for i in valid]
+        all_trips = sorted({tid for ids, _ in sub_cols for tid in ids})
+
+        prob = pulp.LpProblem("BP_RF_MIP", pulp.LpMinimize)
+        x = [pulp.LpVariable(f"x_{j}", cat="Binary") for j in range(len(sub_cols))]
+        prob += pulp.lpSum(cost * x[j] for j, (_, cost) in enumerate(sub_cols))
+        for trip_id in all_trips:
+            prob += (
+                pulp.lpSum(x[j] for j, (ids, _) in enumerate(sub_cols) if trip_id in ids) >= 1,
+                f"cover_{trip_id}",
+            )
+
+        prob.solve(_make_solver(time_limit))
+        obj = float(pulp.value(prob.objective) or float("inf"))
+        sel_local = [j for j, v in enumerate(x) if (pulp.value(v) or 0.0) >= 0.5]
+        sel_global = [valid[j] for j in sel_local]
+        return (obj, sel_global)
 
 
 class PricingSubproblem:
@@ -405,6 +484,39 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         mip_obj = master.solve_mip(time_limit=mip_budget)
         selected = master.selected_columns()
 
+        # F4: Ryan-Foster branching se LP fracionário após todos os rounds
+        rf_used = False
+        rf_pair: Optional[Tuple[int, int]] = None
+        if not master.is_lp_integral() and not self._check_timeout():
+            pair = master.ryan_foster_pair()
+            if pair is not None:
+                rf_pair = pair
+                rf_budget = max(10, mip_budget // 2)
+                all_trip_ids = {t.id for t in trips}
+                rf_candidates: List[Tuple[int, float, List[int]]] = []
+
+                for constraint_type in ("together", "apart"):
+                    kw = dict(
+                        together=pair if constraint_type == "together" else None,
+                        apart=pair if constraint_type == "apart" else None,
+                        time_limit=rf_budget,
+                    )
+                    obj_rf, sel_rf = master.solve_mip_with_constraints(**kw)
+                    if not sel_rf:
+                        continue
+                    covered_rf = {tid for idx in sel_rf for tid in master.column_trips(idx)}
+                    if all_trip_ids <= covered_rf:
+                        rf_candidates.append((len(sel_rf), obj_rf, sel_rf))
+
+                if rf_candidates:
+                    # Menor blocos primeiro; desempate: menor custo
+                    rf_candidates.sort(key=lambda r: (r[0], r[1]))
+                    best_n, best_obj, best_sel = rf_candidates[0]
+                    if (best_n, best_obj) < (len(selected), mip_obj):
+                        selected = best_sel
+                        mip_obj = best_obj
+                        rf_used = True
+
         # Reconstrução: blocos a partir dos trip_ids selecionados
         rebuilt_blocks: List[Block] = []
         covered: set[int] = set()
@@ -429,7 +541,7 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         )
         sol.meta = {
             "branch_and_price": {
-                "phase": "F3",
+                "phase": "F4",
                 "warm_start_algorithm": warm_start.algorithm,
                 "warm_start_blocks": len(warm_start.blocks),
                 "columns_seeded": len(warm_start.blocks),
@@ -439,7 +551,8 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
                 "columns_selected": len(selected),
                 "mip_objective": mip_obj,
                 "mip_status": master._lp_status,
-                "branching": False,
+                "branching": rf_used,
+                "rf_pair": list(rf_pair) if rf_pair else None,
             }
         }
         return sol

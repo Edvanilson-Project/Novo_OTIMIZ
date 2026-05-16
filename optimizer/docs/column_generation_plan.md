@@ -77,7 +77,7 @@ Integração:
 | **F1** | Master LP (PuLP CBC) + warm-start greedy + MIP final. | 100v: B&P == greedy blocos. 18 testes novos. | ✅ DONE |
 | **F2** | _(pulado — fundido em F3)_ | — | ✅ DONE |
 | **F3** | SPPRC com dominância (label A domina B se rc≤ AND shift≤). Registro no dispatcher. Mem otimizada (del pós-prop, lazy init, cap=30 succ, auto-scale labels). | 1000v: B&P ≤ greedy. 18 testes passam em 2.3s. `algorithm="branch_and_price"` disponível na API. | ✅ DONE |
-| **F4** | Branching Ryan-Foster (branch on fractional pair i,j: subprob must/cannot co-occur). Necessário para instâncias onde LP fracionário não arredonda limpo. | 2000v: ≤ greedy blocos (alvo: ≤333); tempo ≤ 600s. | 🔜 Próximo |
+| **F4** | Ryan-Foster branching (1 camada: TOGETHER/APART sobre par mais fracionário). `is_lp_integral`, `ryan_foster_pair`, `solve_mip_with_constraints`. Meta reporta `branching=True` e `rf_pair`. | 28 testes passam. LP fracionário → branching melhora solução se ramo viável e melhor que MIP direto. | ✅ DONE |
 | **F5** | Estabilização + acceleration (proximal, dual bounding, parallel pricing). | 100k+ viagens em ≤30 min. | 🔜 Futuro |
 
 ## 6. Riscos
@@ -112,11 +112,23 @@ Integração:
 
 `bp_max_labels_per_node=0` → auto-escala (recomendado). Para debug: valores explícitos.
 
-## 9. Notas de implementação F3
+## 9. Notas de implementação F3 + F4
 
+**F3:**
 - `PricingSubproblem._build_successors` cap em 30 succ/nó — instâncias com >30 conexões
   por viagem são raras e os 30 melhores (por start_time) são suficientes para pricing.
 - Labels liberados imediatamente após propagação (`labels_at.pop`) — pico de memória
   proporcional ao fan-out, não ao n total.
 - MIP final via CBC (PuLP) sobre pool completo — CBC faz branching internamente.
-  Ryan-Foster explícito (F4) melhorará a qualidade dos duais no loop CG.
+
+**F4 (Ryan-Foster, 1 camada):**
+- `MasterProblemLP.is_lp_integral(tol=1e-4)`: verifica se todos os x_p ∈ {0,1}.
+- `MasterProblemLP.ryan_foster_pair()`: encontra coluna mais fracionária (|x_p - 0.5| mínimo)
+  com ≥ 2 trips. Retorna (trip_i, trip_j) ou None.
+- `MasterProblemLP.solve_mip_with_constraints(together, apart, time_limit)`: filtra colunas
+  que violam o constraint e resolve MIP no subconjunto válido. Retorna (obj, selected_global_idx).
+- `BranchAndPrice.solve`: se LP fracionário após todos os rounds → tenta TOGETHER e APART.
+  Compara (n_blocos, custo) com MIP direto. Aceita ramo somente se cobre todos os trips e
+  melhora (n_blocos, custo). `meta["branching"]=True` e `meta["rf_pair"]=[i,j]` se usado.
+- Sem árvore B&B completa — 1 camada é suficiente para os casos práticos observados
+  nos benchmarks (dados uniformes e bimodais). F5 adicionaria multi-level se necessário.
