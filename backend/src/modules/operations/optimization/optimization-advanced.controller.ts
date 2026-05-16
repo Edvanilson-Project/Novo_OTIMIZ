@@ -197,4 +197,42 @@ export class OptimizationAdvancedController {
     }
     return this.optimizationService.replayRun(companyId, fingerprint);
   }
+
+  /**
+   * Comparação original vs replay: retorna `{ original, replay, diff, status }`.
+   * `status` pode ser: 'ready' (replay concluída), 'running', 'not_started'.
+   * Chamar após POST /replay/:fingerprint para acompanhar o resultado.
+   */
+  @Get('replay/:fingerprint/compare')
+  async getReplayComparison(@Param('fingerprint') fingerprint: string) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) {
+      throw new Error('Empresa não identificada.');
+    }
+    return this.optimizationService.getReplayComparison(companyId, fingerprint);
+  }
+
+  /**
+   * Benchmark embarcado: executa o solver em dados sintéticos e retorna timing + qualidade.
+   * Destinado a SRE/operação — não persiste dados. Não requer schedule no DB.
+   * Body: { sizes?: number[], algorithm?: string, seed?: number, timeBudgetS?: number }
+   */
+  @Post('admin/benchmark')
+  async runBenchmark(
+    @Body()
+    body: {
+      sizes?: number[];
+      algorithm?: string;
+      seed?: number;
+      timeBudgetS?: number;
+    },
+  ) {
+    const sizes = body.sizes ?? [100, 500, 1000];
+    return this.optimizationService.runBenchmark(
+      sizes,
+      body.algorithm,
+      body.seed,
+      body.timeBudgetS,
+    );
+  }
 }

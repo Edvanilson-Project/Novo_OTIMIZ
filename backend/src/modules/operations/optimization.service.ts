@@ -457,6 +457,117 @@ export class OptimizationService implements OnModuleInit {
     });
   }
 
+  /**
+   * Retorna `{ original, replay, diff, status }` para um fingerprint dado.
+   * `status` é 'ready' quando a replay COMPLETED, 'running' se ainda pendente,
+   * 'not_started' se nenhuma replay existe.
+   */
+  async getReplayComparison(
+    companyId: number,
+    inputFingerprint: string,
+  ): Promise<{ original: any; replay: any | null; diff: any | null; status: string }> {
+    const original = await this.optimizationRunRepo.findOne({
+      where: { companyId, inputFingerprint },
+      order: { createdAt: 'DESC' },
+    });
+    if (!original) {
+      throw new BadRequestException(
+        `Nenhuma OptimizationRun com inputFingerprint=${inputFingerprint}.`,
+      );
+    }
+    const replayScenarioId = `replay-of-${inputFingerprint.slice(0, 12)}`;
+    const replayRun = await this.optimizationRunRepo.findOne({
+      where: { companyId, scenarioId: replayScenarioId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const originalMetrics = this.extractRunMetrics(original.metrics);
+    if (!replayRun) {
+      return { original: originalMetrics, replay: null, diff: null, status: 'not_started' };
+    }
+    if (replayRun.status !== OptimizationRunStatus.COMPLETED) {
+      return {
+        original: originalMetrics,
+        replay: { status: replayRun.status },
+        diff: null,
+        status: 'running',
+      };
+    }
+    const replayMetrics = this.extractRunMetrics(replayRun.metrics);
+    const diff: Record<string, any> = {};
+    for (const key of Object.keys(originalMetrics)) {
+      const o = originalMetrics[key];
+      const r = replayMetrics[key];
+      if (typeof o === 'number' && typeof r === 'number') {
+        diff[key] = r - o;
+      } else {
+        diff[key] = r === o ? 'same' : { original: o, replay: r };
+      }
+    }
+    return { original: originalMetrics, replay: replayMetrics, diff, status: 'ready' };
+  }
+
+  /**
+   * Benchmark embarcado: gera viagens sintéticas para cada tamanho em `sizes`,
+   * chama o optimizer diretamente (sem persistir no DB) e retorna timing + qualidade.
+   * Útil para SRE validar performance do solver sem CLI.
+   */
+  async runBenchmark(
+    sizes: number[],
+    algorithm = 'branch_and_price',
+    seed = 42,
+    timeBudgetS = 30,
+  ): Promise<{ results: any[]; timestamp: string }> {
+    const results: any[] = [];
+    const vehicleTypes = [
+      { id: 1, name: 'Standard', passenger_capacity: 60, fixed_cost: 800.0 },
+    ];
+
+    for (const n of sizes) {
+      // Viagens uniformes entre 06:00 (360min) e 20:00 (1200min), duration=40min, dist=10km
+      const daySpan = 840; // 1200 - 360
+      const interval = Math.floor(daySpan / n);
+      const trips = Array.from({ length: n }, (_, i) => {
+        const start = 360 + i * interval;
+        return {
+          id: i + 1,
+          line_id: (i % 5) + 1,
+          start_time: start,
+          end_time: start + 40,
+          duration: 40,
+          origin_id: (i % 2) + 1,
+          destination_id: ((i + 1) % 2) + 1,
+          distance_km: 10.0,
+        };
+      });
+
+      const t0 = Date.now();
+      let result: any = null;
+      let error: string | null = null;
+      try {
+        const { data } = await axios.post(
+          `${this.OPTIMIZER_URL}/optimize/`,
+          { trips, vehicle_types: vehicleTypes, algorithm, time_budget_s: timeBudgetS },
+          { headers: { 'X-Internal-Key': this.INTERNAL_KEY }, timeout: (timeBudgetS + 30) * 1000 },
+        );
+        result = data;
+      } catch (e: any) {
+        error = e?.response?.data?.detail ?? e?.message ?? 'unknown error';
+      }
+      const elapsedS = (Date.now() - t0) / 1000;
+      results.push({
+        n,
+        algorithm,
+        seed,
+        blocks: result?.vehicles ?? null,
+        totalCost: result?.total_cost ?? null,
+        elapsedS: Number(elapsedS.toFixed(2)),
+        error,
+      });
+    }
+    return { results, timestamp: new Date().toISOString() };
+  }
+
   /** Sumarização das métricas que importam para comparação de cenários. */
   private extractRunMetrics(result: any): Record<string, any> {
     if (!result || typeof result !== 'object') return {};

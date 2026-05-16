@@ -1,13 +1,20 @@
+import { NotFoundException } from '@nestjs/common';
 import { WhatIfSimulatorService } from './whatif-simulator.service';
 
 describe('WhatIfSimulatorService', () => {
   let service: WhatIfSimulatorService;
+  let scheduleRepo: { findOne: jest.Mock };
+  let optimizationService: { runOptimization: jest.Mock };
+  let tenantContext: { getCompanyId: jest.Mock };
 
   beforeEach(() => {
+    scheduleRepo = { findOne: jest.fn() };
+    optimizationService = { runOptimization: jest.fn() };
+    tenantContext = { getCompanyId: jest.fn().mockReturnValue(16) };
     service = new WhatIfSimulatorService(
-      { findOne: jest.fn() } as any, // scheduleRepo
-      { runOptimization: jest.fn() } as any, // optimizationService
-      { getCompanyId: jest.fn().mockReturnValue(16) } as any, // tenantContext
+      scheduleRepo as any,
+      optimizationService as any,
+      tenantContext as any,
     );
   });
 
@@ -176,6 +183,83 @@ describe('WhatIfSimulatorService', () => {
       expect(result.scenario.type).toBe('vehicle_type_change');
       expect(result.scenario.description).toBeTruthy();
       expect(Array.isArray(result.scenario.affectedElements)).toBe(true);
+    });
+  });
+
+  describe('runParameterChangeReal', () => {
+    const fakeSchedule = { id: 42, companyId: 16 };
+    const fakeSubmission = {
+      optimizationRunId: 99,
+      scheduleId: 42,
+      scenarioId: 'whatif-test-123',
+      inputFingerprint: 'abc123',
+    };
+
+    beforeEach(() => {
+      scheduleRepo.findOne.mockResolvedValue(fakeSchedule);
+      optimizationService.runOptimization.mockResolvedValue(fakeSubmission);
+    });
+
+    it('should return running status with optimizationRunId', async () => {
+      const result = await service.runParameterChangeReal(42, { cost_vehicle: 1200 });
+
+      expect(result.status).toBe('running');
+      expect(result.optimizationRunId).toBe(99);
+      expect(result.scheduleId).toBe(42);
+    });
+
+    it('should pass paramsOverride to optimizationService', async () => {
+      await service.runParameterChangeReal(42, { cost_vehicle: 1500, time_budget_s: 60 }, 'test-label');
+
+      expect(optimizationService.runOptimization).toHaveBeenCalledWith(
+        16,
+        undefined,
+        undefined,
+        expect.objectContaining({
+          optimizationParamsOverride: { cost_vehicle: 1500, time_budget_s: 60 },
+          baselineScheduleId: 42,
+          skipTenantLock: true,
+        }),
+      );
+    });
+
+    it('should include label in scenarioId', async () => {
+      await service.runParameterChangeReal(42, {}, 'custo-reduzido');
+
+      const call = optimizationService.runOptimization.mock.calls[0];
+      const opts = call[3];
+      expect(opts.scenarioId).toContain('custo-reduzido');
+    });
+
+    it('should use provided algorithm', async () => {
+      await service.runParameterChangeReal(42, {}, undefined, 'greedy');
+
+      expect(optimizationService.runOptimization).toHaveBeenCalledWith(
+        16,
+        'greedy',
+        undefined,
+        expect.any(Object),
+      );
+      const result = await service.runParameterChangeReal(42, {}, undefined, 'greedy');
+      expect(result.algorithm).toBe('greedy');
+    });
+
+    it('should default algorithm to hybrid_pipeline when not provided', async () => {
+      const result = await service.runParameterChangeReal(42, {});
+
+      expect(result.algorithm).toBe('hybrid_pipeline');
+    });
+
+    it('should throw NotFoundException when schedule not found', async () => {
+      scheduleRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.runParameterChangeReal(999, {})).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw NotFoundException when companyId is null', async () => {
+      tenantContext.getCompanyId.mockReturnValue(null);
+
+      await expect(service.runParameterChangeReal(42, {})).rejects.toThrow(NotFoundException);
     });
   });
 });

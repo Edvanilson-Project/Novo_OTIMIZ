@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..domain.models import AlgorithmType
 
@@ -107,8 +107,7 @@ class BaseOptimizationConfig(BaseModel):
     goal_weights: Dict[str, float] = Field(default_factory=dict, description="Pesos personalizados de objetivos")
     dynamic_rules: List[Dict[str, Any]] = Field(default_factory=list, description="Regras dinâmicas de custo")
     
-    class Config:
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 class OptimizationParametersDTO(BaseOptimizationConfig):

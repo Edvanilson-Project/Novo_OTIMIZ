@@ -1,6 +1,6 @@
 # Comparativo Honesto: OTIMIZ vs Optibus
 
-**Data:** 2026-05-16
+**Data:** 2026-05-16 (atualizado sessão 2)
 **Baseado em:** código-fonte real do OTIMIZ + informações públicas do Optibus
 **Metodologia:** sem fabricar números do Optibus, sem alucinar benchmarks, sem exagero
 
@@ -40,7 +40,7 @@ Este documento substitui aquele com avaliação baseada no código real.
   slack de apenas 5 minutos. Implementado em `algorithms/vsp/timetable_slack.py`.
 - **GTFS import**, what-if, comparação de cenários, Gini de equidade, P5/P95 por motorista.
 - **Custom reports builder** com exportação CSV e PDF (pdfkit).
-- **221 testes backend + 460 testes optimizer** — suite crescendo com B&P EV/CCT e JointBP.
+- **232 testes backend + 483 testes optimizer** — suite crescendo com B&P EV/CCT, JointBP, runParameterChangeReal, replay comparativo e admin benchmark.
 
 ### Benchmark real (hardware: AMD Ryzen 5 4600H, CPU-only, sem GPU)
 

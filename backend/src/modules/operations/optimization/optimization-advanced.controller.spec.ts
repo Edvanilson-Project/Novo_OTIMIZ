@@ -25,7 +25,17 @@ describe('OptimizationAdvancedController', () => {
       simulateVehicleTypeChange: jest.fn().mockReturnValue({ delta: {} }),
     };
     optimizationSvc = {
-      replayRun: jest.fn().mockResolvedValue({}),
+      replayRun: jest.fn().mockResolvedValue({ optimizationRunId: 5, status: 'running' }),
+      getReplayComparison: jest.fn().mockResolvedValue({
+        original: { totalCost: 10000 },
+        replay: { totalCost: 9800 },
+        diff: { totalCost: -200 },
+        status: 'ready',
+      }),
+      runBenchmark: jest.fn().mockResolvedValue({
+        results: [{ n: 100, elapsedS: 0.5, blocks: 20 }],
+        timestamp: '2026-05-16T00:00:00.000Z',
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -64,5 +74,37 @@ describe('OptimizationAdvancedController', () => {
     (scenarioSvc.getScenarioRun as jest.Mock).mockResolvedValue(null);
     const result = await controller.getScenarioRun(10, 'MISSING');
     expect(result).toBeNull();
+  });
+
+  it('replayRun delegates to optimizationService', async () => {
+    const result = await controller.replayRun('fp123');
+    expect(optimizationSvc.replayRun).toHaveBeenCalledWith(1, 'fp123');
+    expect(result).toMatchObject({ status: 'running' });
+  });
+
+  it('getReplayComparison returns diff with status ready', async () => {
+    const result = await controller.getReplayComparison('fp123');
+    expect(optimizationSvc.getReplayComparison).toHaveBeenCalledWith(1, 'fp123');
+    expect(result).toMatchObject({ status: 'ready', diff: { totalCost: -200 } });
+  });
+
+  it('runBenchmark uses default sizes when not provided', async () => {
+    await controller.runBenchmark({});
+    expect(optimizationSvc.runBenchmark).toHaveBeenCalledWith(
+      [100, 500, 1000],
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  it('runBenchmark passes provided sizes and algorithm', async () => {
+    await controller.runBenchmark({ sizes: [50, 200], algorithm: 'greedy', seed: 7 });
+    expect(optimizationSvc.runBenchmark).toHaveBeenCalledWith(
+      [50, 200],
+      'greedy',
+      7,
+      undefined,
+    );
   });
 });

@@ -6,9 +6,21 @@ import * as request from 'supertest';
 import { VehiclesModule } from './vehicles.module';
 import { VehicleType } from '../database/entities/vehicle-type.entity';
 import { Vehicle } from '../database/entities/vehicle.entity';
+import { VehicleMaintenance } from '../database/entities/vehicle-maintenance.entity';
+import { VehicleAvailabilityWindow } from '../database/entities/vehicle-availability-window.entity';
 import { Terminal } from '../database/entities/terminal.entity';
 import { BlockAssignment } from '../database/entities/block-assignment.entity';
-import { TenantBaseEntity } from '../../common/entities/base.entity';
+import { Schedule } from '../database/entities/schedule.entity';
+import { DutyAssignment } from '../database/entities/duty-assignment.entity';
+import { OptimizationRun } from '../database/entities/optimization-run.entity';
+import { AuditLog } from '../database/entities/audit-log.entity';
+import { Company } from '../database/entities/company.entity';
+import { CompanyParameters } from '../database/entities/company-parameters.entity';
+import { CustomReport } from '../database/entities/custom-report.entity';
+import { Driver } from '../database/entities/driver.entity';
+import { Line } from '../database/entities/line.entity';
+import { Trip } from '../database/entities/trip.entity';
+import { User } from '../database/entities/user.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Injectable()
@@ -32,7 +44,11 @@ describe.skip('Vehicles E2E Tests', () => {
         TypeOrmModule.forRoot({
           type: 'sqlite',
           database: ':memory:',
-          entities: [VehicleType, Vehicle, Terminal, BlockAssignment, TenantBaseEntity],
+          entities: [
+            VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow,
+            Terminal, BlockAssignment, Schedule, DutyAssignment, OptimizationRun,
+            AuditLog, Company, CompanyParameters, CustomReport, Driver, Line, Trip, User,
+          ],
           synchronize: true,
         }),
         VehiclesModule,
