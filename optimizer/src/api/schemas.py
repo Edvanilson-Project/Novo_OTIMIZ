@@ -338,6 +338,17 @@ class VspParamsInput(BaseModel):
     group_infeasibility_mode: Optional[str] = None
     goal_weights: Dict[str, float] = Field(default_factory=dict)
     natural_language_rules: List[str] = Field(default_factory=list)
+    # Branch-and-Price params (algorithm="branch_and_price" ou "joint_bp")
+    bp_max_pricing_iterations: Optional[int] = None
+    bp_max_pricing_columns: Optional[int] = None
+    bp_max_labels_per_node: Optional[int] = None
+    bp_max_driving_minutes: Optional[int] = None    # CCT driving limit no pricing B&P
+    bp_min_break_minutes: Optional[int] = None      # pausa mínima para reset (default 30)
+    ev_kwh_per_km: Optional[float] = None           # consumo EV (default 1.8 kWh/km)
+    # Timetable Slack Optimization
+    timetable_slack_minutes: Optional[int] = None   # slack de horário para reduzir PVR
+    timetable_slack_step_minutes: Optional[int] = None
+    scale_stitch_max_gap_minutes: Optional[int] = None
 
 
 class OptimizeRequest(BaseModel):

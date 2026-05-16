@@ -57,15 +57,12 @@ class JointBP(BaseAlgorithm, IIntegratedSolver):
             return OptimizationResult(vsp=None, csp=None)
 
         # Extrair limites CLT do cct_params e injetar no B&P via vsp_params
+        # Usa "max_driving_minutes" (mesma chave que GreedyCSP/CctParamsInput)
         max_driving = int(
-            self.cct_params.get(
-                "max_continuous_driving_minutes", _CLT_MAX_DRIVING_MINUTES
-            )
+            self.cct_params.get("max_driving_minutes", _CLT_MAX_DRIVING_MINUTES)
         )
         min_break = int(
-            self.cct_params.get(
-                "min_break_after_driving_minutes", _CLT_MIN_BREAK_MINUTES
-            )
+            self.cct_params.get("min_break_minutes", _CLT_MIN_BREAK_MINUTES)
         )
 
         bp_vsp_params = {

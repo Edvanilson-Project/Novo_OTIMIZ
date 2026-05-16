@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .ai_service import AiService
 from .algorithm_dispatcher import dispatch_algorithm
+from ..algorithms.ev.soc_tracker import EVSoCTracker
 from .parameter_normalization import (
     align_vsp_params_with_cct as _module_align_vsp_params_with_cct,
     as_dict as _module_as_dict,
@@ -557,10 +558,22 @@ class OptimizerService:
         if effective_optimization_params:
             self.evaluator.set_costs(effective_optimization_params)
             result.meta["ilp_timeout_seconds"] = int(effective_optimization_params.get("ilp_timeout_seconds", 120) or 120)
-        
+
         cost_breakdown = self.evaluator.total_cost_breakdown(result, vehicle_types)
         result.total_cost = float(cost_breakdown["total"])
         result.meta["cost_breakdown"] = cost_breakdown
+
+        # EV fleet SoC report (apenas quando VehicleType é elétrico e há solução VSP)
+        ev_vehicle = next((v for v in vehicle_types if getattr(v, "is_electric", False)), None)
+        if ev_vehicle and result.vsp and result.vsp.blocks:
+            kwh_per_km = float((vsp_params or {}).get("ev_kwh_per_km", 1.8) or 1.8)
+            try:
+                tracker = EVSoCTracker(ev_vehicle, kwh_per_km=kwh_per_km)
+                soc_report = tracker.track(result.vsp)
+                result.meta["ev_soc_report"] = soc_report.to_dict()
+            except Exception as _e:  # noqa: BLE001
+                logger.warning("EVSoCTracker falhou: %s", _e)
+
         result.meta["roster_count"] = result.csp.meta.get("roster_count", 0)
         result.meta["operational_time_reports"] = summarize_operational_time_reports(result.csp.duties or [])
         result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)

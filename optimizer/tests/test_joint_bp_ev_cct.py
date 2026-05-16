@@ -76,7 +76,7 @@ class TestJointBPIntegration:
             algorithm=AlgorithmType.JOINT_BP,
             time_budget_s=30,
             vsp_params={},
-            cct_params={"max_continuous_driving_minutes": 300},
+            cct_params={"max_driving_minutes": 300},
         )
         meta = (result.meta or {}).get("joint_bp", {})
         assert meta.get("cct_max_driving_minutes") == 300
@@ -96,7 +96,7 @@ class TestJointBPIntegration:
             algorithm=AlgorithmType.JOINT_BP,
             time_budget_s=30,
             vsp_params={"bp_max_pricing_iterations": 3, "bp_max_pricing_columns": 200},
-            cct_params={"max_continuous_driving_minutes": 330, "min_break_after_driving_minutes": 30},
+            cct_params={"max_driving_minutes": 330, "min_break_minutes": 30},
         )
         # Nenhum bloco deve ter 3 trips com condução contínua de 450 min
         for block in result.vsp.blocks:
