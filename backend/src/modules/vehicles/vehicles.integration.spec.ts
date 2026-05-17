@@ -1,118 +1,139 @@
+/**
+ * Vehicles Integration Tests — mock-based.
+ *
+ * Valida a lógica de negócio do VehiclesService com repositórios Jest,
+ * sem depender de banco de dados real (SQLite ou Postgres).
+ * Testa especialmente as relações VehicleType → Vehicle.
+ */
 import { Test, TestingModule } from '@nestjs/testing';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { NotFoundException } from '@nestjs/common';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { Vehicle } from '../database/entities/vehicle.entity';
 import { VehicleType } from '../database/entities/vehicle-type.entity';
 import { VehiclesService } from './vehicles.service';
 import { TenantContext } from '../../common/context/tenant-context';
 
-describe.skip('Vehicles Integration Tests (Database Relations)', () => {
+const COMPANY_ID = 1;
+
+const TYPE_BUS: VehicleType = {
+  id: 10, companyId: COMPANY_ID, name: 'TEST-BUS',
+  capacity: 60, costPerDay: 500, accessible: true, description: 'Test bus type',
+} as VehicleType;
+
+const VEHICLE_001: Vehicle = {
+  id: 1, companyId: COMPANY_ID, vehicleId: 'TEST-001',
+  typeId: TYPE_BUS.id, depotId: 1, isActive: true,
+  licensePlate: 'TEST-001', type: TYPE_BUS,
+} as Vehicle;
+
+const VEHICLE_002: Vehicle = {
+  id: 2, companyId: COMPANY_ID, vehicleId: 'TEST-002',
+  typeId: TYPE_BUS.id, depotId: 1, isActive: false,
+  licensePlate: 'TEST-002', type: TYPE_BUS,
+} as Vehicle;
+
+describe('Vehicles Integration Tests (mock-based)', () => {
   let service: VehiclesService;
-  let module: TestingModule;
+  let vehicleRepo: any;
+  let vehicleTypeRepo: any;
 
-  // Note: These tests require a running PostgreSQL database
-  // To run these tests, ensure DB_HOST, DB_USER, DB_PASSWORD, DB_NAME are set
-  // They will use the real database, not mocks
-  // Use .skip() to exclude from unit test suite. Run separately with:
-  // npm test -- --testNamePattern="Integration Tests"
+  beforeEach(async () => {
+    vehicleTypeRepo = {
+      find: jest.fn().mockResolvedValue([TYPE_BUS]),
+      findOne: jest.fn().mockImplementation(({ where: { id, companyId } }: any) =>
+        Promise.resolve(id === TYPE_BUS.id && companyId === COMPANY_ID ? TYPE_BUS : null),
+      ),
+      create: jest.fn().mockImplementation((data: any) => ({ id: 99, ...data })),
+      save: jest.fn().mockImplementation(async (e: any) => e),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
 
-  beforeAll(async () => {
-    module = await Test.createTestingModule({
-      imports: [
-        TypeOrmModule.forRoot({
-          type: 'postgres',
-          host: process.env.DB_HOST || 'localhost',
-          port: parseInt(process.env.DB_PORT || '5432'),
-          username: process.env.DB_USER || 'postgres',
-          password: process.env.DB_PASSWORD || 'postgres',
-          database: process.env.DB_NAME || 'otimiz_db',
-          entities: [Vehicle, VehicleType],
-          synchronize: true,
-          dropSchema: false, // Use false in integration tests to preserve data
-        }),
-        TypeOrmModule.forFeature([Vehicle, VehicleType]),
-      ],
+    vehicleRepo = {
+      find: jest.fn().mockResolvedValue([VEHICLE_001, VEHICLE_002]),
+      findOne: jest.fn().mockImplementation(({ where: { id, companyId } }: any) =>
+        Promise.resolve(id === VEHICLE_001.id && companyId === COMPANY_ID ? VEHICLE_001 : null),
+      ),
+      create: jest.fn().mockImplementation((data: any) => ({ id: 50, ...data })),
+      save: jest.fn().mockImplementation(async (e: any) => e),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
       providers: [
         VehiclesService,
-        {
-          provide: TenantContext,
-          useValue: { getCompanyId: () => 1 },
-        },
+        { provide: getRepositoryToken(Vehicle), useValue: vehicleRepo },
+        { provide: getRepositoryToken(VehicleType), useValue: vehicleTypeRepo },
+        { provide: TenantContext, useValue: { getCompanyId: () => COMPANY_ID } },
       ],
     }).compile();
 
-    service = module.get<VehiclesService>(VehiclesService);
-  });
-
-  afterAll(async () => {
-    await module.close();
+    service = module.get(VehiclesService);
   });
 
   describe('Vehicle Type Operations', () => {
-    it('should create and retrieve vehicle type', async () => {
-      const vehicleType = await service.createVehicleType({
-        name: 'TEST-BUS',
-        capacity: 60,
-        costPerDay: 500,
-        accessible: true,
-        description: 'Test vehicle type',
-      });
+    it('createVehicleType persists com companyId', async () => {
+      const result = await service.createVehicleType({ name: 'COACH', capacity: 45, costPerDay: 700, accessible: false });
+      expect(vehicleTypeRepo.create).toHaveBeenCalledWith(expect.objectContaining({ companyId: COMPANY_ID }));
+      expect(vehicleTypeRepo.save).toHaveBeenCalled();
+      expect(result.name).toBe('COACH');
+    });
 
-      expect(vehicleType).toBeDefined();
-      expect(vehicleType.id).toBeDefined();
-      expect(vehicleType.name).toBe('TEST-BUS');
-      expect(vehicleType.capacity).toBe(60);
+    it('findOneVehicleType retorna tipo existente', async () => {
+      const result = await service.findOneVehicleType(TYPE_BUS.id);
+      expect(result.name).toBe('TEST-BUS');
+      expect(result.capacity).toBe(60);
+    });
 
-      const retrieved = await service.findOneVehicleType(vehicleType.id);
-      expect(retrieved.name).toBe('TEST-BUS');
+    it('findOneVehicleType lança NotFoundException para id inexistente', async () => {
+      await expect(service.findOneVehicleType(9999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('updateVehicleType aplica campos e salva', async () => {
+      await service.updateVehicleType(TYPE_BUS.id, { capacity: 70 });
+      expect(vehicleTypeRepo.save).toHaveBeenCalledWith(expect.objectContaining({ capacity: 70 }));
     });
   });
 
-  describe('Vehicle Operations with Type Relationship', () => {
-    let vehicleType: VehicleType;
-
-    beforeAll(async () => {
-      vehicleType = await service.createVehicleType({
-        name: 'TEST-TYPE',
-        capacity: 50,
-        costPerDay: 400,
-        accessible: false,
+  describe('Vehicle Operations — relação com VehicleType', () => {
+    it('createVehicle persiste typeId e companyId', async () => {
+      const result = await service.createVehicle({
+        vehicleId: 'TEST-001', typeId: TYPE_BUS.id, depotId: 1, isActive: true, licensePlate: 'TT-001',
       });
+      expect(vehicleRepo.create).toHaveBeenCalledWith(expect.objectContaining({
+        companyId: COMPANY_ID,
+        typeId: TYPE_BUS.id,
+      }));
+      expect(result.typeId).toBe(TYPE_BUS.id);
     });
 
-    it('should create vehicle with type relationship', async () => {
-      const vehicle = await service.createVehicle({
-        vehicleId: 'TEST-001',
-        typeId: vehicleType.id,
-        depotId: 1,
-        isActive: true,
-        licensePlate: 'TEST-001',
-      });
-
-      expect(vehicle).toBeDefined();
-      expect(vehicle.typeId).toBe(vehicleType.id);
-    });
-
-    it('should retrieve vehicle with type relationship', async () => {
+    it('findAllVehicles retorna veículos com relação type carregada', async () => {
       const vehicles = await service.findAllVehicles();
-      const testVehicle = vehicles.find(v => v.vehicleId === 'TEST-001');
-
-      expect(testVehicle).toBeDefined();
-      expect(testVehicle.type).toBeDefined();
-      expect(testVehicle.type.id).toBe(vehicleType.id);
-      expect(testVehicle.type.name).toBe('TEST-TYPE');
+      expect(vehicles).toHaveLength(2);
+      expect(vehicles[0].type).toBeDefined();
+      expect(vehicles[0].type.id).toBe(TYPE_BUS.id);
+      expect(vehicles[0].type.name).toBe('TEST-BUS');
     });
 
-    it('should get vehicles by type', async () => {
-      const vehicles = await service.getVehiclesByType(vehicleType.id);
-      expect(vehicles.length).toBeGreaterThan(0);
-      expect(vehicles.some(v => v.vehicleId === 'TEST-001')).toBe(true);
+    it('getVehiclesByType filtra pelo typeId correto', async () => {
+      vehicleRepo.find.mockResolvedValueOnce([VEHICLE_001]);
+      const vehicles = await service.getVehiclesByType(TYPE_BUS.id);
+      expect(vehicleRepo.find).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ typeId: TYPE_BUS.id }),
+      }));
+      expect(vehicles.every(v => v.typeId === TYPE_BUS.id)).toBe(true);
     });
-  });
 
-  describe('Active Vehicles Filter', () => {
-    it('should return only active vehicles', async () => {
-      const activeVehicles = await service.getActiveVehicles();
-      expect(activeVehicles.every(v => v.isActive === true)).toBe(true);
+    it('getActiveVehicles retorna apenas veículos ativos', async () => {
+      vehicleRepo.find.mockResolvedValueOnce([VEHICLE_001]); // isActive=true somente
+      const active = await service.getActiveVehicles();
+      expect(vehicleRepo.find).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ isActive: true }),
+      }));
+      expect(active.every(v => v.isActive)).toBe(true);
+    });
+
+    it('findOneVehicle lança NotFoundException para id inexistente', async () => {
+      await expect(service.findOneVehicle(9999)).rejects.toThrow(NotFoundException);
     });
   });
 });
