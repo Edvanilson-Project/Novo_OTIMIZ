@@ -64,14 +64,14 @@ export default function AdvancedOptimizationPage() {
     setIsOptimizing(true);
     try {
       await operationsApi.optimize({});
-      // Poll until schedule is updated (status changes or new schedule appears)
+      // Poll GET /operations/optimize/status until completed or failed (max 3 min)
       const maxWaitMs = 180_000;
       const pollIntervalMs = 4_000;
       const deadline = Date.now() + maxWaitMs;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, pollIntervalMs));
-        const s = await operationsApi.getLatestSchedule().catch(() => null) as any;
-        if (s?.status === 'completed' || s?.status === 'ok') break;
+        const s = await operationsApi.getOptimizeStatus().catch(() => null);
+        if (s?.status === 'completed' || s?.status === 'failed') break;
       }
       const updated = await operationsApi.getLatestSchedule().catch(() => null) as any;
       if (updated?.id) setScheduleId(updated.id);

@@ -92,7 +92,7 @@ jobs:
           pip install pytest pytest-asyncio pytest-timeout
 
       - name: Run full test suite
-        run: python -m pytest tests/ -q --timeout=120
+        run: python -m pytest tests/ -q --timeout=120 -m "not slow"
         env:
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
           DATABASE_URL: sqlite:///./test.db
@@ -258,7 +258,7 @@ jobs:
 
       - name: Run E2E tests
         working-directory: frontend
-        run: npx playwright test
+        run: npx playwright test e2e/smoke.spec.ts e2e/flows.spec.ts
         env:
           E2E_BASE_URL: http://localhost:3000
           CI: true

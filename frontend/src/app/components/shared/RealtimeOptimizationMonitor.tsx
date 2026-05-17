@@ -121,28 +121,29 @@ const RealtimeOptimizationMonitor: React.FC<RealtimeOptimizationMonitorProps> = 
         }
 
         // Fetch real metrics from backend after animation completes
-        if (scheduleId > 0) {
-          try {
-            const schedule = await operationsApi.getLatestSchedule() as any;
-            if (schedule) {
-              const totalTrips = Number(schedule.total_trips ?? schedule.totalTrips ?? 0);
-              const unassigned = Array.isArray(schedule.unassigned_trips) ? schedule.unassigned_trips.length : 0;
-              const assigned = totalTrips - unassigned;
-              const vehiclesUsed = Number(schedule.num_vehicles ?? schedule.vehicles ?? 0);
-              const utilization = totalTrips > 0 ? Math.round((assigned / totalTrips) * 100) : 0;
-              setMetrics({
-                totalTrips,
-                assignedTrips: assigned,
-                unassignedTrips: unassigned,
-                totalCost: Number(schedule.totalCost ?? schedule.total_cost ?? 0),
-                costReduction: 0,
-                vehiclesUsed,
-                averageUtilization: utilization,
-              });
-            }
-          } catch {
-            // keep zeros if fetch fails — don't show random numbers
+        try {
+          const [statusData, schedule] = await Promise.all([
+            operationsApi.getOptimizeStatus().catch(() => null),
+            operationsApi.getLatestSchedule().catch(() => null) as Promise<any>,
+          ]);
+          if (schedule) {
+            const totalTrips = Number(schedule.total_trips ?? schedule.totalTrips ?? 0);
+            const unassigned = Array.isArray(schedule.unassigned_trips) ? schedule.unassigned_trips.length : 0;
+            const assigned = totalTrips - unassigned;
+            const vehiclesUsed = Number(schedule.num_vehicles ?? schedule.vehicles ?? 0);
+            const utilization = totalTrips > 0 ? Math.round((assigned / totalTrips) * 100) : 0;
+            setMetrics({
+              totalTrips,
+              assignedTrips: assigned,
+              unassignedTrips: unassigned,
+              totalCost: Number(statusData?.totalCost ?? schedule.totalCost ?? schedule.total_cost ?? 0),
+              costReduction: 0,
+              vehiclesUsed,
+              averageUtilization: utilization,
+            });
           }
+        } catch {
+          // keep zeros if fetch fails — don't show random numbers
         }
 
         setStatus('completed');

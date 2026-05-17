@@ -101,6 +101,15 @@ export class OperationsController {
     return this.optimizationService.evaluateBaseline(body);
   }
 
+  @Get('optimize/status')
+  @ApiOperation({ summary: 'Status da última otimização', description: 'Retorna status (processing|completed|failed|idle), scheduleId e totalCost da otimização mais recente.' })
+  @ApiResponse({ status: 200, description: 'Status da otimização: idle | processing | completed | failed.' })
+  async getOptimizeStatus() {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.optimizationService.getOptimizeStatus(companyId);
+  }
+
   @Get('latest-schedule')
   @ApiOperation({ summary: 'Buscar última escala otimizada', description: 'Retorna o schedule mais recente com blocks, duties e trips.' })
   @ApiResponse({ status: 200, description: 'Schedule completo com blocos e jornadas.' })

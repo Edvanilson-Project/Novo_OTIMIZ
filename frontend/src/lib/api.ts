@@ -121,6 +121,13 @@ export const operationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
   getLatestSchedule: () => apiClient.get('/operations/latest-schedule').then((r) => r.data),
+  getOptimizeStatus: () => apiClient.get('/operations/optimize/status').then((r) => r.data) as Promise<{
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    scheduleId: number | null;
+    startedAt: string | null;
+    totalCost: number | null;
+    cctViolations: number;
+  }>,
   optimize: (data?: { algorithm?: string; operational_quality_mode?: string; depot_ids?: number[] }) =>
     apiClient.post('/operations/optimize', data ?? {}).then((r) => r.data),
   reassignTrip: (data: object) => apiClient.patch('/operations/reassign-trip', data).then((r) => r.data),

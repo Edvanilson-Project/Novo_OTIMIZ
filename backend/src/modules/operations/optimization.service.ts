@@ -1485,6 +1485,21 @@ export class OptimizationService implements OnModuleInit {
     return 'Resultado inválido persistido como falha por validação final.';
   }
 
+  async getOptimizeStatus(companyId: number) {
+    const schedule = await this.scheduleRepo.findOne({
+      where: { companyId },
+      order: { createdAt: 'DESC' },
+    });
+    if (!schedule) return { status: 'idle', scheduleId: null, startedAt: null, totalCost: null, cctViolations: 0 };
+    return {
+      status: schedule.status,
+      scheduleId: schedule.id,
+      startedAt: schedule.createdAt,
+      totalCost: schedule.totalCost ?? null,
+      cctViolations: schedule.cctViolations ?? 0,
+    };
+  }
+
   async getLatestSchedule(companyId: number) {
     const cached = this.scheduleCache.get(companyId);
     const now = Date.now();
