@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Card,
@@ -22,6 +22,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { IconActivity, IconCheck, IconClock, IconAlertTriangle } from '@tabler/icons-react';
+import { operationsApi } from '@/lib/api';
 
 interface OptimizationStep {
   id: string;
@@ -49,6 +50,8 @@ interface RealtimeOptimizationMonitorProps {
   isRunning?: boolean;
 }
 
+const STEP_DELAY_MS = 200;
+
 const RealtimeOptimizationMonitor: React.FC<RealtimeOptimizationMonitorProps> = ({
   scheduleId,
   isRunning = false,
@@ -73,86 +76,84 @@ const RealtimeOptimizationMonitor: React.FC<RealtimeOptimizationMonitorProps> = 
 
   const [overallProgress, setOverallProgress] = useState(0);
   const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const stepStartTimes = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!isRunning) return;
 
-    const simulation = async () => {
+    const run = async () => {
       try {
         setStatus('running');
+        setSteps((prev) => prev.map((s) => ({ ...s, status: 'pending', progress: 0 })));
 
-        // Simulate step-by-step optimization
         const stepSequence = ['loading', 'validation', 'optimization', 'evaluation', 'finalization'];
 
         for (let i = 0; i < stepSequence.length; i++) {
           const stepId = stepSequence[i];
-          const nextStepId = i + 1 < stepSequence.length ? stepSequence[i + 1] : null;
+          stepStartTimes.current[stepId] = Date.now();
 
-          // Mark current step as running
           setSteps((prev) =>
             prev.map((s) =>
               s.id === stepId ? { ...s, status: 'running', startTime: new Date() } : s
             )
           );
 
-          // Simulate progress
-          for (let progress = 0; progress <= 100; progress += Math.random() * 30 + 10) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
+          // Progress animation — UX only, not real data
+          let progress = 0;
+          while (progress < 100) {
+            progress = Math.min(progress + 20 + i * 5, 100);
+            await new Promise((resolve) => setTimeout(resolve, STEP_DELAY_MS));
             setSteps((prev) =>
-              prev.map((s) =>
-                s.id === stepId ? { ...s, progress: Math.min(progress, 100) } : s
-              )
+              prev.map((s) => (s.id === stepId ? { ...s, progress } : s))
             );
           }
 
-          // Complete step
+          const elapsedS = Math.round((Date.now() - stepStartTimes.current[stepId]) / 1000);
+
           setSteps((prev) =>
             prev.map((s) =>
               s.id === stepId
-                ? {
-                    ...s,
-                    status: 'completed',
-                    progress: 100,
-                    endTime: new Date(),
-                    duration: Math.floor(Math.random() * 5 + 2),
-                  }
+                ? { ...s, status: 'completed', progress: 100, endTime: new Date(), duration: Math.max(1, elapsedS) }
                 : s
             )
           );
-
-          // Update overall progress
           setOverallProgress(((i + 1) / stepSequence.length) * 100);
+        }
 
-          // Simulate some metrics as we progress
-          if (i >= 0) {
-            setMetrics((prev) => ({
-              ...prev,
-              totalTrips: 150,
-              assignedTrips: Math.floor(150 * ((i + 1) / stepSequence.length)),
-              unassignedTrips: 150 - Math.floor(150 * ((i + 1) / stepSequence.length)),
-              vehiclesUsed: Math.ceil(Math.random() * 12 + 8),
-              averageUtilization: Math.random() * 30 + 70,
-            }));
-          }
-
-          if (i === stepSequence.length - 2) {
-            setMetrics((prev) => ({
-              ...prev,
-              totalCost: 50000,
-              costReduction: 4500,
-            }));
+        // Fetch real metrics from backend after animation completes
+        if (scheduleId > 0) {
+          try {
+            const schedule = await operationsApi.getLatestSchedule() as any;
+            if (schedule) {
+              const totalTrips = Number(schedule.total_trips ?? schedule.totalTrips ?? 0);
+              const unassigned = Array.isArray(schedule.unassigned_trips) ? schedule.unassigned_trips.length : 0;
+              const assigned = totalTrips - unassigned;
+              const vehiclesUsed = Number(schedule.num_vehicles ?? schedule.vehicles ?? 0);
+              const utilization = totalTrips > 0 ? Math.round((assigned / totalTrips) * 100) : 0;
+              setMetrics({
+                totalTrips,
+                assignedTrips: assigned,
+                unassignedTrips: unassigned,
+                totalCost: Number(schedule.totalCost ?? schedule.total_cost ?? 0),
+                costReduction: 0,
+                vehiclesUsed,
+                averageUtilization: utilization,
+              });
+            }
+          } catch {
+            // keep zeros if fetch fails — don't show random numbers
           }
         }
 
         setStatus('completed');
       } catch (error) {
         setStatus('error');
-        console.error('Optimization simulation error:', error);
+        console.error('Optimization monitor error:', error);
       }
     };
 
-    simulation();
-  }, [isRunning]);
+    run();
+  }, [isRunning, scheduleId]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

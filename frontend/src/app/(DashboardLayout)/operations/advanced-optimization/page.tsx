@@ -59,12 +59,28 @@ export default function AdvancedOptimizationPage() {
     setTabValue(newValue);
   };
 
-  const handleRunOptimization = () => {
+  const handleRunOptimization = async () => {
+    if (!scheduleId) return;
     setIsOptimizing(true);
-    // Optimization would complete in RealtimeOptimizationMonitor
-    setTimeout(() => {
+    try {
+      await operationsApi.optimize({});
+      // Poll until schedule is updated (status changes or new schedule appears)
+      const maxWaitMs = 180_000;
+      const pollIntervalMs = 4_000;
+      const deadline = Date.now() + maxWaitMs;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        const s = await operationsApi.getLatestSchedule().catch(() => null) as any;
+        if (s?.status === 'completed' || s?.status === 'ok') break;
+      }
+      const updated = await operationsApi.getLatestSchedule().catch(() => null) as any;
+      if (updated?.id) setScheduleId(updated.id);
+      if (updated?.totalCost) setOriginalCost(Number(updated.totalCost));
+    } catch (err) {
+      console.error('[AdvancedOptimization] optimize failed', err);
+    } finally {
       setIsOptimizing(false);
-    }, 30000);
+    }
   };
 
   return (
