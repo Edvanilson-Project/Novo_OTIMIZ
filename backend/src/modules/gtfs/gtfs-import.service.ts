@@ -188,7 +188,7 @@ export class GtfsImportService {
   private _parseCsv<T>(content: string): T[] {
     const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^﻿/, ''));
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^﻿/, '').replace(/^"|"$/g, ''));
     const result: T[] = [];
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
