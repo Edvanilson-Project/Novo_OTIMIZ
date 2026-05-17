@@ -1639,6 +1639,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         operator_assignment = self._assign_operator_profiles(roster_state, duties)
         warnings.extend(operator_assignment.get("violations", []))
 
+        # Coleta trip_ids de jornadas com violações CCT para feedback bidirecional VSP
+        violated_trip_ids: set = set()
+        for duty in duties:
+            if duty.shift_violations > 0 or duty.rest_violations > 0:
+                for block in duty.tasks:
+                    for trip in block.trips:
+                        violated_trip_ids.add(trip.id)
+
         return CSPSolution(
             duties=duties,
             uncovered_blocks=uncovered_source_blocks,
@@ -1653,6 +1661,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "set_covering_objective": "min sum(c_j * x_j)",
                 "task_coverage": sum(len(duty.meta.get("task_ids", [])) for duty in duties),
                 "quality_summary": self._quality_summary(duties),
+                "violated_trip_ids": violated_trip_ids,
             },
         )
 

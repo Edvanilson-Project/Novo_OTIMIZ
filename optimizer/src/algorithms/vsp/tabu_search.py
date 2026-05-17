@@ -236,6 +236,10 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             else 0.0
         )
 
+        # Penalidade bidirecional: trip_ids que causaram violações CCT em rodadas anteriores
+        penalize_trip_ids: set = set(self.vsp_params.get("penalize_trip_ids", []))
+        cct_split_penalty = float(self.vsp_params.get("cct_split_penalty", fvc * 3.0))
+
         def cost_fn(state: List[List[int]]) -> float:
             sequences = [[trip_map[tid] for tid in block if tid in trip_map] for block in state]
             base = quick_cost_from_trips(
@@ -252,7 +256,15 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 paired_trip_bonus,
                 hard_pairing_penalty,
             )
-            return base + pairs
+            # Penaliza blocos que agrupam ≥2 viagens que causaram violações CCT
+            # Incentiva o solver a distribuí-las em blocos menores
+            cct_penalty = 0.0
+            if penalize_trip_ids:
+                for seq in sequences:
+                    n_penalized = sum(1 for t in seq if t.id in penalize_trip_ids)
+                    if n_penalized >= 2:
+                        cct_penalty += cct_split_penalty * (n_penalized - 1)
+            return base + pairs + cct_penalty
 
         current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
         current_state = [[t.id for t in block.trips] for block in current_sol.blocks]
