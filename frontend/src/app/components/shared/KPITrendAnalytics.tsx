@@ -213,76 +213,111 @@ const KPITrendAnalytics: React.FC<KPITrendAnalyticsProps> = ({ scheduleId, days 
         <CardContent>
           {trends.length > 0 ? (
             <Stack spacing={2}>
-              {/* Cost Trend Chart Placeholder */}
+              {/* Custo Total — barras com rótulo de valor ao hover */}
               <Box sx={{ p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-                  Custo Total
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 200 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    Custo Total (R$)
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    R$ {Math.min(...trends.map((t) => t.cost)).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} –{' '}
+                    R$ {Math.max(...trends.map((t) => t.cost)).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: 180, borderBottom: '1px solid #ccc', borderLeft: '1px solid #ccc', px: 0.5 }}>
                   {trends.slice(-14).map((trend, idx) => {
                     const minCost = Math.min(...trends.map((t) => t.cost));
                     const maxCost = Math.max(...trends.map((t) => t.cost));
-                    const normalized = ((trend.cost - minCost) / (maxCost - minCost)) * 100;
-
+                    const range = maxCost - minCost || 1;
+                    const normalized = ((trend.cost - minCost) / range) * 100;
                     return (
                       <Box
                         key={idx}
                         sx={{
                           flex: 1,
-                          height: `${normalized}%`,
+                          minWidth: 8,
+                          height: `${Math.max(normalized, 4)}%`,
                           backgroundColor: '#1976d2',
-                          borderRadius: '4px 4px 0 0',
-                          transition: 'all 0.3s ease',
-                          '&:hover': {
-                            backgroundColor: '#1565c0',
-                            cursor: 'pointer',
-                          },
+                          borderRadius: '3px 3px 0 0',
+                          transition: 'background-color 0.2s',
+                          cursor: 'default',
+                          position: 'relative',
+                          '&:hover': { backgroundColor: '#1565c0' },
+                          '&:hover .bar-tooltip': { display: 'block' },
                         }}
-                        title={`${trend.date.toLocaleDateString('pt-BR')}: R$ ${trend.cost.toLocaleString('pt-BR')}`}
-                      />
+                        title={`${trend.date.toLocaleDateString('pt-BR')}: R$ ${trend.cost.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                      >
+                        <Box className="bar-tooltip" sx={{
+                          display: 'none', position: 'absolute', bottom: '110%', left: '50%',
+                          transform: 'translateX(-50%)', backgroundColor: 'rgba(0,0,0,0.78)',
+                          color: '#fff', borderRadius: 1, px: 1, py: 0.5, whiteSpace: 'nowrap', zIndex: 10,
+                        }}>
+                          <Typography variant="caption">{trend.date.toLocaleDateString('pt-BR')}</Typography>
+                          <br />
+                          <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                            R$ {trend.cost.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                          </Typography>
+                        </Box>
+                      </Box>
                     );
                   })}
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
                   <Typography variant="caption" color="textSecondary">
-                    {trends.length > 0 && trends[0].date.toLocaleDateString('pt-BR')}
+                    {trends[Math.max(0, trends.length - 14)].date.toLocaleDateString('pt-BR')}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    {trends.length > 0 && trends[trends.length - 1].date.toLocaleDateString('pt-BR')}
+                    {trends[trends.length - 1].date.toLocaleDateString('pt-BR')}
                   </Typography>
                 </Box>
               </Box>
 
-              {/* Utilization Trend Chart Placeholder */}
+              {/* Utilização Média — barra colorida por nível */}
               <Box sx={{ p: 2, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-                  Utilização Média
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 150 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                    Utilização Média (%)
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Verde ≥ 80% · Laranja {'<'} 80%
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: 130, borderBottom: '1px solid #ccc', borderLeft: '1px solid #ccc', px: 0.5 }}>
                   {trends.slice(-14).map((trend, idx) => (
                     <Box
                       key={idx}
                       sx={{
                         flex: 1,
-                        height: `${trend.utilization}%`,
-                        backgroundColor: trend.utilization > 80 ? '#2e7d32' : '#f57c00',
-                        borderRadius: '4px 4px 0 0',
-                        transition: 'all 0.3s ease',
-                        '&:hover': {
-                          opacity: 0.8,
-                          cursor: 'pointer',
-                        },
+                        minWidth: 8,
+                        height: `${Math.max(trend.utilization, 2)}%`,
+                        backgroundColor: trend.utilization >= 80 ? '#2e7d32' : '#f57c00',
+                        borderRadius: '3px 3px 0 0',
+                        transition: 'opacity 0.2s',
+                        cursor: 'default',
+                        position: 'relative',
+                        '&:hover': { opacity: 0.75 },
+                        '&:hover .bar-tooltip': { display: 'block' },
                       }}
                       title={`${trend.date.toLocaleDateString('pt-BR')}: ${trend.utilization.toFixed(1)}%`}
-                    />
+                    >
+                      <Box className="bar-tooltip" sx={{
+                        display: 'none', position: 'absolute', bottom: '110%', left: '50%',
+                        transform: 'translateX(-50%)', backgroundColor: 'rgba(0,0,0,0.78)',
+                        color: '#fff', borderRadius: 1, px: 1, py: 0.5, whiteSpace: 'nowrap', zIndex: 10,
+                      }}>
+                        <Typography variant="caption">{trend.date.toLocaleDateString('pt-BR')}</Typography>
+                        <br />
+                        <Typography variant="caption" sx={{ fontWeight: 700 }}>{trend.utilization.toFixed(1)}%</Typography>
+                      </Box>
+                    </Box>
                   ))}
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
                   <Typography variant="caption" color="textSecondary">
-                    {trends.length > 0 && trends[0].date.toLocaleDateString('pt-BR')}
+                    {trends[Math.max(0, trends.length - 14)].date.toLocaleDateString('pt-BR')}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    {trends.length > 0 && trends[trends.length - 1].date.toLocaleDateString('pt-BR')}
+                    {trends[trends.length - 1].date.toLocaleDateString('pt-BR')}
                   </Typography>
                 </Box>
               </Box>

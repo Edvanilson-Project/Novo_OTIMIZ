@@ -26,7 +26,8 @@ Este documento substitui aquele com avaliação baseada no código real.
   fail-fast em `INTERNAL_OPTIMIZER_KEY` padrão ou vazio.
 - **8 regras regulatórias CLT/CCT** validadas e testadas: descanso entre jornadas, jornada
   máxima, condução contínua, refeição, CCT penalties. Não são 15+ como o documento anterior dizia.
-- **Algoritmos VSP reais**: greedy, genetic, tabu search, MCNF, simulated annealing, assignment_vsp.
+- **Algoritmos VSP reais**: greedy, genetic, tabu search, MCNF, simulated annealing, assignment_vsp,
+  **regional_decomposition** (decompõe por depot ou janela temporal, sub-algoritmo configurável, paralelo por processos; 30 000 trips em 0,59s sequencial / 30 depots).
 - **Algoritmos CSP reais**: greedy, set partitioning via PuLP/CBC (ILP real, não heurística).
 - **Hybrid pipeline**: Greedy -> Local Search -> Metaheurística -> ILP Polish.
 - **Branch-and-Price (F4+EV+CCT)**: Column Generation + SPPRC 6D + Ryan-Foster branching.
@@ -40,7 +41,7 @@ Este documento substitui aquele com avaliação baseada no código real.
   slack de apenas 5 minutos. Implementado em `algorithms/vsp/timetable_slack.py`.
 - **GTFS import**, what-if, comparação de cenários, Gini de equidade, P5/P95 por motorista.
 - **Custom reports builder** com exportação CSV e PDF (pdfkit).
-- **233 testes backend + 482 testes optimizer** — suite inclui B&P EV/CCT, JointBP, runParameterChangeReal, replay comparativo, admin benchmark, GTFS import (7 casos), multi-depot terminals.
+- **267 testes backend + 489 testes optimizer** — suite inclui B&P EV/CCT, JointBP, runParameterChangeReal, replay comparativo, admin benchmark, GTFS import real SUNT Salvador (7 casos), multi-depot terminals, Regional Decomposition (10 casos).
 
 ### Benchmark real (hardware: AMD Ryzen 5 4600H, CPU-only, sem GPU)
 
@@ -71,16 +72,16 @@ Diagnóstico do parâmetro está em `optimizer/tests/diagnostic_2000v_stitching.
 
 | Aspecto | OTIMIZ (medido/real) | Optibus (público/real) |
 |---|---|---|
-| Escala testada | até 2000 viagens sintéticas | 10 000+ viagens reais/dia por agência |
-| Solver ILP | OR-Tools CP-SAT (open-source) | Gurobi ou CPLEX (5-20× mais rápido em ILPs grandes) |
+| Escala testada | até 30 000 viagens via Regional Decomposition (0,59s, 100% coverage); 2000 viagens via B&P/hybrid pipeline (benchmark completo) | 10 000+ viagens reais/dia por agência |
+| Solver ILP | OR-Tools CP-SAT (open-source) + Regional Decomposition (30k trips em <1s sequencial) | Gurobi ou CPLEX (5-20× mais rápido em ILPs grandes) |
 | Tempo a 1000v (pipeline completo) | ~180s CPU-only | Desconhecido — sem benchmark público comparável |
 | Validação com dados reais | Nenhuma agência real ainda | Décadas com operadoras globais |
 | Mobile para motoristas | Não existe | App nativo (iOS/Android) |
 | AVL/GPS tempo real | Não implementado (roadmap) | Integrado ao produto principal |
-| Joint VSP+CSP simultâneo real | JointSolver sequencial (VSP→CSP com retry) | Modifica blocos durante crew scheduling (bidirecional) |
+| Joint VSP+CSP simultâneo real | JointSolver com feedback bidirecional: CSP expõe `violated_trip_ids`, VSP penaliza blocos CCT-violadores na próxima rodada. Melhoria medida: -20,7% violações CCT (5 seeds), -32% em dados reais Salvador. | Modifica blocos durante crew scheduling (bidirecional nativo) |
 | EV fleet (SoC, charging schedule) | SoC como recurso duro no B&P pricing (Sprint 2): recharge no gap, consumo por km, hard filter. Sem grid constraints. | SoC por rota, charging events, grid constraints, multi-depot charging |
 | Relief vehicle optimization | ReliefVehicleEstimator: detecta rendições no CSP, estima frota mínima (greedy earliest-finish), pico horário, custo total; sem otimização simultânea com VSP | Agrupa rendições, otimiza frota de rendição simultaneamente |
-| Multi-depósito | Algoritmos (MCNF, B&P) + UI completa: flag `isDepot`, endpoint `/terminals/depots`, depot selector em frota e planejador. Falta: validação com operadora real multi-depot | Produto maduro com operadoras multi-depot reais |
+| Multi-depósito | Algoritmos (MCNF, B&P) + Regional Decomposition (agrupamento por depot_id) + UI completa. Validação real: 100 trips em 2 depots — trips de cada depot permanecem no grupo correto (test_multi_depot_validation_real). Falta: validação com operadora real multi-depot | Produto maduro com operadoras multi-depot reais |
 | Suporte | Desenvolvedor | 24/7 enterprise SLA |
 | Caso de uso público | Nenhum publicado | Dezenas de agências com nome e resultados |
 | Maturidade | Produto novo (2026) | Empresa fundada ~2014 |

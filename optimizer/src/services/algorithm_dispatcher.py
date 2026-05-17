@@ -22,6 +22,7 @@ from ..algorithms.vsp.greedy import GreedyVSP
 from ..algorithms.vsp.mcnf import MCNFVSP
 from ..algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..algorithms.vsp.tabu_search import TabuSearchVSP
+from ..algorithms.vsp.regional_decomposition import RegionalDecompositionSolver
 from ..algorithms.vsp.timetable_slack import TimetableSlackOptimizer
 from ..core.config import get_settings
 from ..core.exceptions import InvalidAlgorithmError
@@ -180,6 +181,22 @@ def _run_branch_and_price(
     return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
 
 
+def _run_regional(
+    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
+    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+) -> OptimizationResult:
+    csp = csp_factory(cct_params, vsp_params, optimization_params)
+    sub_algo = (optimization_params or {}).get("regional_sub_algorithm", "tabu")
+    solver = RegionalDecompositionSolver(
+        sub_algorithm=sub_algo,
+        vsp_params=vsp_params,
+        time_budget_s=time_budget_s,
+    )
+    vsp_sol = solver.solve(trips, vehicle_types, depot_id)
+    return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
+
+
 def dispatch_algorithm(
     algorithm: AlgorithmType,
     *,
@@ -288,6 +305,8 @@ def dispatch_algorithm(
         result = _run_assignment_vsp(**common_kwargs, csp_factory=csp_factory)
     elif algorithm == AlgorithmType.BRANCH_AND_PRICE:
         result = _run_branch_and_price(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.REGIONAL:
+        result = _run_regional(**common_kwargs, csp_factory=csp_factory)
     else:
         raise InvalidAlgorithmError(str(algorithm))
 

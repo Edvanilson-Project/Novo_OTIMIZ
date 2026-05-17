@@ -44,55 +44,22 @@ const VehicleHealthStatus: React.FC<VehicleHealthStatusProps> = ({ vehicleId }) 
   const fetchVehicleHealth = async () => {
     try {
       setLoading(true);
-      const vehicle = await vehiclesApi.getById(vehicleId);
-      const calculatedHealth = calculateHealth(vehicle);
-      setHealth(calculatedHealth);
+      const metrics = await vehiclesApi.getMetrics(vehicleId);
+      setHealth({
+        vehicleId: metrics.vehicleId,
+        healthScore: metrics.healthScore ?? 100,
+        lastMaintenanceDate: metrics.lastMaintenanceDate,
+        nextMaintenanceDate: metrics.nextMaintenanceDate,
+        odometer: metrics.odometer,
+        utilizationRate: metrics.utilizationRate ?? 0,
+        maintenanceStatus: metrics.maintenanceStatus ?? 'good',
+        issues: metrics.issues ?? [],
+      });
     } catch (err) {
       setError('Erro ao carregar saúde do veículo');
     } finally {
       setLoading(false);
     }
-  };
-
-  const calculateHealth = (vehicle: any): VehicleHealth => {
-    let score = 100;
-    const issues: string[] = [];
-
-    if (!vehicle.isActive) {
-      score -= 50;
-      issues.push('Veículo inativo');
-    }
-
-    if (vehicle.lastMaintenanceDate) {
-      const lastMaint = new Date(vehicle.lastMaintenanceDate);
-      const daysSinceLastMaint = Math.floor(
-        (new Date().getTime() - lastMaint.getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      if (daysSinceLastMaint > 180) {
-        score -= 20;
-        issues.push('Manutenção vencida (> 180 dias)');
-      } else if (daysSinceLastMaint > 90) {
-        score -= 10;
-        issues.push('Manutenção em breve recomendada');
-      }
-    }
-
-    if (vehicle.odometer && vehicle.odometer > 300000) {
-      score -= 15;
-      issues.push('Quilometragem alta (> 300k km)');
-    }
-
-    return {
-      vehicleId: vehicle.vehicleId,
-      healthScore: Math.max(0, score),
-      lastMaintenanceDate: vehicle.lastMaintenanceDate,
-      odometer: vehicle.odometer,
-      utilizationRate: Math.random() * 100, // Placeholder
-      maintenanceStatus:
-        score >= 80 ? 'good' : score >= 60 ? 'warning' : 'critical',
-      issues,
-    };
   };
 
   const getHealthColor = (score: number): string => {

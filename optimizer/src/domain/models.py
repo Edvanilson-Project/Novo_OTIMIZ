@@ -23,6 +23,7 @@ class AlgorithmType(str, Enum):
     ASSIGNMENT_VSP = "assignment_vsp"
     BRANCH_AND_PRICE = "branch_and_price"
     JOINT_BP = "joint_bp"
+    REGIONAL = "regional"
 
 
 class SolverPhase(str, Enum):
