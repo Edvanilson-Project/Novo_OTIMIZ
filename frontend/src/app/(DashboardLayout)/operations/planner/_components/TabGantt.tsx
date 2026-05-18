@@ -15,7 +15,7 @@ import {
   IconChevronDown, IconChevronUp,
   IconFlag, IconMapPin, IconCoffee, IconClock,
 } from '@tabler/icons-react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import type { Line, Terminal, OptimizationResultSummary } from '../../_types';
 import {
@@ -626,16 +626,31 @@ function buildEventsFromSegments(
 
 // ─── Helper: export CSV ───────────────────────────────────────────────────────
 function exportCsv(rows: Record<string, unknown>[], filename: string) {
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const csv = XLSX.utils.sheet_to_csv(ws);
-  saveAs(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), filename);
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const lines = [
+    headers.join(','),
+    ...rows.map(row =>
+      headers.map(h => {
+        const v = row[h];
+        const str = v === null || v === undefined ? '' : String(v);
+        return str.includes(',') || str.includes('"') || str.includes('\n')
+          ? `"${str.replace(/"/g, '""')}"` : str;
+      }).join(','),
+    ),
+  ];
+  saveAs(new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' }), filename);
 }
 
-function exportExcel(rows: Record<string, unknown>[], filename: string, sheet = 'Dados') {
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheet);
-  saveAs(new Blob([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: 'application/octet-stream' }), filename);
+async function exportExcel(rows: Record<string, unknown>[], filename: string, sheet = 'Dados') {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(sheet);
+  if (rows.length > 0) {
+    worksheet.addRow(Object.keys(rows[0]));
+    rows.forEach(row => worksheet.addRow(Object.values(row) as unknown[]));
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer], { type: 'application/octet-stream' }), filename);
 }
 
 // ─── ExportButtons ────────────────────────────────────────────────────────────

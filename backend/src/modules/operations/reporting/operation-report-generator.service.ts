@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import ExcelJS from 'exceljs';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
+import PDFDocument from 'pdfkit';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../../database/entities/duty-assignment.entity';
@@ -92,12 +94,16 @@ export class OperationReportGeneratorService {
    * Gera relatório para o schedule baseline + melhor run completed para esse baseline
    * (escolhe a de menor totalCost). Recomendações vêm de issues mensurados — não há números fabricados.
    */
-  async generateReport(scheduleId: number, companyId: number): Promise<OperationReport> {
+  async generateReport(
+    scheduleId: number,
+    companyId: number,
+  ): Promise<OperationReport> {
     const schedule = await this.scheduleRepo.findOne({
       where: { id: scheduleId, companyId },
       relations: ['blocks'],
     });
-    if (!schedule) throw new NotFoundException(`Schedule ${scheduleId} not found`);
+    if (!schedule)
+      throw new NotFoundException(`Schedule ${scheduleId} not found`);
 
     const blocks = schedule.blocks || [];
     const currentMetrics = this.metricsFromSchedule(schedule, blocks);
@@ -107,7 +113,9 @@ export class OperationReportGeneratorService {
       .createQueryBuilder('run')
       .where('run.baselineScheduleId = :baselineId', { baselineId: scheduleId })
       .andWhere('run.companyId = :companyId', { companyId })
-      .andWhere('run.status = :status', { status: OptimizationRunStatus.COMPLETED })
+      .andWhere('run.status = :status', {
+        status: OptimizationRunStatus.COMPLETED,
+      })
       .orderBy(`(run.metrics->>'totalCost')::float`, 'ASC')
       .getOne();
 
@@ -120,14 +128,20 @@ export class OperationReportGeneratorService {
       algorithm = bestRun.algorithm;
     }
 
-    const savings = optimizedMetrics ? currentMetrics.totalCost - optimizedMetrics.totalCost : 0;
+    const savings = optimizedMetrics
+      ? currentMetrics.totalCost - optimizedMetrics.totalCost
+      : 0;
     const savingsPercent =
       optimizedMetrics && currentMetrics.totalCost > 0
         ? (savings / currentMetrics.totalCost) * 100
         : 0;
 
     const issues = this.generateIssues(currentMetrics);
-    const recommendations = this.generateRecommendations(currentMetrics, issues, optimizedMetrics);
+    const recommendations = this.generateRecommendations(
+      currentMetrics,
+      issues,
+      optimizedMetrics,
+    );
 
     return {
       id: `report_${scheduleId}_${Date.now()}`,
@@ -155,7 +169,11 @@ export class OperationReportGeneratorService {
    * Histórico real: para cada DIA dentro da janela, traz a melhor run COMPLETED para o baseline.
    * Sem ruído sintético. Se um dia não teve otimização, ele não aparece no array.
    */
-  async getHistoricalReports(scheduleId: number, companyId: number, days: number = 30): Promise<OperationReport[]> {
+  async getHistoricalReports(
+    scheduleId: number,
+    companyId: number,
+    days: number = 30,
+  ): Promise<OperationReport[]> {
     const start = new Date();
     start.setDate(start.getDate() - days);
 
@@ -178,7 +196,10 @@ export class OperationReportGeneratorService {
 
     if (runs.length === 0) return [];
 
-    const currentMetrics = this.metricsFromSchedule(schedule, schedule.blocks || []);
+    const currentMetrics = this.metricsFromSchedule(
+      schedule,
+      schedule.blocks || [],
+    );
 
     // Agrupa por dia, melhor run/dia (menor totalCost)
     const byDay = new Map<string, OptimizationRun>();
@@ -187,7 +208,9 @@ export class OperationReportGeneratorService {
       const dayKey = new Date(run.completedAt).toISOString().slice(0, 10);
       const existing = byDay.get(dayKey);
       const cost = Number(run.metrics?.totalCost ?? Infinity);
-      const existingCost = existing ? Number(existing.metrics?.totalCost ?? Infinity) : Infinity;
+      const existingCost = existing
+        ? Number(existing.metrics?.totalCost ?? Infinity)
+        : Infinity;
       if (!existing || cost < existingCost) byDay.set(dayKey, run);
     }
 
@@ -197,7 +220,9 @@ export class OperationReportGeneratorService {
         const m = this.metricsFromRun(run);
         const savings = currentMetrics.totalCost - m.totalCost;
         const savingsPercent =
-          currentMetrics.totalCost > 0 ? (savings / currentMetrics.totalCost) * 100 : 0;
+          currentMetrics.totalCost > 0
+            ? (savings / currentMetrics.totalCost) * 100
+            : 0;
         const startDay = new Date(`${dayKey}T00:00:00Z`);
         const endDay = new Date(`${dayKey}T23:59:59Z`);
         return {
@@ -223,7 +248,12 @@ export class OperationReportGeneratorService {
   /**
    * Estatísticas REAIS sobre runs no intervalo. Retorna null se não há dados — sem fabricar.
    */
-  async compareReports(scheduleId: number, companyId: number, startDate: Date, endDate: Date) {
+  async compareReports(
+    scheduleId: number,
+    companyId: number,
+    startDate: Date,
+    endDate: Date,
+  ) {
     const runs = await this.runRepo.find({
       where: {
         baselineScheduleId: scheduleId,
@@ -248,9 +278,12 @@ export class OperationReportGeneratorService {
 
     const avgCost = costs.reduce((a, b) => a + b, 0) / costs.length;
     const avgVehicles = vehicles.reduce((a, b) => a + b, 0) / vehicles.length;
-    const avgViolations = violations.reduce((a, b) => a + b, 0) / violations.length;
-    const avgUtilization = utilizations.reduce((a, b) => a + b, 0) / utilizations.length;
-    const costTrend = costs.length >= 2 ? costs[costs.length - 1] - costs[0] : 0;
+    const avgViolations =
+      violations.reduce((a, b) => a + b, 0) / violations.length;
+    const avgUtilization =
+      utilizations.reduce((a, b) => a + b, 0) / utilizations.length;
+    const costTrend =
+      costs.length >= 2 ? costs[costs.length - 1] - costs[0] : 0;
 
     const bestRunIdx = costs.indexOf(Math.min(...costs));
     const worstRunIdx = costs.indexOf(Math.max(...costs));
@@ -280,14 +313,19 @@ export class OperationReportGeneratorService {
     };
   }
 
-  async getDutyStats(scheduleId: number, companyId: number): Promise<DutyStatsReport> {
+  async getDutyStats(
+    scheduleId: number,
+    companyId: number,
+  ): Promise<DutyStatsReport> {
     const duties = await this.dutyRepo.find({
       where: { scheduleId, companyId },
       order: { dutyId: 'ASC' },
     });
 
     if (!duties.length) {
-      throw new NotFoundException(`Nenhuma jornada encontrada para o schedule ${scheduleId}`);
+      throw new NotFoundException(
+        `Nenhuma jornada encontrada para o schedule ${scheduleId}`,
+      );
     }
 
     const stats: DutyStat[] = duties.map((d) => {
@@ -342,9 +380,10 @@ export class OperationReportGeneratorService {
     };
   }
 
-  async generatePDFReport(scheduleId: number, companyId: number): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const PDFDocument = require('pdfkit') as typeof import('pdfkit');
+  async generatePDFReport(
+    scheduleId: number,
+    companyId: number,
+  ): Promise<Buffer> {
     const report = await this.generateReport(scheduleId, companyId);
     const m = report.metrics;
 
@@ -355,12 +394,18 @@ export class OperationReportGeneratorService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      doc.fontSize(18).font('Helvetica-Bold').text('Relatório Operacional', { align: 'center' });
+      doc
+        .fontSize(18)
+        .font('Helvetica-Bold')
+        .text('Relatório Operacional', { align: 'center' });
       doc.moveDown(0.5);
-      doc.fontSize(11).font('Helvetica').text(
-        `Schedule #${report.scheduleId}  •  Gerado em ${new Date(report.generatedAt).toLocaleString('pt-BR')}`,
-        { align: 'center' },
-      );
+      doc
+        .fontSize(11)
+        .font('Helvetica')
+        .text(
+          `Schedule #${report.scheduleId}  •  Gerado em ${new Date(report.generatedAt).toLocaleString('pt-BR')}`,
+          { align: 'center' },
+        );
       doc.moveDown(1);
 
       doc.fontSize(13).font('Helvetica-Bold').text('Métricas Gerais');
@@ -381,10 +426,15 @@ export class OperationReportGeneratorService {
       doc.moveDown(1);
 
       if (report.scenarioComparison.optimized) {
-        doc.fontSize(13).font('Helvetica-Bold').text('Comparação com Melhor Run');
+        doc
+          .fontSize(13)
+          .font('Helvetica-Bold')
+          .text('Comparação com Melhor Run');
         doc.moveDown(0.3);
         doc.fontSize(10).font('Helvetica');
-        doc.text(`Economia: R$ ${report.scenarioComparison.savings.toFixed(2)} (${report.scenarioComparison.savingsPercent.toFixed(1)}%)`);
+        doc.text(
+          `Economia: R$ ${report.scenarioComparison.savings.toFixed(2)} (${report.scenarioComparison.savingsPercent.toFixed(1)}%)`,
+        );
         doc.text(`Algoritmo: ${report.algorithm ?? '-'}`);
         doc.moveDown(1);
       }
@@ -412,16 +462,18 @@ export class OperationReportGeneratorService {
     });
   }
 
-  async generateExcelReport(scheduleId: number, companyId: number): Promise<Buffer> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const XLSX = require('xlsx') as typeof import('xlsx');
+  async generateExcelReport(
+    scheduleId: number,
+    companyId: number,
+  ): Promise<Buffer> {
     const report = await this.generateReport(scheduleId, companyId);
     const m = report.metrics;
 
-    const wb = XLSX.utils.book_new();
+    const workbook = new ExcelJS.Workbook();
 
     // Sheet 1 — Métricas
-    const metricsData = [
+    const metricsSheet = workbook.addWorksheet('Métricas');
+    metricsSheet.addRows([
       ['Métrica', 'Valor'],
       ['Schedule ID', report.scheduleId],
       ['Gerado em', new Date(report.generatedAt).toISOString()],
@@ -432,40 +484,50 @@ export class OperationReportGeneratorService {
       ['Custo por Viagem (R$)', m.costPerTrip],
       ['Veículos Utilizados', m.vehiclesUsed],
       ['Utilização Média (%)', m.averageUtilization],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(metricsData), 'Métricas');
+    ]);
 
     // Sheet 2 — Alertas
-    const issuesData: (string | number)[][] = [['Severidade', 'Mensagem']];
+    const alertsSheet = workbook.addWorksheet('Alertas');
+    alertsSheet.addRow(['Severidade', 'Mensagem']);
     for (const issue of report.issues) {
-      issuesData.push([issue.severity.toUpperCase(), issue.message]);
+      alertsSheet.addRow([issue.severity.toUpperCase(), issue.message]);
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(issuesData), 'Alertas');
 
     // Sheet 3 — Recomendações
-    const recsData: (string | number)[][] = [['Recomendação']];
+    const recsSheet = workbook.addWorksheet('Recomendações');
+    recsSheet.addRow(['Recomendação']);
     for (const rec of report.recommendations) {
-      recsData.push([rec]);
+      recsSheet.addRow([rec]);
     }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(recsData), 'Recomendações');
 
-    return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  private metricsFromSchedule(schedule: Schedule, blocks: BlockAssignment[]): ReportMetrics {
+  private metricsFromSchedule(
+    schedule: Schedule,
+    blocks: BlockAssignment[],
+  ): ReportMetrics {
     // Compat: tripIds[] (schema real) ou fallback 1/block (mocks legados)
-    const tripsFor = (b: BlockAssignment) => (b.tripIds?.length ?? 1);
+    const tripsFor = (b: BlockAssignment) => b.tripIds?.length ?? 1;
     const totalTrips = blocks.reduce((sum, b) => sum + tripsFor(b), 0);
     const assignedBlocks = blocks.filter((b) => b.vehicleId != null);
-    const assignedTrips = assignedBlocks.reduce((sum, b) => sum + tripsFor(b), 0);
+    const assignedTrips = assignedBlocks.reduce(
+      (sum, b) => sum + tripsFor(b),
+      0,
+    );
     const unassignedTrips = totalTrips - assignedTrips;
-    const totalCost = Number(schedule.totalCost ?? 0) || blocks.reduce((s, b) => s + (b.cost || 0), 0);
+    const totalCost =
+      Number(schedule.totalCost ?? 0) ||
+      blocks.reduce((s, b) => s + (b.cost || 0), 0);
     const actualVehicles =
-      new Set(assignedBlocks.map((b) => b.vehicleId).filter((v) => v != null)).size ||
-      assignedBlocks.length;
-    const costPerTrip = assignedTrips > 0 && totalCost > 0 ? totalCost / assignedTrips : 0;
+      new Set(assignedBlocks.map((b) => b.vehicleId).filter((v) => v != null))
+        .size || assignedBlocks.length;
+    const costPerTrip =
+      assignedTrips > 0 && totalCost > 0 ? totalCost / assignedTrips : 0;
     const averageUtilization =
-      actualVehicles > 0 ? Math.min(100, (assignedTrips / actualVehicles) * 20) : 0;
+      actualVehicles > 0
+        ? Math.min(100, (assignedTrips / actualVehicles) * 20)
+        : 0;
     return {
       totalTrips,
       assignedTrips,
@@ -503,7 +565,10 @@ export class OperationReportGeneratorService {
   private generateIssues(
     metrics: ReportMetrics,
   ): { severity: 'critical' | 'warning' | 'info'; message: string }[] {
-    const issues: { severity: 'critical' | 'warning' | 'info'; message: string }[] = [];
+    const issues: {
+      severity: 'critical' | 'warning' | 'info';
+      message: string;
+    }[] = [];
     if (metrics.unassignedTrips > 0) {
       issues.push({
         severity: 'critical',
@@ -538,10 +603,14 @@ export class OperationReportGeneratorService {
   ): string[] {
     const recommendations: string[] = [];
     if (issues.some((i) => i.severity === 'critical')) {
-      recommendations.push('Executar otimização imediatamente para reduzir viagens não atribuídas.');
+      recommendations.push(
+        'Executar otimização imediatamente para reduzir viagens não atribuídas.',
+      );
     }
     if (metrics.averageUtilization < 50) {
-      recommendations.push('Consolidar viagens em menos veículos para melhorar utilização.');
+      recommendations.push(
+        'Consolidar viagens em menos veículos para melhorar utilização.',
+      );
     }
     if (optimized && optimized.totalCost < metrics.totalCost) {
       const diff = metrics.totalCost - optimized.totalCost;
@@ -551,7 +620,9 @@ export class OperationReportGeneratorService {
       );
     }
     if (recommendations.length === 0) {
-      recommendations.push('Operação em nível aceitável. Manter monitoramento.');
+      recommendations.push(
+        'Operação em nível aceitável. Manter monitoramento.',
+      );
     }
     return recommendations;
   }

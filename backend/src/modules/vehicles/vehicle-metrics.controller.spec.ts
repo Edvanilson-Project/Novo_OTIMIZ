@@ -9,15 +9,20 @@ describe('VehicleMetricsController', () => {
 
   beforeEach(async () => {
     service = {
-      getAllVehiclesMetrics: jest.fn().mockResolvedValue([{ vehicleId: 1, utilizationPct: 80 }]),
-      getVehicleMetrics: jest.fn().mockResolvedValue({ vehicleId: 1, utilizationPct: 80 }),
+      getAllVehiclesMetrics: jest
+        .fn()
+        .mockResolvedValue([{ vehicleId: 1, utilizationPct: 80 }]),
+      getVehicleMetrics: jest
+        .fn()
+        .mockResolvedValue({ vehicleId: 1, utilizationPct: 80 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [VehicleMetricsController],
       providers: [{ provide: VehicleMetricsService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(VehicleMetricsController);

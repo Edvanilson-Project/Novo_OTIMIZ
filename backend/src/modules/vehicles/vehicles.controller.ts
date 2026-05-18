@@ -1,6 +1,15 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, ParseIntPipe, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { VehiclesService } from './vehicles.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -27,7 +36,10 @@ export class VehiclesController {
   }
 
   @Patch('types/:id')
-  updateVehicleType(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+  updateVehicleType(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, any>,
+  ) {
     return this.service.updateVehicleType(id, body);
   }
 
@@ -64,7 +76,10 @@ export class VehiclesController {
   }
 
   @Patch(':id')
-  updateVehicle(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+  updateVehicle(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, any>,
+  ) {
     return this.service.updateVehicle(id, body);
   }
 

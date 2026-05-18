@@ -2,6 +2,7 @@
 Vehicle maintenance constraint validator.
 Ensures scheduled maintenance windows don't conflict with trip assignments.
 """
+
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 @dataclass
 class MaintenanceWindow:
     """Represents a vehicle maintenance/unavailability window."""
+
     vehicle_id: int
     start_time: datetime
     end_time: datetime
@@ -39,20 +41,20 @@ class MaintenanceValidator:
 
     def add_window(self, window_data: Dict) -> None:
         """Add a maintenance window."""
-        start = window_data.get('start_time')
-        end = window_data.get('end_time')
+        start = window_data.get("start_time")
+        end = window_data.get("end_time")
 
         if isinstance(start, str):
-            start = datetime.fromisoformat(start.replace('Z', '+00:00'))
+            start = datetime.fromisoformat(start.replace("Z", "+00:00"))
         if isinstance(end, str):
-            end = datetime.fromisoformat(end.replace('Z', '+00:00'))
+            end = datetime.fromisoformat(end.replace("Z", "+00:00"))
 
         window = MaintenanceWindow(
-            vehicle_id=window_data.get('vehicle_id'),
+            vehicle_id=window_data.get("vehicle_id"),
             start_time=start,
             end_time=end,
-            reason=window_data.get('reason', 'other'),
-            description=window_data.get('description'),
+            reason=window_data.get("reason", "other"),
+            description=window_data.get("description"),
         )
         self.windows.append(window)
 
@@ -99,31 +101,29 @@ class MaintenanceValidator:
                 'maintenance_cost_impact': float
             }
         """
-        is_available, conflict = self.is_vehicle_available(
-            vehicle_id, start_time, end_time
-        )
+        is_available, conflict = self.is_vehicle_available(vehicle_id, start_time, end_time)
 
         conflict_data = None
         if conflict:
             conflict_data = {
-                'vehicle_id': conflict.vehicle_id,
-                'start_time': conflict.start_time.isoformat(),
-                'end_time': conflict.end_time.isoformat(),
-                'reason': conflict.reason,
-                'description': conflict.description,
+                "vehicle_id": conflict.vehicle_id,
+                "start_time": conflict.start_time.isoformat(),
+                "end_time": conflict.end_time.isoformat(),
+                "reason": conflict.reason,
+                "description": conflict.description,
             }
 
         result = {
-            'valid': is_available,
-            'conflict': conflict_data,
-            'warnings': [],
-            'maintenance_cost_impact': 0.0,
+            "valid": is_available,
+            "conflict": conflict_data,
+            "warnings": [],
+            "maintenance_cost_impact": 0.0,
         }
 
         # Check for upcoming maintenance that might cause rescheduling
         upcoming = self._get_upcoming_maintenance(vehicle_id, start_time, days=7)
         if upcoming:
-            result['warnings'].append(
+            result["warnings"].append(
                 f"Vehicle has maintenance scheduled in next 7 days: "
                 f"{upcoming[0].reason} on {upcoming[0].start_time.date()}"
             )
@@ -138,10 +138,7 @@ class MaintenanceValidator:
     ) -> List[MaintenanceWindow]:
         """Get maintenance windows for vehicle within N days after given date."""
         cutoff = after_date + timedelta(days=days)
-        return [
-            w for w in self.get_unavailable_windows(vehicle_id)
-            if after_date <= w.start_time <= cutoff
-        ]
+        return [w for w in self.get_unavailable_windows(vehicle_id) if after_date <= w.start_time <= cutoff]
 
     def calculate_maintenance_impact_cost(
         self,
@@ -176,15 +173,17 @@ class MaintenanceValidator:
             if window.vehicle_id not in vehicles_with_maintenance:
                 vehicles_with_maintenance[window.vehicle_id] = []
 
-            vehicles_with_maintenance[window.vehicle_id].append({
-                'start_time': window.start_time.isoformat(),
-                'end_time': window.end_time.isoformat(),
-                'reason': window.reason,
-                'description': window.description,
-            })
+            vehicles_with_maintenance[window.vehicle_id].append(
+                {
+                    "start_time": window.start_time.isoformat(),
+                    "end_time": window.end_time.isoformat(),
+                    "reason": window.reason,
+                    "description": window.description,
+                }
+            )
 
         return {
-            'total_maintenance_windows': len(self.windows),
-            'vehicles_with_maintenance': len(vehicles_with_maintenance),
-            'windows_by_vehicle': vehicles_with_maintenance,
+            "total_maintenance_windows": len(self.windows),
+            "vehicles_with_maintenance": len(vehicles_with_maintenance),
+            "windows_by_vehicle": vehicles_with_maintenance,
         }

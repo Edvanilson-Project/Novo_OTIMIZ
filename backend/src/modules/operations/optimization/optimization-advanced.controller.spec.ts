@@ -16,16 +16,26 @@ describe('OptimizationAdvancedController', () => {
     scenarioSvc = {
       generateScenarios: jest.fn().mockResolvedValue([{ scenarioId: 'S1' }]),
       getScenarioRun: jest.fn().mockResolvedValue({
-        id: 1, scenarioId: 'S1', status: 'completed', algorithm: 'greedy',
-        metrics: {}, errorMessage: null, durationMs: 100, resultScheduleId: 2,
-        inputFingerprint: 'abc', createdAt: new Date(), completedAt: new Date(),
+        id: 1,
+        scenarioId: 'S1',
+        status: 'completed',
+        algorithm: 'greedy',
+        metrics: {},
+        errorMessage: null,
+        durationMs: 100,
+        resultScheduleId: 2,
+        inputFingerprint: 'abc',
+        createdAt: new Date(),
+        completedAt: new Date(),
       }),
     };
     whatIfSvc = {
       simulateVehicleTypeChange: jest.fn().mockReturnValue({ delta: {} }),
     };
     optimizationSvc = {
-      replayRun: jest.fn().mockResolvedValue({ optimizationRunId: 5, status: 'running' }),
+      replayRun: jest
+        .fn()
+        .mockResolvedValue({ optimizationRunId: 5, status: 'running' }),
       getReplayComparison: jest.fn().mockResolvedValue({
         original: { totalCost: 10000 },
         replay: { totalCost: 9800 },
@@ -47,7 +57,8 @@ describe('OptimizationAdvancedController', () => {
         { provide: TenantContext, useValue: { getCompanyId: () => 1 } },
       ],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(OptimizationAdvancedController);
@@ -84,8 +95,14 @@ describe('OptimizationAdvancedController', () => {
 
   it('getReplayComparison returns diff with status ready', async () => {
     const result = await controller.getReplayComparison('fp123');
-    expect(optimizationSvc.getReplayComparison).toHaveBeenCalledWith(1, 'fp123');
-    expect(result).toMatchObject({ status: 'ready', diff: { totalCost: -200 } });
+    expect(optimizationSvc.getReplayComparison).toHaveBeenCalledWith(
+      1,
+      'fp123',
+    );
+    expect(result).toMatchObject({
+      status: 'ready',
+      diff: { totalCost: -200 },
+    });
   });
 
   it('runBenchmark uses default sizes when not provided', async () => {
@@ -99,7 +116,11 @@ describe('OptimizationAdvancedController', () => {
   });
 
   it('runBenchmark passes provided sizes and algorithm', async () => {
-    await controller.runBenchmark({ sizes: [50, 200], algorithm: 'greedy', seed: 7 });
+    await controller.runBenchmark({
+      sizes: [50, 200],
+      algorithm: 'greedy',
+      seed: 7,
+    });
     expect(optimizationSvc.runBenchmark).toHaveBeenCalledWith(
       [50, 200],
       'greedy',

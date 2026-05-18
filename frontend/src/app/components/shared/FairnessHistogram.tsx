@@ -69,10 +69,12 @@ export default function FairnessHistogram({ scheduleId }: Props) {
   const [duties, setDuties] = useState<DutyWork[]>([]);
 
   useEffect(() => {
-    setLoading(true);
-    operationsApi
-      .getLatestSchedule()
-      .then((schedule: any) => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const schedule: any = await operationsApi.getLatestSchedule();
+        if (cancelled) return;
         const fb =
           schedule?.resultSummary?.costBreakdown?.csp?.fairness ??
           schedule?.metadata?.cost_breakdown?.csp?.fairness ??
@@ -82,19 +84,23 @@ export default function FairnessHistogram({ scheduleId }: Props) {
           setError("Métricas de equidade indisponíveis para este schedule.");
           return;
         }
-        setFairness(fb as FairnessData);
         const rawDuties: any[] = schedule?.duties ?? schedule?.resultSummary?.duties ?? [];
         const dutyWork: DutyWork[] = rawDuties.map((d) => ({
           dutyId: Number(d.duty_id ?? d.dutyId ?? 0),
           workMinutes: Number(d.work_time ?? d.workMinutes ?? 0),
         }));
+        setFairness(fb as FairnessData);
         setDuties(dutyWork);
-      })
-      .catch((err: any) => {
-        console.error("[FairnessHistogram] load failed", err);
-        setError(err?.message || "Erro ao carregar dados.");
-      })
-      .finally(() => setLoading(false));
+      } catch (err: any) {
+        if (!cancelled) {
+          console.error("[FairnessHistogram] load failed", err);
+          setError(err?.message || "Erro ao carregar dados.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [scheduleId]);
 
   if (loading) {

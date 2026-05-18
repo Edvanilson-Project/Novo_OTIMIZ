@@ -298,8 +298,12 @@ export class CreateCoreTables1700000000000 implements MigrationInterface {
         "createdAt" TIMESTAMP NOT NULL DEFAULT now()
       );
     `);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_audit_logs_company_created" ON "audit_logs" ("companyId", "createdAt");`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS "IDX_audit_logs_entity" ON "audit_logs" ("entity", "entityId");`);
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS "IDX_audit_logs_company_created" ON "audit_logs" ("companyId", "createdAt");`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS "IDX_audit_logs_entity" ON "audit_logs" ("entity", "entityId");`,
+    );
 
     // ── company_parameters ────────────────────────────────────────────────────
     await queryRunner.query(`
@@ -420,12 +424,20 @@ export class CreateCoreTables1700000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE IF EXISTS "company_parameters" CASCADE;`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "company_parameters" CASCADE;`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "audit_logs" CASCADE;`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "vehicle_availability_windows" CASCADE;`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "vehicle_maintenance" CASCADE;`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "vehicle_availability_windows" CASCADE;`,
+    );
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "vehicle_maintenance" CASCADE;`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "duty_assignments" CASCADE;`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "block_assignments" CASCADE;`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "block_assignments" CASCADE;`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "schedules" CASCADE;`);
     await queryRunner.query(`DROP TABLE IF EXISTS "trips" CASCADE;`);
     await queryRunner.query(`DROP TABLE IF EXISTS "drivers" CASCADE;`);

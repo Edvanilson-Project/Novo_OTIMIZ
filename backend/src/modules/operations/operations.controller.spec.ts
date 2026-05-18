@@ -4,7 +4,9 @@ import { OperationsController } from './operations.controller';
 describe('OperationsController', () => {
   it('encaminha operational_quality_mode do body para o service', async () => {
     const optimizationService = {
-      runOptimization: jest.fn().mockResolvedValue({ scheduleId: 10, taskId: 'task-10' }),
+      runOptimization: jest
+        .fn()
+        .mockResolvedValue({ scheduleId: 10, taskId: 'task-10' }),
     };
     const controller = new OperationsController(
       {} as any,
@@ -36,7 +38,9 @@ describe('OperationsController', () => {
 
   it('usa fallback camelCase quando operational_quality_mode nao veio no body snake_case', async () => {
     const optimizationService = {
-      runOptimization: jest.fn().mockResolvedValue({ scheduleId: 11, taskId: 'task-11' }),
+      runOptimization: jest
+        .fn()
+        .mockResolvedValue({ scheduleId: 11, taskId: 'task-11' }),
     };
     const controller = new OperationsController(
       {} as any,

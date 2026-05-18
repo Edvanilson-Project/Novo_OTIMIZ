@@ -3,16 +3,9 @@ import logging
 import pulp
 from typing import List, Dict, Any, Optional, Tuple
 
-from ...domain.models import (
-    Duty,
-    OperatorProfile,
-    RosteringRule,
-    NominalAssignment,
-    NominalRosteringSolution
-)
+from ...domain.models import Duty, OperatorProfile, RosteringRule, NominalAssignment, NominalRosteringSolution
 from .evaluator import RosteringEvaluator
 from ...core.config import get_settings
-
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -37,20 +30,20 @@ class NominalRosteringSolver:
     ) -> NominalRosteringSolution:
         start_time = time.time()
         evaluator = RosteringEvaluator(rules)
-        
+
         # ── 1. Pré-Cálculo de Afinidade (Scoring Matrix) ────────────────────
         affinity_matrix = {}
         explanation_matrix = {}
         valid_pairs = []
-        
+
         for i, op in enumerate(operators):
             for j, duty in enumerate(duties):
                 score, expl = evaluator.evaluate(op, duty, inter_shift_rest_minutes)
-                
+
                 # Se o score for proibitivo (violação HARD), não criamos variável
                 if score < -1e6:
                     continue
-                
+
                 affinity_matrix[(i, j)] = score
                 explanation_matrix[(i, j)] = expl
                 valid_pairs.append((i, j))
@@ -58,18 +51,18 @@ class NominalRosteringSolver:
         if not valid_pairs:
             return NominalRosteringSolution(
                 logs=["AVISO: Nenhum emparelhamento válido encontrado (violações generalizadas de descanso?)."],
-                elapsed_ms=(time.time() - start_time) * 1000
+                elapsed_ms=(time.time() - start_time) * 1000,
             )
 
         # ── 2. Formulação PuLP ──────────────────────────────────────────────
         prob = pulp.LpProblem("Nominal_Rostering_Assignment", pulp.LpMaximize)
-        
+
         # x_i_j = 1 se motorista i faz jornada j
         x = pulp.LpVariable.dicts("x", valid_pairs, cat="Binary")
-        
+
         # Objetivo: Max Utility
         prob += pulp.lpSum(x[i, j] * affinity_matrix[(i, j)] for (i, j) in valid_pairs)
-        
+
         # Restrição 1: Cada jornada deve ter exatamente 1 motorista (se possível)
         # Usamos <= 1 para permitir que jornadas fiquem desatribuidas se faltar pessoal
         for j in range(len(duties)):
@@ -103,7 +96,7 @@ class NominalRosteringSolver:
             # Restrição: sum_v y[i,v] <= 1 (operador só toca 1 veículo).
             # E: para cada (i,j) com v em vehicles(j), x[i,j] <= y[i,v].
             ops_vehicles_seen: Dict[int, set] = {}
-            for (i, j) in valid_pairs:
+            for i, j in valid_pairs:
                 ops_vehicles_seen.setdefault(i, set()).update(duty_vehicles.get(j, set()))
 
             y_vars: Dict[Tuple[int, int], Any] = {}
@@ -111,7 +104,7 @@ class NominalRosteringSolver:
                 for vid in vehicles:
                     y_vars[(i, vid)] = pulp.LpVariable(f"y_op{i}_v{vid}", cat="Binary")
 
-            for (i, j) in valid_pairs:
+            for i, j in valid_pairs:
                 vids = duty_vehicles.get(j, set())
                 if not vids:
                     continue
@@ -126,41 +119,33 @@ class NominalRosteringSolver:
         # ── 3. Resolução do Modelo ──────────────────────────────────────────
         timeout_s = int((cct_params or {}).get("rostering_timeout_seconds", 120))
         logger.info(f"Resolvendo Rostering com {len(operators)} ops e {len(duties)} duties (timeout={timeout_s}s)")
-        
+
         try:
             # CBC Solver (Quiet mode)
-            solver = pulp.PULP_CBC_CMD(
-                msg=0, 
-                timeLimit=timeout_s, 
-                threads=settings.ilp_threads
-            )
+            solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=timeout_s, threads=settings.ilp_threads)
             prob.solve(solver)
         except Exception as e:
             logger.exception("Falha no solver de Rostering: %s", e)
             return NominalRosteringSolution(
-                logs=[f"ERRO CRÍTICO no Solver: {str(e)}"],
-                elapsed_ms=(time.time() - start_time) * 1000
+                logs=[f"ERRO CRÍTICO no Solver: {str(e)}"], elapsed_ms=(time.time() - start_time) * 1000
             )
 
         # ── 4. Reconstrução da Solução ───────────────────────────────────────
         assignments = []
         assigned_duties = set()
         logs = []
-        
+
         if prob.status == pulp.constants.LpStatusOptimal:
-            for (i, j) in valid_pairs:
+            for i, j in valid_pairs:
                 if pulp.value(x[i, j]) > 0.5:
                     op = operators[i]
                     duty = duties[j]
                     score = affinity_matrix[(i, j)]
                     expl = explanation_matrix[(i, j)]
-                    
-                    assignments.append(NominalAssignment(
-                        operator_id=op.id,
-                        duty_id=duty.id,
-                        score=score,
-                        explanations=expl
-                    ))
+
+                    assignments.append(
+                        NominalAssignment(operator_id=op.id, duty_id=duty.id, score=score, explanations=expl)
+                    )
                     assigned_duties.add(j)
                     logs.append(
                         f"MATCH: {op.name} ({op.cp}) -> Jornada #{duty.id} | "
@@ -169,50 +154,47 @@ class NominalRosteringSolver:
         else:
             status_str = pulp.LpStatus[prob.status]
             logs.append(f"Solver Status Inesperado: {status_str} - Iniciando Fallback Greedy")
-            
+
             # --- FALLBACK GREEDY ---
             # Ordenar valid_pairs por score descendente
             sorted_pairs = sorted(valid_pairs, key=lambda p: affinity_matrix[p], reverse=True)
             used_ops = set()
             used_duties = set()
-            
-            for (i, j) in sorted_pairs:
+
+            for i, j in sorted_pairs:
                 if i not in used_ops and j not in used_duties:
                     op = operators[i]
                     duty = duties[j]
                     score = affinity_matrix[(i, j)]
                     expl = explanation_matrix[(i, j)]
-                    
-                    assignments.append(NominalAssignment(
-                        operator_id=op.id,
-                        duty_id=duty.id,
-                        score=score,
-                        explanations=expl
-                    ))
+
+                    assignments.append(
+                        NominalAssignment(operator_id=op.id, duty_id=duty.id, score=score, explanations=expl)
+                    )
                     assigned_duties.add(j)
                     used_ops.add(i)
                     used_duties.add(j)
-                    logs.append(
-                        f"FALLBACK MATCH: {op.name} -> Jornada #{duty.id} | Score={score}"
-                    )
-            
+                    logs.append(f"FALLBACK MATCH: {op.name} -> Jornada #{duty.id} | Score={score}")
+
             fallback_meta = {
                 "fallback_used": True,
                 "fallback_reason": status_str,
                 "original_solver": "nominal_assignment_pulp",
                 "fallback_solver": "greedy_priority_assignment",
-                "assigned_count": len(assignments)
+                "assigned_count": len(assignments),
             }
 
         unassigned_duties = [d.id for j, d in enumerate(duties) if j not in assigned_duties]
-        
+
         end_time = time.time()
-        
+
         return NominalRosteringSolution(
             assignments=assignments,
             unassigned_duties=unassigned_duties,
-            total_utility=float(pulp.value(prob.objective) or 0.0) if prob.status == pulp.constants.LpStatusOptimal else 0.0,
+            total_utility=(
+                float(pulp.value(prob.objective) or 0.0) if prob.status == pulp.constants.LpStatusOptimal else 0.0
+            ),
             elapsed_ms=(end_time - start_time) * 1000,
             logs=logs,
-            meta=locals().get("fallback_meta", {})
+            meta=locals().get("fallback_meta", {}),
         )

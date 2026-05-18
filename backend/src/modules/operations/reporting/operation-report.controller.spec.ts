@@ -26,7 +26,9 @@ describe('OperationReportController', () => {
 
   it('generateReport throws ForbiddenException when no companyId', async () => {
     const { ctrl } = makeController(null);
-    await expect(ctrl.generateReport(1)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(ctrl.generateReport(1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('getHistoricalReports passes scheduleId, companyId, days to service', async () => {
@@ -49,16 +51,22 @@ describe('OperationReportController', () => {
 
   it('compareReports throws ForbiddenException when no companyId', async () => {
     const { ctrl } = makeController(null);
-    await expect(ctrl.compareReports(1, '2026-01-01', '2026-01-31')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      ctrl.compareReports(1, '2026-01-01', '2026-01-31'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('compareReports throws BadRequestException for missing startDate', async () => {
     const { ctrl } = makeController(7);
-    await expect(ctrl.compareReports(1, '', '2026-01-31')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      ctrl.compareReports(1, '', '2026-01-31'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('compareReports throws BadRequestException for invalid endDate', async () => {
     const { ctrl } = makeController(7);
-    await expect(ctrl.compareReports(1, '2026-01-01', 'not-a-date')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      ctrl.compareReports(1, '2026-01-01', 'not-a-date'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

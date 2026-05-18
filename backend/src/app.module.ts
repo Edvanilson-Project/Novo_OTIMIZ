@@ -1,4 +1,9 @@
-import { Module, MiddlewareConsumer, NestModule, RequestMethod } from '@nestjs/common';
+import {
+  Module,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -56,7 +61,25 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        entities: [Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, AuditLog, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun, CustomReport],
+        entities: [
+          Company,
+          User,
+          CompanyParameters,
+          Trip,
+          Driver,
+          Schedule,
+          BlockAssignment,
+          DutyAssignment,
+          Line,
+          Terminal,
+          AuditLog,
+          VehicleType,
+          Vehicle,
+          VehicleMaintenance,
+          VehicleAvailabilityWindow,
+          OptimizationRun,
+          CustomReport,
+        ],
         // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
         // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
@@ -67,7 +90,24 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
         logging: false,
       }),
     }),
-    TypeOrmModule.forFeature([Company, User, CompanyParameters, Trip, Driver, Schedule, BlockAssignment, DutyAssignment, Line, Terminal, VehicleType, Vehicle, VehicleMaintenance, VehicleAvailabilityWindow, OptimizationRun, CustomReport]),
+    TypeOrmModule.forFeature([
+      Company,
+      User,
+      CompanyParameters,
+      Trip,
+      Driver,
+      Schedule,
+      BlockAssignment,
+      DutyAssignment,
+      Line,
+      Terminal,
+      VehicleType,
+      Vehicle,
+      VehicleMaintenance,
+      VehicleAvailabilityWindow,
+      OptimizationRun,
+      CustomReport,
+    ]),
     AuthModule,
     ParametersModule,
     OperationsModule,
@@ -84,10 +124,10 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
     // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
     // (/optimize). Throttles podem ser sobrescritos por endpoint via @Throttle decorator.
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 1_000, limit: 30 },     // 30 req/s por IP — burst defense
-      { name: 'medium', ttl: 60_000, limit: 300 },  // 300 req/min — uso normal
+      { name: 'short', ttl: 1_000, limit: 30 }, // 30 req/s por IP — burst defense
+      { name: 'medium', ttl: 60_000, limit: 300 }, // 300 req/min — uso normal
     ]),
-],
+  ],
   controllers: [AppController],
   providers: [
     AppService,

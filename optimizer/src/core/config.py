@@ -1,4 +1,5 @@
 """Configuração central via variáveis de ambiente (Pydantic BaseSettings)."""
+
 from functools import lru_cache
 from pathlib import Path
 from typing import List
@@ -37,9 +38,7 @@ class Settings(BaseSettings):
     )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:3001"]
-    )
+    cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:3001"])
 
     # ── Database (PostgreSQL async) ───────────────────────────────────────────
     db_host: str = "localhost"
@@ -99,23 +98,23 @@ class Settings(BaseSettings):
     hybrid_time_budget_seconds: int = 900
 
     # ── Custos padrão (quando tipo de veículo não fornece custo) ──────────────
-    default_vehicle_fixed_cost: float = 800.0   # R$ por veículo por dia
-    default_cost_per_km: float = 2.0            # R$ por km
-    default_cost_per_hour: float = 50.0         # R$ por hora de operação
+    default_vehicle_fixed_cost: float = 800.0  # R$ por veículo por dia
+    default_cost_per_km: float = 2.0  # R$ por km
+    default_cost_per_hour: float = 50.0  # R$ por hora de operação
 
     # ── Regras CCT (Convenção Coletiva de Trabalho) ───────────────────────────
-    cct_max_shift_minutes: int = 480            # 8 horas de jornada
-    cct_max_driving_minutes: int = 270          # 4h30 de direção contínua
-    cct_min_break_minutes: int = 30             # 30 min de intervalo mínimo
+    cct_max_shift_minutes: int = 480  # 8 horas de jornada
+    cct_max_driving_minutes: int = 270  # 4h30 de direção contínua
+    cct_min_break_minutes: int = 30  # 30 min de intervalo mínimo
 
     # ── AI Copilot (OpenRouter) ───────────────────────────────────────────────
-    openrouter_api_key: str = ""                # Chave de API. Vazia = recurso desativado silenciosamente.
-    openrouter_model: str = ""                  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
+    openrouter_api_key: str = ""  # Chave de API. Vazia = recurso desativado silenciosamente.
+    openrouter_model: str = ""  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
 
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
-    redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
-    celery_task_soft_time_limit: int = 1200      # 20 min
-    celery_task_time_limit: int = 1500           # 25 min
+    redis_url: str = "redis://localhost:6379/0"  # Lida de REDIS_URL no .env ou docker-compose
+    celery_task_soft_time_limit: int = 1200  # 20 min
+    celery_task_time_limit: int = 1500  # 25 min
 
     # ── Roteamento OSRM ──────────────────────────────────────────────────────
     osrm_url: str = "http://localhost:5000"
@@ -132,9 +131,7 @@ class Settings(BaseSettings):
     @classmethod
     def reject_known_default_key(cls, v: str) -> str:
         if not v or v == "internal-key-123456":
-            raise ValueError(
-                "INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)"
-            )
+            raise ValueError("INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)")
         return v
 
     @field_validator("debug", mode="before")

@@ -18,13 +18,19 @@ export class VehiclesService {
   // Vehicle Type methods
   async findAllVehicleTypes(): Promise<VehicleType[]> {
     const companyId = this.tenantContext.getCompanyId();
-    return this.vehicleTypeRepo.find({ where: { companyId }, order: { name: 'ASC' } });
+    return this.vehicleTypeRepo.find({
+      where: { companyId },
+      order: { name: 'ASC' },
+    });
   }
 
   async findOneVehicleType(id: number): Promise<VehicleType> {
     const companyId = this.tenantContext.getCompanyId();
-    const type = await this.vehicleTypeRepo.findOne({ where: { id, companyId } });
-    if (!type) throw new NotFoundException(`Tipo de veículo ${id} não encontrado`);
+    const type = await this.vehicleTypeRepo.findOne({
+      where: { id, companyId },
+    });
+    if (!type)
+      throw new NotFoundException(`Tipo de veículo ${id} não encontrado`);
     return type;
   }
 
@@ -34,7 +40,10 @@ export class VehiclesService {
     return this.vehicleTypeRepo.save(entity);
   }
 
-  async updateVehicleType(id: number, dto: Record<string, any>): Promise<VehicleType> {
+  async updateVehicleType(
+    id: number,
+    dto: Record<string, any>,
+  ): Promise<VehicleType> {
     const type = await this.findOneVehicleType(id);
     Object.assign(type, dto);
     return this.vehicleTypeRepo.save(type);

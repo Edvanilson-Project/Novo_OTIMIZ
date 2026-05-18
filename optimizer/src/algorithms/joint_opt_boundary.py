@@ -9,12 +9,13 @@ que cruzam essas fronteiras, em vez de explorar todo o O(B²) espaço.
 Reduz drasticamente o trabalho do ALNS: de O(B²) para O(B_boundary * K),
 onde B_boundary << B (tipicamente 5-10% dos blocos tocam fronteiras).
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from ..domain.models import Block, Trip, VSPSolution
+from ..domain.models import Block, VSPSolution
 from .utils import is_connection_feasible
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,10 @@ def identify_boundary_blocks(
             my_chunk = chunk_assignments.get(b.id)
             if my_chunk is None:
                 continue
-            for nbr in (blocks_sorted[i - 1] if i > 0 else None,
-                        blocks_sorted[i + 1] if i < len(blocks_sorted) - 1 else None):
+            for nbr in (
+                blocks_sorted[i - 1] if i > 0 else None,
+                blocks_sorted[i + 1] if i < len(blocks_sorted) - 1 else None,
+            ):
                 if nbr is None:
                     continue
                 if chunk_assignments.get(nbr.id) != my_chunk:
@@ -88,8 +91,16 @@ def boundary_two_opt(
     max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
     allow_multi = bool(vsp_params.get("allow_multi_line_block", True))
 
-    blocks = [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
-                    warnings=list(b.warnings), meta=dict(b.meta)) for b in vsp_sol.blocks]
+    blocks = [
+        Block(
+            id=b.id,
+            trips=list(b.trips),
+            vehicle_type_id=b.vehicle_type_id,
+            warnings=list(b.warnings),
+            meta=dict(b.meta),
+        )
+        for b in vsp_sol.blocks
+    ]
     if boundary_block_ids is None:
         boundary_block_ids = identify_boundary_blocks(blocks)
 
@@ -169,8 +180,16 @@ def boundary_tail_relocation(
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
     max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
 
-    blocks = [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
-                    warnings=list(b.warnings), meta=dict(b.meta)) for b in vsp_sol.blocks]
+    blocks = [
+        Block(
+            id=b.id,
+            trips=list(b.trips),
+            vehicle_type_id=b.vehicle_type_id,
+            warnings=list(b.warnings),
+            meta=dict(b.meta),
+        )
+        for b in vsp_sol.blocks
+    ]
     if boundary_block_ids is None:
         boundary_block_ids = identify_boundary_blocks(blocks)
     if not boundary_block_ids:
@@ -225,9 +244,7 @@ def boundary_tail_relocation(
     new_sol = copy.copy(vsp_sol)
     new_sol.blocks = blocks
     new_sol.meta = {**(vsp_sol.meta or {}), "boundary_tail_relocations": relocations}
-    logger.info(
-        f"[BOUNDARY-TAIL] {relocations} realocações eliminaram {relocations} veículos"
-    )
+    logger.info(f"[BOUNDARY-TAIL] {relocations} realocações eliminaram {relocations} veículos")
     return new_sol, relocations
 
 
@@ -251,10 +268,7 @@ def stitch_chunk_boundaries(
         chunk_assignments=chunk_assignments,
         temporal_window_minutes=temporal_window_minutes,
     )
-    logger.info(
-        f"[STITCH] {len(boundary_ids)}/{len(vsp_sol.blocks)} blocos identificados "
-        f"como fronteira"
-    )
+    logger.info(f"[STITCH] {len(boundary_ids)}/{len(vsp_sol.blocks)} blocos identificados " f"como fronteira")
     sol, _ = boundary_tail_relocation(vsp_sol, vsp_params, boundary_ids)
     sol, _ = boundary_two_opt(sol, vsp_params, boundary_ids)
     return sol

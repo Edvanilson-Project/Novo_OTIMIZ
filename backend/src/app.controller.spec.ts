@@ -11,7 +11,10 @@ describe('AppController', () => {
       controllers: [AppController],
       providers: [
         AppService,
-        { provide: DataSource, useValue: { query: jest.fn().mockResolvedValue([{ 1: 1 }]) } },
+        {
+          provide: DataSource,
+          useValue: { query: jest.fn().mockResolvedValue([{ 1: 1 }]) },
+        },
       ],
     }).compile();
 

@@ -14,7 +14,9 @@ export class ParametersController {
   }
 
   @Put()
-  async updateParameters(@Body() updateData: Partial<CompanyParameters>): Promise<CompanyParameters> {
+  async updateParameters(
+    @Body() updateData: Partial<CompanyParameters>,
+  ): Promise<CompanyParameters> {
     return this.parametersService.updateParameters(updateData);
   }
 }

@@ -1,6 +1,7 @@
 """
 Schemas Pydantic para a API REST do OTIMIZ Optimizer.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -9,11 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..domain.models import AlgorithmType
 
+
 class BaseOptimizationConfig(BaseModel):
     """
     Configuração centralizada de parâmetros de otimização (Single Source of Truth).
     Utilizado por todos os solvers e pelo CostEvaluator.
     """
+
     # Custos Operacionais e Pesos
     driver_cost_per_minute: float = Field(0.0, description="Custo real do motorista por minuto")
     collector_cost_per_minute: float = Field(0.0, description="Custo real do coletor por minuto")
@@ -23,13 +26,15 @@ class BaseOptimizationConfig(BaseModel):
     cost_duty: float = Field(500.0, description="Custo/Peso fixo por jornada (ativação de tripulação)")
     waiting_time_pay_pct: float = Field(0.30, description="Percentual de pagamento sobre o tempo de espera (ocioso)")
     idle_time_is_paid: bool = Field(True, description="Indica se o tempo de espera entre viagens é remunerado")
-    
+
     # Parâmetros Noturnos
     nocturnal_start_hour: int = Field(22, description="Hora de início do período noturno (0-23)")
     nocturnal_end_hour: int = Field(5, description="Hora de término do período noturno (0-23)")
     nocturnal_factor: float = Field(1.0, description="Fator de redução de hora noturna (ex: 1.1428 para 52.5min)")
     nocturnal_extra_pct: float = Field(0.20, description="Adicional noturno em percentual (ex: 0.20 para 20%)")
-    holiday_extra_pct: float = Field(1.0, description="Adicional por trabalho em feriado/domingo (ex: 1.0 para 100% extra)")
+    holiday_extra_pct: float = Field(
+        1.0, description="Adicional por trabalho em feriado/domingo (ex: 1.0 para 100% extra)"
+    )
     sunday_off_weight: float = Field(0.0, description="Peso/Penalidade para escalas que não folgam no domingo")
 
     # Limites CCT (Tripulação)
@@ -43,35 +48,49 @@ class BaseOptimizationConfig(BaseModel):
     mandatory_break_after_minutes: int = Field(270, description="Tempo máximo de condução antes de pausa obrigatória")
     meal_break_minutes: int = Field(60, description="Tempo padrão de intervalo de refeição")
     inter_shift_rest_minutes: int = Field(660, description="Descanso mínimo entre jornadas (11h)")
-    
+
     # Limites Adicionais (Europeus/Avançados)
     daily_driving_limit_minutes: int = Field(540, description="Limite de direção diária (padrão 9h)")
-    extended_daily_driving_limit_minutes: int = Field(600, description="Limite estendido de direção diária (padrão 10h)")
+    extended_daily_driving_limit_minutes: int = Field(
+        600, description="Limite estendido de direção diária (padrão 10h)"
+    )
     max_extended_driving_days_per_week: int = Field(2, description="Número máximo de extensões de direção por semana")
     weekly_driving_limit_minutes: int = Field(3360, description="Limite de direção semanal (56h)")
     fortnight_driving_limit_minutes: int = Field(5400, description="Limite de direção quinzenal (90h)")
     weekly_rest_minutes: int = Field(2700, description="Tempo de descanso semanal obrigatório (45h)")
     reduced_weekly_rest_minutes: int = Field(1440, description="Tempo de descanso semanal reduzido (24h)")
     allow_reduced_weekly_rest: bool = Field(False, description="Permite reduzir o descanso semanal")
-    max_unpaid_break_minutes: Optional[int] = Field(None, description="Limite máximo de um único intervalo não remunerado")
-    max_total_unpaid_break_minutes: Optional[int] = Field(None, description="Limite total de intervalos não remunerados na jornada")
+    max_unpaid_break_minutes: Optional[int] = Field(
+        None, description="Limite máximo de um único intervalo não remunerado"
+    )
+    max_total_unpaid_break_minutes: Optional[int] = Field(
+        None, description="Limite total de intervalos não remunerados na jornada"
+    )
     long_unpaid_break_limit_minutes: int = Field(180, description="Duração acima da qual a pausa é considerada longa")
     long_unpaid_break_penalty_weight: float = Field(4.0, description="Peso de penalização por pausas longas não pagas")
-    
+
     # Regras de Conexão e Operação
     min_layover_minutes: int = Field(8, description="Tempo mínimo de parada técnica em terminais")
     min_connection_time: Optional[int] = Field(None, description="Alias operacional para min_layover_minutes")
     pullout_minutes: int = Field(10, description="Tempo de soltura (garagem -> primeiro terminal)")
     pullback_minutes: int = Field(10, description="Tempo de recolhimento (último terminal -> garagem)")
-    pullout_counts_in_driver_shift: bool = Field(True, description="Inclui o pull-out no spread e no início efetivo da jornada")
-    pullback_counts_in_driver_shift: bool = Field(True, description="Inclui o pull-back no spread e no fim efetivo da jornada")
+    pullout_counts_in_driver_shift: bool = Field(
+        True, description="Inclui o pull-out no spread e no início efetivo da jornada"
+    )
+    pullback_counts_in_driver_shift: bool = Field(
+        True, description="Inclui o pull-back no spread e no fim efetivo da jornada"
+    )
     connection_tolerance_minutes: int = Field(0, description="Tolerância para conexões apertadas")
     allow_relief_points: bool = Field(False, description="Permitir trocas de motorista em pontos de rendição na rota")
     enforce_same_depot_start_end: bool = Field(False, description="Forçar início e fim da jornada na mesma garagem")
-    operator_change_terminals_only: bool = Field(True, description="Restringir trocas de operador apenas a terminais/garagem")
+    operator_change_terminals_only: bool = Field(
+        True, description="Restringir trocas de operador apenas a terminais/garagem"
+    )
     enforce_single_line_duty: bool = Field(False, description="Restringir jornada a apenas uma linha")
-    operator_single_vehicle_only: bool = Field(False, description="Restringir operador a apenas um veículo (sem trocas)")
-    
+    operator_single_vehicle_only: bool = Field(
+        False, description="Restringir operador a apenas um veículo (sem trocas)"
+    )
+
     # Pesos de Metas (Soft Constraints)
     fairness_weight: float = Field(0.0, description="Peso para equilibrar carga de trabalho entre motoristas")
     fairness_target_work_minutes: int = Field(420, description="Alvo de minutos de trabalho para equilíbrio")
@@ -80,11 +99,13 @@ class BaseOptimizationConfig(BaseModel):
     trip_group_keep_bonus: float = Field(240.0, description="Bônus por manter viagens acopladas (ida e volta)")
     enforce_trip_groups_hard: bool = Field(True, description="Obriga viagens do mesmo grupo a ficarem na mesma escala")
     operator_pairing_hard: bool = Field(True, description="Obriga pareamento rígido de operadores")
-    
+
     # Configurações de Algoritmo e Modo Estrito
     apply_cct: bool = Field(True, description="Ativa todas as regras da Convenção Coletiva de Trabalho")
     strict_hard_validation: bool = Field(True, description="Rejeita soluções que violem restrições hard")
-    strict_zero_gap_validation: bool = Field(False, description="Valida continuidade geografica em conexoes com gap zero")
+    strict_zero_gap_validation: bool = Field(
+        False, description="Valida continuidade geografica em conexoes com gap zero"
+    )
     strict_operational_mode: bool = Field(False, description="Desativa tolerancia operacional em conexoes VSP")
     strict_hard_constraints: bool = Field(False, description="Aplica restricoes operacionais sem tolerancia")
     strict_union_rules: bool = Field(True, description="Aplica regras sindicais em modo estrito")
@@ -106,7 +127,7 @@ class BaseOptimizationConfig(BaseModel):
     ilp_timeout_seconds: int = Field(120, description="Tempo limite para solvers exatos (segundos)")
     goal_weights: Dict[str, float] = Field(default_factory=dict, description="Pesos personalizados de objetivos")
     dynamic_rules: List[Dict[str, Any]] = Field(default_factory=list, description="Regras dinâmicas de custo")
-    
+
     model_config = ConfigDict(extra="ignore")
 
 
@@ -115,11 +136,14 @@ class OptimizationParametersDTO(BaseOptimizationConfig):
     DTO retrocompatível para parâmetros de otimização.
     Campos antigos mapeados ou marcados como secundários.
     """
+
     # Mapeamentos para manter compatibilidade com nomes antigos do Frontend
     force_round_trip: bool = Field(True, description="Forçar viagem de ida e volta (Mapeia para trip_group_keep_bonus)")
     allow_vehicle_swap: bool = Field(True, description="Permitir troca de veículo entre blocos")
     max_driving_time_minutes: Optional[int] = Field(None, description="DEPRECATED: Use max_work_minutes")
-    terminal_location_ids: List[int] = Field(default_factory=list, description="IDs dos locais que são terminais válidos")
+    terminal_location_ids: List[int] = Field(
+        default_factory=list, description="IDs dos locais que são terminais válidos"
+    )
 
     @model_validator(mode="after")
     def sync_deprecated_fields(self) -> "OptimizationParametersDTO":
@@ -188,9 +212,13 @@ class TripInput(BaseModel):
             raise ValueError("mid_trip_relief_offset_minutes deve cair dentro da viagem")
         if int(self.mid_trip_relief_point_id or 0) in {int(self.origin_id), int(self.destination_id)}:
             raise ValueError("mid_trip_relief_point_id deve representar um ponto intermediario, nao a origem/destino")
-        if self.mid_trip_relief_distance_ratio is not None and not (0.0 < float(self.mid_trip_relief_distance_ratio) < 1.0):
+        if self.mid_trip_relief_distance_ratio is not None and not (
+            0.0 < float(self.mid_trip_relief_distance_ratio) < 1.0
+        ):
             raise ValueError("mid_trip_relief_distance_ratio deve estar entre 0 e 1")
-        if self.mid_trip_relief_elevation_ratio is not None and not (0.0 < float(self.mid_trip_relief_elevation_ratio) < 1.0):
+        if self.mid_trip_relief_elevation_ratio is not None and not (
+            0.0 < float(self.mid_trip_relief_elevation_ratio) < 1.0
+        ):
             raise ValueError("mid_trip_relief_elevation_ratio deve estar entre 0 e 1")
         return self
 
@@ -221,6 +249,7 @@ class VehicleTypeInput(BaseModel):
 
 class CctParamsInput(BaseModel):
     """Schema flexível para entrada de parâmetros CCT (campos opcionais)."""
+
     max_shift_minutes: Optional[int] = None
     max_work_minutes: Optional[int] = None
     min_work_minutes: Optional[int] = None
@@ -292,6 +321,7 @@ class CctParamsInput(BaseModel):
 
 class VspParamsInput(BaseModel):
     """Schema flexível para entrada de parâmetros VSP."""
+
     time_budget_s: Optional[float] = None
     random_seed: Optional[int] = None
     force_round_trip: Optional[bool] = None
@@ -342,11 +372,11 @@ class VspParamsInput(BaseModel):
     bp_max_pricing_iterations: Optional[int] = None
     bp_max_pricing_columns: Optional[int] = None
     bp_max_labels_per_node: Optional[int] = None
-    bp_max_driving_minutes: Optional[int] = None    # CCT driving limit no pricing B&P
-    bp_min_break_minutes: Optional[int] = None      # pausa mínima para reset (default 30)
-    ev_kwh_per_km: Optional[float] = None           # consumo EV (default 1.8 kWh/km)
+    bp_max_driving_minutes: Optional[int] = None  # CCT driving limit no pricing B&P
+    bp_min_break_minutes: Optional[int] = None  # pausa mínima para reset (default 30)
+    ev_kwh_per_km: Optional[float] = None  # consumo EV (default 1.8 kWh/km)
     # Timetable Slack Optimization
-    timetable_slack_minutes: Optional[int] = None   # slack de horário para reduzir PVR
+    timetable_slack_minutes: Optional[int] = None  # slack de horário para reduzir PVR
     timetable_slack_step_minutes: Optional[int] = None
     scale_stitch_max_gap_minutes: Optional[int] = None
 
@@ -361,9 +391,13 @@ class OptimizeRequest(BaseModel):
         description="Preferência de motor VSP: 'assignment_vsp' ativa o solver esparso de alta escala (40k+ viagens)",
     )
     depot_id: Optional[int] = None
-    depot_ids: Optional[List[int]] = Field(None, description="Filtro multi-depot: inclui apenas viagens cujo depot_id esteja na lista")
+    depot_ids: Optional[List[int]] = Field(
+        None, description="Filtro multi-depot: inclui apenas viagens cujo depot_id esteja na lista"
+    )
     time_budget_s: Optional[float] = Field(None, ge=1, le=3600)
-    wait_for_completion: bool = Field(False, description="Se True, a requisição aguarda o resultado e o retorna diretamente")
+    wait_for_completion: bool = Field(
+        False, description="Se True, a requisição aguarda o resultado e o retorna diretamente"
+    )
     trips: List[TripInput]
     # vehicle_types tem default vazio; a obrigatoriedade é validada no route
     # handler (POST /optimize) que devolve 400 quando lista está vazia. Manter
@@ -468,12 +502,14 @@ class ErrorResponse(BaseModel):
 
 class TaskSubmittedResponse(BaseModel):
     """Resposta imediata do POST /optimize/ após enfileirar no Celery."""
+
     status: str = "processing"
     task_id: str
 
 
 class TaskStatusResponse(BaseModel):
     """Resposta do polling GET /optimize/status/{task_id}."""
+
     status: str  # "processing" | "completed" | "failed"
     task_id: str
     result: Optional[OptimizeResponse] = None
@@ -483,9 +519,9 @@ class TaskStatusResponse(BaseModel):
     message: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
     # Campos de progresso em tempo real (presentes quando status="processing" e Celery reporta PROGRESS)
-    phase: Optional[str] = None            # Ex: "vsp", "csp", "finalizing"
-    phase_label: Optional[str] = None     # Ex: "Otimizando alocação de veículos (VSP)..."
-    progress_pct: Optional[int] = None    # 0–100
+    phase: Optional[str] = None  # Ex: "vsp", "csp", "finalizing"
+    phase_label: Optional[str] = None  # Ex: "Otimizando alocação de veículos (VSP)..."
+    progress_pct: Optional[int] = None  # 0–100
 
 
 class MacroEstimateRequest(BaseModel):
@@ -698,6 +734,7 @@ class AiChatResponse(BaseModel):
 
 
 # ── Weekly Rostering ─────────────────────────────────────────────────────────
+
 
 class WeeklyDutyInput(BaseModel):
     id: int

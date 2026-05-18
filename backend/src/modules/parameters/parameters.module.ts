@@ -13,11 +13,7 @@ import { TenantContext } from '../../common/context/tenant-context';
     JwtModule.register({}), // Re-utiliza a config global se disponível
   ],
   controllers: [ParametersController],
-  providers: [
-    ParametersService,
-    CompanyParametersRepository,
-    TenantContext,
-  ],
+  providers: [ParametersService, CompanyParametersRepository, TenantContext],
   exports: [ParametersService],
 })
 export class ParametersModule {}

@@ -10,17 +10,25 @@ describe('VehiclesController', () => {
 
   beforeEach(async () => {
     service = {
-      findAllVehicleTypes: jest.fn().mockResolvedValue([{ id: 1, name: 'BUS' }]),
+      findAllVehicleTypes: jest
+        .fn()
+        .mockResolvedValue([{ id: 1, name: 'BUS' }]),
       findOneVehicleType: jest.fn().mockResolvedValue({ id: 1, name: 'BUS' }),
       createVehicleType: jest.fn().mockResolvedValue({ id: 2, name: 'MINI' }),
-      updateVehicleType: jest.fn().mockResolvedValue({ id: 1, name: 'Updated' }),
+      updateVehicleType: jest
+        .fn()
+        .mockResolvedValue({ id: 1, name: 'Updated' }),
       removeVehicleType: jest.fn().mockResolvedValue(undefined),
-      findAllVehicles: jest.fn().mockResolvedValue([{ id: 10, vehicleId: 'V1' }]),
+      findAllVehicles: jest
+        .fn()
+        .mockResolvedValue([{ id: 10, vehicleId: 'V1' }]),
       getActiveVehicles: jest.fn().mockResolvedValue([{ id: 10 }]),
       getVehiclesByType: jest.fn().mockResolvedValue([]),
       findOneVehicle: jest.fn().mockResolvedValue({ id: 10 }),
       createVehicle: jest.fn().mockResolvedValue({ id: 11 }),
-      updateVehicle: jest.fn().mockResolvedValue({ id: 10, vehicleId: 'Updated' }),
+      updateVehicle: jest
+        .fn()
+        .mockResolvedValue({ id: 10, vehicleId: 'Updated' }),
       removeVehicle: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -28,7 +36,8 @@ describe('VehiclesController', () => {
       controllers: [VehiclesController],
       providers: [{ provide: VehiclesService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(VehiclesController);
@@ -45,8 +54,12 @@ describe('VehiclesController', () => {
     });
 
     it('findOneVehicleType propagates NotFoundException', async () => {
-      (service.findOneVehicleType as jest.Mock).mockRejectedValue(new NotFoundException());
-      await expect(controller.findOneVehicleType(999)).rejects.toThrow(NotFoundException);
+      (service.findOneVehicleType as jest.Mock).mockRejectedValue(
+        new NotFoundException(),
+      );
+      await expect(controller.findOneVehicleType(999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('createVehicleType calls service', async () => {
@@ -57,7 +70,9 @@ describe('VehiclesController', () => {
 
     it('updateVehicleType calls service', async () => {
       await controller.updateVehicleType(1, { name: 'Updated' });
-      expect(service.updateVehicleType).toHaveBeenCalledWith(1, { name: 'Updated' });
+      expect(service.updateVehicleType).toHaveBeenCalledWith(1, {
+        name: 'Updated',
+      });
     });
 
     it('removeVehicleType calls service', async () => {
@@ -81,8 +96,12 @@ describe('VehiclesController', () => {
     });
 
     it('findOneVehicle propagates NotFoundException', async () => {
-      (service.findOneVehicle as jest.Mock).mockRejectedValue(new NotFoundException());
-      await expect(controller.findOneVehicle(999)).rejects.toThrow(NotFoundException);
+      (service.findOneVehicle as jest.Mock).mockRejectedValue(
+        new NotFoundException(),
+      );
+      await expect(controller.findOneVehicle(999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

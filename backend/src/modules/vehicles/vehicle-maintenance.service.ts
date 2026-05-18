@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { VehicleMaintenance, MaintenanceStatus } from '../database/entities/vehicle-maintenance.entity';
+import {
+  VehicleMaintenance,
+  MaintenanceStatus,
+} from '../database/entities/vehicle-maintenance.entity';
 import { VehicleAvailabilityWindow } from '../database/entities/vehicle-availability-window.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 
@@ -15,7 +22,10 @@ export class VehicleMaintenanceService {
     private tenantContext: TenantContext,
   ) {}
 
-  async scheduleMaintenance(vehicleId: number, data: any): Promise<VehicleMaintenance> {
+  async scheduleMaintenance(
+    vehicleId: number,
+    data: any,
+  ): Promise<VehicleMaintenance> {
     const companyId = this.tenantContext.getCompanyId();
 
     const maintenanceDate = new Date(data.maintenanceDate);
@@ -33,7 +43,9 @@ export class VehicleMaintenanceService {
     });
 
     if (existing) {
-      throw new BadRequestException('Maintenance already scheduled for this date');
+      throw new BadRequestException(
+        'Maintenance already scheduled for this date',
+      );
     }
 
     const maintenance = this.maintenanceRepo.create({
@@ -51,7 +63,9 @@ export class VehicleMaintenanceService {
     return this.maintenanceRepo.save(maintenance);
   }
 
-  async getMaintenanceHistory(vehicleId: number): Promise<VehicleMaintenance[]> {
+  async getMaintenanceHistory(
+    vehicleId: number,
+  ): Promise<VehicleMaintenance[]> {
     const companyId = this.tenantContext.getCompanyId();
     return this.maintenanceRepo.find({
       where: { vehicleId, companyId },
@@ -59,7 +73,11 @@ export class VehicleMaintenanceService {
     });
   }
 
-  async getUnavailablePeriods(vehicleId: number, startDate: Date, endDate: Date): Promise<VehicleAvailabilityWindow[]> {
+  async getUnavailablePeriods(
+    vehicleId: number,
+    _startDate: Date,
+    _endDate: Date,
+  ): Promise<VehicleAvailabilityWindow[]> {
     const companyId = this.tenantContext.getCompanyId();
     return this.availabilityRepo.find({
       where: {
@@ -107,7 +125,10 @@ export class VehicleMaintenanceService {
     return this.maintenanceRepo.save(maintenance);
   }
 
-  async cancelMaintenance(vehicleId: number, maintenanceId: number): Promise<void> {
+  async cancelMaintenance(
+    vehicleId: number,
+    maintenanceId: number,
+  ): Promise<void> {
     const companyId = this.tenantContext.getCompanyId();
     const maintenance = await this.maintenanceRepo.findOne({
       where: { id: maintenanceId, vehicleId, companyId },
@@ -125,7 +146,10 @@ export class VehicleMaintenanceService {
     await this.maintenanceRepo.save(maintenance);
   }
 
-  async createAvailabilityWindow(vehicleId: number, data: any): Promise<VehicleAvailabilityWindow> {
+  async createAvailabilityWindow(
+    vehicleId: number,
+    data: any,
+  ): Promise<VehicleAvailabilityWindow> {
     const companyId = this.tenantContext.getCompanyId();
 
     const window = this.availabilityRepo.create({
@@ -142,7 +166,10 @@ export class VehicleMaintenanceService {
     return this.availabilityRepo.save(window);
   }
 
-  async deleteAvailabilityWindow(vehicleId: number, windowId: number): Promise<void> {
+  async deleteAvailabilityWindow(
+    vehicleId: number,
+    windowId: number,
+  ): Promise<void> {
     const companyId = this.tenantContext.getCompanyId();
     const window = await this.availabilityRepo.findOne({
       where: { id: windowId, vehicleId, companyId },

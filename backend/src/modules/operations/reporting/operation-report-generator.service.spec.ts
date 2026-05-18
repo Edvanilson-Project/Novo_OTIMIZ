@@ -22,35 +22,34 @@ const baselineSchedule = (overrides: any = {}) => ({
   ...overrides,
 });
 
-const completedRun = (overrides: any = {}): OptimizationRun =>
-  ({
-    id: 10,
-    companyId: 16,
-    scenarioId: 'cost-optimized',
-    baselineScheduleId: 1,
-    resultScheduleId: 100,
-    inputFingerprint: 'fp-10',
-    params: {},
-    algorithm: 'vcsp_pulp',
-    randomSeed: 42,
-    status: OptimizationRunStatus.COMPLETED,
-    metrics: {
-      totalCost: 4500,
-      numVehicles: 10,
-      numDuties: 12,
-      totalTrips: 100,
-      unassignedTrips: 0,
-      cctViolations: 0,
-      hardIssueCount: 0,
-      softIssueCount: 0,
-    },
-    errorMessage: null,
-    durationMs: 60000,
-    createdAt: new Date('2026-05-10T10:00:00Z'),
-    updatedAt: new Date('2026-05-10T10:01:00Z'),
-    completedAt: new Date('2026-05-10T10:01:00Z'),
-    ...overrides,
-  }) as any;
+const completedRun = (overrides: any = {}): OptimizationRun => ({
+  id: 10,
+  companyId: 16,
+  scenarioId: 'cost-optimized',
+  baselineScheduleId: 1,
+  resultScheduleId: 100,
+  inputFingerprint: 'fp-10',
+  params: {},
+  algorithm: 'vcsp_pulp',
+  randomSeed: 42,
+  status: OptimizationRunStatus.COMPLETED,
+  metrics: {
+    totalCost: 4500,
+    numVehicles: 10,
+    numDuties: 12,
+    totalTrips: 100,
+    unassignedTrips: 0,
+    cctViolations: 0,
+    hardIssueCount: 0,
+    softIssueCount: 0,
+  },
+  errorMessage: null,
+  durationMs: 60000,
+  createdAt: new Date('2026-05-10T10:00:00Z'),
+  updatedAt: new Date('2026-05-10T10:01:00Z'),
+  completedAt: new Date('2026-05-10T10:01:00Z'),
+  ...overrides,
+});
 
 describe('OperationReportGeneratorService', () => {
   let service: OperationReportGeneratorService;
@@ -168,17 +167,35 @@ describe('OperationReportGeneratorService', () => {
       scheduleRepo.findOne.mockResolvedValue(baselineSchedule());
       const day1Run1 = completedRun({
         id: 20,
-        metrics: { totalCost: 4800, numVehicles: 11, totalTrips: 100, unassignedTrips: 0, cctViolations: 0 },
+        metrics: {
+          totalCost: 4800,
+          numVehicles: 11,
+          totalTrips: 100,
+          unassignedTrips: 0,
+          cctViolations: 0,
+        },
         completedAt: new Date('2026-05-09T08:00:00Z'),
       });
       const day1Run2 = completedRun({
         id: 21,
-        metrics: { totalCost: 4600, numVehicles: 10, totalTrips: 100, unassignedTrips: 0, cctViolations: 0 },
+        metrics: {
+          totalCost: 4600,
+          numVehicles: 10,
+          totalTrips: 100,
+          unassignedTrips: 0,
+          cctViolations: 0,
+        },
         completedAt: new Date('2026-05-09T15:00:00Z'),
       });
       const day2Run = completedRun({
         id: 22,
-        metrics: { totalCost: 4400, numVehicles: 9, totalTrips: 100, unassignedTrips: 0, cctViolations: 0 },
+        metrics: {
+          totalCost: 4400,
+          numVehicles: 9,
+          totalTrips: 100,
+          unassignedTrips: 0,
+          cctViolations: 0,
+        },
         completedAt: new Date('2026-05-10T12:00:00Z'),
       });
       runRepo.find.mockResolvedValue([day1Run1, day1Run2, day2Run]);
@@ -245,9 +262,36 @@ describe('OperationReportGeneratorService', () => {
 
     it('returns real averages + best/worst day from runs', async () => {
       const runs = [
-        completedRun({ id: 30, metrics: { totalCost: 4500, numVehicles: 10, totalTrips: 100, unassignedTrips: 0, cctViolations: 0 } }),
-        completedRun({ id: 31, metrics: { totalCost: 4700, numVehicles: 11, totalTrips: 100, unassignedTrips: 0, cctViolations: 1 } }),
-        completedRun({ id: 32, metrics: { totalCost: 4300, numVehicles: 9, totalTrips: 100, unassignedTrips: 0, cctViolations: 0 } }),
+        completedRun({
+          id: 30,
+          metrics: {
+            totalCost: 4500,
+            numVehicles: 10,
+            totalTrips: 100,
+            unassignedTrips: 0,
+            cctViolations: 0,
+          },
+        }),
+        completedRun({
+          id: 31,
+          metrics: {
+            totalCost: 4700,
+            numVehicles: 11,
+            totalTrips: 100,
+            unassignedTrips: 0,
+            cctViolations: 1,
+          },
+        }),
+        completedRun({
+          id: 32,
+          metrics: {
+            totalCost: 4300,
+            numVehicles: 9,
+            totalTrips: 100,
+            unassignedTrips: 0,
+            cctViolations: 0,
+          },
+        }),
       ];
       runRepo.find.mockResolvedValue(runs);
 
@@ -269,11 +313,23 @@ describe('OperationReportGeneratorService', () => {
   });
 
   describe('getDutyStats', () => {
-    const makeDuty = (dutyId: number, work_time: number, cost: number, overrides: any = {}) => ({
+    const makeDuty = (
+      dutyId: number,
+      work_time: number,
+      cost: number,
+      overrides: any = {},
+    ) => ({
       dutyId,
       tripIds: [1, 2],
       cost,
-      metadata: { work_time, spread_time: work_time + 30, overtime_minutes: 0, rest_violations: 0, shift_violations: 0, ...overrides },
+      metadata: {
+        work_time,
+        spread_time: work_time + 30,
+        overtime_minutes: 0,
+        rest_violations: 0,
+        shift_violations: 0,
+        ...overrides,
+      },
     });
 
     it('throws NotFoundException when no duties exist', async () => {

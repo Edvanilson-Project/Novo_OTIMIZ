@@ -10,6 +10,7 @@ Por que CP-SAT bate CBC para scheduling:
 - Paralelismo nativo (n workers por default)
 - Sem overhead de marshaling Python→binário (API nativa Python)
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,6 +23,7 @@ _log = logging.getLogger(__name__)
 
 try:
     from ortools.sat.python import cp_model as _cp_model
+
     _CPSAT_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _CPSAT_AVAILABLE = False
@@ -103,13 +105,19 @@ class CPSatCSP(SetPartitioningCSP):
             duty = Duty(id=self._next_duty_id())
             for task in combo:
                 if not duty.tasks:
-                    self.greedy._apply_block(duty, task, {
-                        "new_work": self.greedy._block_drive(task),
-                        "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
-                        "new_cont": self.greedy._block_drive(task),
-                        "daily_drive": self.greedy._block_drive(task),
-                        "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
-                    })
+                    self.greedy._apply_block(
+                        duty,
+                        task,
+                        {
+                            "new_work": self.greedy._block_drive(task),
+                            "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
+                            "new_cont": self.greedy._block_drive(task),
+                            "daily_drive": self.greedy._block_drive(task),
+                            "extended_days_used": (
+                                1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                            ),
+                        },
+                    )
                 else:
                     ok, _, data = self.greedy._can_extend(duty, task)
                     if not ok:
@@ -117,13 +125,19 @@ class CPSatCSP(SetPartitioningCSP):
                         if finalized.duties:
                             duties.append(finalized.duties[0])
                         duty = Duty(id=self._next_duty_id())
-                        self.greedy._apply_block(duty, task, {
-                            "new_work": self.greedy._block_drive(task),
-                            "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
-                            "new_cont": self.greedy._block_drive(task),
-                            "daily_drive": self.greedy._block_drive(task),
-                            "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
-                        })
+                        self.greedy._apply_block(
+                            duty,
+                            task,
+                            {
+                                "new_work": self.greedy._block_drive(task),
+                                "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
+                                "new_cont": self.greedy._block_drive(task),
+                                "daily_drive": self.greedy._block_drive(task),
+                                "extended_days_used": (
+                                    1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                                ),
+                            },
+                        )
                     else:
                         self.greedy._apply_block(duty, task, data)
                 covered_tasks.add(task.id)
@@ -133,13 +147,19 @@ class CPSatCSP(SetPartitioningCSP):
         for task in tasks:
             if task.id not in covered_tasks:
                 duty = Duty(id=self._next_duty_id())
-                self.greedy._apply_block(duty, task, {
-                    "new_work": self.greedy._block_drive(task),
-                    "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
-                    "new_cont": self.greedy._block_drive(task),
-                    "daily_drive": self.greedy._block_drive(task),
-                    "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
-                })
+                self.greedy._apply_block(
+                    duty,
+                    task,
+                    {
+                        "new_work": self.greedy._block_drive(task),
+                        "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
+                        "new_cont": self.greedy._block_drive(task),
+                        "daily_drive": self.greedy._block_drive(task),
+                        "extended_days_used": (
+                            1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                        ),
+                    },
+                )
                 duties.append(duty)
 
         duties = self.greedy._merge_small_duties(duties)
@@ -150,15 +170,17 @@ class CPSatCSP(SetPartitioningCSP):
 
         sol = self.greedy.finalize_selected_duties(duties, original_blocks=blocks)
         sol.algorithm = self.name
-        sol.meta.update({
-            "solver": "cp_sat",
-            "cp_sat_status": solver.StatusName(status),
-            "cp_sat_objective": solver.ObjectiveValue() / _COST_SCALE,
-            "cp_sat_wall_time_s": round(solver.WallTime(), 3),
-            "workpieces_generated": len(columns),
-            "task_count": len(tasks),
-            "relief_reassignment_audit": relief_audit,
-            "soft_issue_reassignment_audit": soft_audit,
-            **run_cut_meta,
-        })
+        sol.meta.update(
+            {
+                "solver": "cp_sat",
+                "cp_sat_status": solver.StatusName(status),
+                "cp_sat_objective": solver.ObjectiveValue() / _COST_SCALE,
+                "cp_sat_wall_time_s": round(solver.WallTime(), 3),
+                "workpieces_generated": len(columns),
+                "task_count": len(tasks),
+                "relief_reassignment_audit": relief_audit,
+                "soft_issue_reassignment_audit": soft_audit,
+                **run_cut_meta,
+            }
+        )
         return sol

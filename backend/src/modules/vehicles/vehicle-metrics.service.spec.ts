@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { VehicleMetricsService } from './vehicle-metrics.service';
 import { Vehicle } from '../database/entities/vehicle.entity';
-import { VehicleMaintenance, MaintenanceStatus } from '../database/entities/vehicle-maintenance.entity';
+import { VehicleMaintenance } from '../database/entities/vehicle-maintenance.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 
 describe('VehicleMetricsService', () => {
@@ -62,7 +62,9 @@ describe('VehicleMetricsService', () => {
 
       const maintenance = [
         {
-          maintenanceDate: new Date(new Date().getTime() - 30 * 24 * 60 * 60 * 1000),
+          maintenanceDate: new Date(
+            new Date().getTime() - 30 * 24 * 60 * 60 * 1000,
+          ),
         },
       ];
 
@@ -106,7 +108,9 @@ describe('VehicleMetricsService', () => {
 
       const oldMaintenance = [
         {
-          maintenanceDate: new Date(new Date().getTime() - 200 * 24 * 60 * 60 * 1000),
+          maintenanceDate: new Date(
+            new Date().getTime() - 200 * 24 * 60 * 60 * 1000,
+          ),
         },
       ];
 

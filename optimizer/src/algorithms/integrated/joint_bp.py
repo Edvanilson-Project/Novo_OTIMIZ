@@ -11,6 +11,7 @@ Parâmetros:
   cct_params: extraídos para configurar max_driving_minutes no pricing B&P.
   vsp_params: repassados ao BranchAndPrice (inclui EV params se aplicável).
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,8 +25,8 @@ from ..vsp.branch_and_price import BranchAndPrice
 
 _log = logging.getLogger(__name__)
 
-_CLT_MAX_DRIVING_MINUTES = 330   # art. 71 §1º CLT: 5h30 de condução contínua
-_CLT_MIN_BREAK_MINUTES = 30      # pausa mínima para reset
+_CLT_MAX_DRIVING_MINUTES = 330  # art. 71 §1º CLT: 5h30 de condução contínua
+_CLT_MIN_BREAK_MINUTES = 30  # pausa mínima para reset
 
 
 class JointBP(BaseAlgorithm, IIntegratedSolver):
@@ -58,12 +59,8 @@ class JointBP(BaseAlgorithm, IIntegratedSolver):
 
         # Extrair limites CLT do cct_params e injetar no B&P via vsp_params
         # Usa "max_driving_minutes" (mesma chave que GreedyCSP/CctParamsInput)
-        max_driving = int(
-            self.cct_params.get("max_driving_minutes", _CLT_MAX_DRIVING_MINUTES)
-        )
-        min_break = int(
-            self.cct_params.get("min_break_minutes", _CLT_MIN_BREAK_MINUTES)
-        )
+        max_driving = int(self.cct_params.get("max_driving_minutes", _CLT_MAX_DRIVING_MINUTES))
+        min_break = int(self.cct_params.get("min_break_minutes", _CLT_MIN_BREAK_MINUTES))
 
         bp_vsp_params = {
             **self.vsp_params,

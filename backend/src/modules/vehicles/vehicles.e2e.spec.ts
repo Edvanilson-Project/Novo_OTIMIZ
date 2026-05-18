@@ -17,8 +17,24 @@ import { VehiclesController } from './vehicles.controller';
 import { VehiclesService } from './vehicles.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-const TYPE_FIXTURE = { id: 1, name: 'BUS', capacity: 60, costPerDay: 450, accessible: true, description: 'City bus', companyId: 1 };
-const VEHICLE_FIXTURE = { id: 1, vehicleId: 'COACH-001', typeId: 1, depotId: 1, isActive: true, licensePlate: 'ABC-1234', companyId: 1 };
+const TYPE_FIXTURE = {
+  id: 1,
+  name: 'BUS',
+  capacity: 60,
+  costPerDay: 450,
+  accessible: true,
+  description: 'City bus',
+  companyId: 1,
+};
+const VEHICLE_FIXTURE = {
+  id: 1,
+  vehicleId: 'COACH-001',
+  typeId: 1,
+  depotId: 1,
+  isActive: true,
+  licensePlate: 'ABC-1234',
+  companyId: 1,
+};
 
 describe('Vehicles E2E — HTTP layer (mock-service)', () => {
   let app: INestApplication;
@@ -29,12 +45,16 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
       findAllVehicleTypes: jest.fn().mockResolvedValue([TYPE_FIXTURE]),
       findOneVehicleType: jest.fn().mockResolvedValue(TYPE_FIXTURE),
       createVehicleType: jest.fn().mockResolvedValue(TYPE_FIXTURE),
-      updateVehicleType: jest.fn().mockResolvedValue({ ...TYPE_FIXTURE, name: 'COACH' }),
+      updateVehicleType: jest
+        .fn()
+        .mockResolvedValue({ ...TYPE_FIXTURE, name: 'COACH' }),
       removeVehicleType: jest.fn().mockResolvedValue(undefined),
       findAllVehicles: jest.fn().mockResolvedValue([VEHICLE_FIXTURE]),
       findOneVehicle: jest.fn().mockResolvedValue(VEHICLE_FIXTURE),
       createVehicle: jest.fn().mockResolvedValue(VEHICLE_FIXTURE),
-      updateVehicle: jest.fn().mockResolvedValue({ ...VEHICLE_FIXTURE, licensePlate: 'XYZ-9999' }),
+      updateVehicle: jest
+        .fn()
+        .mockResolvedValue({ ...VEHICLE_FIXTURE, licensePlate: 'XYZ-9999' }),
       removeVehicle: jest.fn().mockResolvedValue(undefined),
       getVehiclesByType: jest.fn().mockResolvedValue([VEHICLE_FIXTURE]),
       getActiveVehicles: jest.fn().mockResolvedValue([VEHICLE_FIXTURE]),
@@ -61,7 +81,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles/types', () => {
     it('retorna lista de tipos com status 200', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles/types').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles/types')
+        .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toMatchObject({ id: 1, name: 'BUS', capacity: 60 });
     });
@@ -69,7 +91,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles/types/:id', () => {
     it('retorna tipo por id com status 200', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles/types/1').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles/types/1')
+        .expect(200);
       expect(res.body).toMatchObject({ id: 1, name: 'BUS' });
     });
   });
@@ -97,7 +121,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('DELETE /vehicles/types/:id', () => {
     it('remove tipo e retorna 200', async () => {
-      await request(app.getHttpServer()).delete('/vehicles/types/1').expect(res => expect(res.status).toBeLessThan(300));
+      await request(app.getHttpServer())
+        .delete('/vehicles/types/1')
+        .expect((res) => expect(res.status).toBeLessThan(300));
       expect(svc.removeVehicleType).toHaveBeenCalledWith(1);
     });
   });
@@ -106,7 +132,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles', () => {
     it('retorna lista de veículos com status 200', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles')
+        .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body[0]).toMatchObject({ vehicleId: 'COACH-001' });
     });
@@ -114,7 +142,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles/active', () => {
     it('retorna apenas veículos ativos', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles/active').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles/active')
+        .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       res.body.forEach((v: any) => expect(v.isActive).toBe(true));
     });
@@ -122,7 +152,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles/by-type/:typeId', () => {
     it('retorna veículos filtrados por tipo', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles/by-type/1').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles/by-type/1')
+        .expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(svc.getVehiclesByType).toHaveBeenCalledWith(1);
     });
@@ -130,7 +162,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('GET /vehicles/:id', () => {
     it('retorna veículo por id', async () => {
-      const res = await request(app.getHttpServer()).get('/vehicles/1').expect(200);
+      const res = await request(app.getHttpServer())
+        .get('/vehicles/1')
+        .expect(200);
       expect(res.body).toMatchObject({ id: 1, vehicleId: 'COACH-001' });
     });
   });
@@ -139,7 +173,13 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
     it('cria veículo e retorna 201', async () => {
       const res = await request(app.getHttpServer())
         .post('/vehicles')
-        .send({ vehicleId: 'COACH-001', typeId: 1, depotId: 1, isActive: true, licensePlate: 'ABC-1234' })
+        .send({
+          vehicleId: 'COACH-001',
+          typeId: 1,
+          depotId: 1,
+          isActive: true,
+          licensePlate: 'ABC-1234',
+        })
         .expect(201);
       expect(res.body).toMatchObject({ vehicleId: 'COACH-001' });
       expect(svc.createVehicle).toHaveBeenCalled();
@@ -158,7 +198,9 @@ describe('Vehicles E2E — HTTP layer (mock-service)', () => {
 
   describe('DELETE /vehicles/:id', () => {
     it('remove veículo e retorna 200', async () => {
-      await request(app.getHttpServer()).delete('/vehicles/1').expect(res => expect(res.status).toBeLessThan(300));
+      await request(app.getHttpServer())
+        .delete('/vehicles/1')
+        .expect((res) => expect(res.status).toBeLessThan(300));
       expect(svc.removeVehicle).toHaveBeenCalledWith(1);
     });
   });

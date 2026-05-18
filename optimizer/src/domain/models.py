@@ -2,6 +2,7 @@
 Modelos de domínio centrais do OTIMIZ Optimizer.
 Representam os dados do problema VSP/CSP.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -138,10 +139,7 @@ class VehicleType:
     depot_id: Optional[int] = None
 
     def trip_cost(self, trip: Trip) -> float:
-        return (
-            self.cost_per_km * trip.distance_km
-            + self.cost_per_hour * (trip.duration / 60)
-        )
+        return self.cost_per_km * trip.distance_km + self.cost_per_hour * (trip.duration / 60)
 
 
 @dataclass
@@ -202,9 +200,7 @@ class Block:
         for i in range(len(self.trips) - 1):
             a, b = self.trips[i], self.trips[i + 1]
             if b.start_time < a.end_time:
-                issues.append(
-                    f"Sobreposição: viagem#{a.id} termina {a.end_fmt} > viagem#{b.id} inicia {b.start_fmt}"
-                )
+                issues.append(f"Sobreposição: viagem#{a.id} termina {a.end_fmt} > viagem#{b.id} inicia {b.start_fmt}")
         return issues
 
 
@@ -619,8 +615,12 @@ class OptimizationResult:
                     "warnings": b.warnings,
                     "meta": b.meta,
                     **{
-                        "activation_cost": round(float(block_costs.get(int(b.id), {}).get("activation", 0.0) or 0.0), 2),
-                        "connection_cost": round(float(block_costs.get(int(b.id), {}).get("connection", 0.0) or 0.0), 2),
+                        "activation_cost": round(
+                            float(block_costs.get(int(b.id), {}).get("activation", 0.0) or 0.0), 2
+                        ),
+                        "connection_cost": round(
+                            float(block_costs.get(int(b.id), {}).get("connection", 0.0) or 0.0), 2
+                        ),
                         "distance_cost": round(float(block_costs.get(int(b.id), {}).get("distance", 0.0) or 0.0), 2),
                         "time_cost": round(float(block_costs.get(int(b.id), {}).get("time", 0.0) or 0.0), 2),
                         "idle_cost": round(float(block_costs.get(int(b.id), {}).get("idle_cost", 0.0) or 0.0), 2),
@@ -657,7 +657,13 @@ class OptimizationResult:
                             "line_id": t.line_id,
                             "trip_group_id": t.trip_group_id,
                             "direction": t.direction,
-                            "block_id": int(next((task.meta.get("source_block_id", task.id) for task in d.tasks if t in task.trips), 0) or 0),
+                            "block_id": int(
+                                next(
+                                    (task.meta.get("source_block_id", task.id) for task in d.tasks if t in task.trips),
+                                    0,
+                                )
+                                or 0
+                            ),
                             "is_pull_out": t.is_pull_out,
                             "is_pull_back": t.is_pull_back,
                             "duration": t.duration,
@@ -702,13 +708,25 @@ class OptimizationResult:
                     "meta": d.meta,
                     **{
                         "work_cost": round(float(duty_costs.get(int(d.id), {}).get("work_cost", 0.0) or 0.0), 2),
-                        "guaranteed_cost": round(float(duty_costs.get(int(d.id), {}).get("guaranteed_cost", 0.0) or 0.0), 2),
+                        "guaranteed_cost": round(
+                            float(duty_costs.get(int(d.id), {}).get("guaranteed_cost", 0.0) or 0.0), 2
+                        ),
                         "waiting_cost": round(float(duty_costs.get(int(d.id), {}).get("waiting_cost", 0.0) or 0.0), 2),
-                        "overtime_cost": round(float(duty_costs.get(int(d.id), {}).get("overtime_cost", 0.0) or 0.0), 2),
-                        "long_unpaid_break_penalty": round(float(duty_costs.get(int(d.id), {}).get("long_unpaid_break_penalty", 0.0) or 0.0), 2),
-                        "nocturnal_extra_cost": round(float(duty_costs.get(int(d.id), {}).get("nocturnal_extra", 0.0) or 0.0), 2),
-                        "holiday_extra_cost": round(float(duty_costs.get(int(d.id), {}).get("holiday_extra", 0.0) or 0.0), 2),
-                        "cct_penalties_cost": round(float(duty_costs.get(int(d.id), {}).get("cct_penalties", 0.0) or 0.0), 2),
+                        "overtime_cost": round(
+                            float(duty_costs.get(int(d.id), {}).get("overtime_cost", 0.0) or 0.0), 2
+                        ),
+                        "long_unpaid_break_penalty": round(
+                            float(duty_costs.get(int(d.id), {}).get("long_unpaid_break_penalty", 0.0) or 0.0), 2
+                        ),
+                        "nocturnal_extra_cost": round(
+                            float(duty_costs.get(int(d.id), {}).get("nocturnal_extra", 0.0) or 0.0), 2
+                        ),
+                        "holiday_extra_cost": round(
+                            float(duty_costs.get(int(d.id), {}).get("holiday_extra", 0.0) or 0.0), 2
+                        ),
+                        "cct_penalties_cost": round(
+                            float(duty_costs.get(int(d.id), {}).get("cct_penalties", 0.0) or 0.0), 2
+                        ),
                         "total_cost": round(float(duty_costs.get(int(d.id), {}).get("total", 0.0) or 0.0), 2),
                     },
                 }
@@ -760,34 +778,38 @@ class NominalRosteringSolution:
 
 # ── Weekly Rostering (escala semanal 7 dias) ──────────────────────────────────
 
+
 @dataclass
 class WeeklyAssignment:
     """Atribuição de um motorista a uma jornada em um dia específico da semana."""
+
     operator_id: str
-    day_index: int        # 0=segunda … 6=domingo
+    day_index: int  # 0=segunda … 6=domingo
     duty_id: int
-    duty_minutes: int     # duração da jornada em minutos
-    duty_start: int       # start_time em minutos desde meia-noite
-    duty_end: int         # end_time em minutos desde meia-noite
+    duty_minutes: int  # duração da jornada em minutos
+    duty_start: int  # start_time em minutos desde meia-noite
+    duty_end: int  # end_time em minutos desde meia-noite
 
 
 @dataclass
 class OperatorWeeklySchedule:
     """Escala semanal de um motorista: quais dias trabalha e métricas."""
+
     operator_id: str
     assignments: List[WeeklyAssignment] = field(default_factory=list)
     total_minutes: int = 0
     days_worked: int = 0
-    days_off: List[int] = field(default_factory=list)   # índices dos dias de folga
+    days_off: List[int] = field(default_factory=list)  # índices dos dias de folga
     weekly_cost: float = 0.0
 
 
 @dataclass
 class WeeklyRosterSolution:
     """Resultado da escala semanal completa."""
+
     schedules: List[OperatorWeeklySchedule] = field(default_factory=list)
     unassigned_by_day: Dict[int, List[int]] = field(default_factory=dict)  # day -> duty_ids
-    fairness_gini: float = 0.0     # Gini das horas semanais por motorista (0=perfeito)
+    fairness_gini: float = 0.0  # Gini das horas semanais por motorista (0=perfeito)
     total_minutes_assigned: int = 0
     elapsed_ms: float = 0.0
     algorithm: str = "weekly_cp_sat"

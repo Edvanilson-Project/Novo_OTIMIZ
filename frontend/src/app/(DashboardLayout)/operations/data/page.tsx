@@ -13,7 +13,7 @@ import {
   IconEdit, IconTrash, IconRefresh, IconEraser, IconArrowBack,
   IconDownload,
 } from "@tabler/icons-react";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import ParentCard from "@/app/components/shared/ParentCard";
@@ -136,67 +136,29 @@ export default function OperationsDataPage() {
   const notify = (message: string, severity: "success" | "error" | "info" | "warning" = "success") =>
     setNotification({ open: true, message, severity });
 
-  const handleExportLayout = () => {
-    const wb = XLSX.utils.book_new();
+  const handleExportLayout = async () => {
+    const workbook = new ExcelJS.Workbook();
 
-    // Sheet 1: Viagens (Template Completo - World Class)
+    // Sheet 1: Viagens (Template Completo)
+    const tripsSheet = workbook.addWorksheet("Viagens");
     const tripsTemplate = [
-      {
-        trip_id: 1001,
-        line_code: "101-A",
-        line_name: "Linha Exemplo Matriz",
-        pair_id: "P001",
-        direction: "IDA",
-        start_time: "06:00",
-        end_time: "07:30",
-        duration: 90,
-        origin_id: 1,
-        origin_name: "Terminal Norte",
-        destination_id: 2,
-        destination_name: "Terminal Sul",
-        distance_km: 25.50,
-      },
-      {
-        trip_id: 1002,
-        line_code: "101-A",
-        line_name: "Linha Exemplo Matriz",
-        pair_id: "P001",
-        direction: "VOLTA",
-        start_time: "07:45",
-        end_time: "09:15",
-        duration: 90,
-        origin_id: 2,
-        origin_name: "Terminal Sul",
-        destination_id: 1,
-        destination_name: "Terminal Norte",
-        distance_km: 25.50,
-      },
+      { trip_id: 1001, line_code: "101-A", line_name: "Linha Exemplo Matriz", pair_id: "P001", direction: "IDA", start_time: "06:00", end_time: "07:30", duration: 90, origin_id: 1, origin_name: "Terminal Norte", destination_id: 2, destination_name: "Terminal Sul", distance_km: 25.50 },
+      { trip_id: 1002, line_code: "101-A", line_name: "Linha Exemplo Matriz", pair_id: "P001", direction: "VOLTA", start_time: "07:45", end_time: "09:15", duration: 90, origin_id: 2, origin_name: "Terminal Sul", destination_id: 1, destination_name: "Terminal Norte", distance_km: 25.50 },
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tripsTemplate), "Viagens");
+    tripsSheet.addRow(Object.keys(tripsTemplate[0]));
+    tripsTemplate.forEach(row => tripsSheet.addRow(Object.values(row) as unknown[]));
 
     // Sheet 2: Motoristas (Template Completo)
+    const driversSheet = workbook.addWorksheet("Motoristas");
     const driversTemplate = [
-      {
-        driver_id: "M001",
-        name: "João Silva",
-        role: "Motorista",
-        max_hours_per_day: 480,
-        last_shift_end: 0
-      },
-      {
-        driver_id: "M002",
-        name: "Maria Souza",
-        role: "Motorista/Cobrador",
-        max_hours_per_day: 540,
-        last_shift_end: 1320
-      },
+      { driver_id: "M001", name: "João Silva", role: "Motorista", max_hours_per_day: 480, last_shift_end: 0 },
+      { driver_id: "M002", name: "Maria Souza", role: "Motorista/Cobrador", max_hours_per_day: 540, last_shift_end: 1320 },
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(driversTemplate), "Motoristas");
+    driversSheet.addRow(Object.keys(driversTemplate[0]));
+    driversTemplate.forEach(row => driversSheet.addRow(Object.values(row) as unknown[]));
 
-    saveAs(
-      new Blob([XLSX.write(wb, { type: "array", bookType: "xlsx" })], { type: "application/octet-stream" }),
-      "layout_importacao_otimiz.xlsx"
-    );
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer], { type: "application/octet-stream" }), "layout_importacao_otimiz.xlsx");
     notify("Layout exportado com sucesso! Preencha os dados e importe.", "success");
   };
 

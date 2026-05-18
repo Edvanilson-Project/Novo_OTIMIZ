@@ -83,17 +83,25 @@ describe('GtfsImportService — dados reais SUNT Salvador', () => {
     terminalRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((data: any) => data),
-      save: jest.fn().mockImplementation(async (entity: any) => ({ id: terminalIdSeq++, ...entity })),
+      save: jest.fn().mockImplementation((entity: any) => ({
+        id: terminalIdSeq++,
+        ...entity,
+      })),
     };
     lineRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((data: any) => data),
-      save: jest.fn().mockImplementation(async (entity: any) => ({ id: lineIdSeq++, ...entity })),
+      save: jest.fn().mockImplementation((entity: any) => ({
+        id: lineIdSeq++,
+        ...entity,
+      })),
     };
     tripRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((data: any) => data),
-      save: jest.fn().mockImplementation(async (entity: any) => ({ id: 999, ...entity })),
+      save: jest
+        .fn()
+        .mockImplementation((entity: any) => ({ id: 999, ...entity })),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -102,7 +110,10 @@ describe('GtfsImportService — dados reais SUNT Salvador', () => {
         { provide: getRepositoryToken(Terminal), useValue: terminalRepo },
         { provide: getRepositoryToken(Line), useValue: lineRepo },
         { provide: getRepositoryToken(Trip), useValue: tripRepo },
-        { provide: TenantContext, useValue: { getCompanyId: jest.fn().mockReturnValue(42) } },
+        {
+          provide: TenantContext,
+          useValue: { getCompanyId: jest.fn().mockReturnValue(42) },
+        },
       ],
     }).compile();
 

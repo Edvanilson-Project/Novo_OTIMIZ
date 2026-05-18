@@ -25,19 +25,20 @@ INTEGRAÇÃO:
   Ativado via vsp_params["timetable_slack_minutes"] > 0.
   Roda como pré-processamento antes do VSP principal (greedy, B&P, etc.).
 """
+
 from __future__ import annotations
 
 import copy
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from ...domain.models import Block, Trip
+from ...domain.models import Trip
 from .greedy import GreedyVSP
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_STEP = 5       # passo de ajuste em minutos
-_DEFAULT_MAX_PASSES = 8 # máximo de passagens sobre pares de blocos
+_DEFAULT_STEP = 5  # passo de ajuste em minutos
+_DEFAULT_MAX_PASSES = 8  # máximo de passagens sobre pares de blocos
 
 
 def _gap(last: Trip, first: Trip, delta_last: int = 0, delta_first: int = 0) -> int:
@@ -148,9 +149,14 @@ class TimetableSlackOptimizer:
 
         if pvr_before <= 1:
             return list(trips), {
-                "slack_applied": False, "pvr_before": pvr_before, "pvr_after": pvr_before,
-                "pvr_reduction": 0, "pvr_reduction_pct": 0.0,
-                "trips_adjusted": 0, "total_merges": 0, "passes": 0,
+                "slack_applied": False,
+                "pvr_before": pvr_before,
+                "pvr_after": pvr_before,
+                "pvr_reduction": 0,
+                "pvr_reduction_pct": 0.0,
+                "trips_adjusted": 0,
+                "total_merges": 0,
+                "passes": 0,
             }
 
         total_merges = 0
@@ -207,7 +213,12 @@ class TimetableSlackOptimizer:
                     pass_merges += 1
                     _log.debug(
                         "timetable_slack: trip %d Δ=%+d, trip %d Δ=%+d → merge block %d←%d",
-                        last_orig_id, d_last, first_orig_id, d_first, i, j,
+                        last_orig_id,
+                        d_last,
+                        first_orig_id,
+                        d_first,
+                        i,
+                        j,
                     )
                     break  # cada bloco A funde com no máximo 1 bloco B por passagem
 
@@ -226,7 +237,11 @@ class TimetableSlackOptimizer:
         non_zero = sum(1 for d in deltas.values() if d != 0)
         _log.info(
             "timetable_slack: PVR %d→%d (−%d), %d trips ajustadas (slack±%dmin)",
-            pvr_before, pvr_after, pvr_before - pvr_after, non_zero, self.slack,
+            pvr_before,
+            pvr_after,
+            pvr_before - pvr_after,
+            non_zero,
+            self.slack,
         )
 
         meta = {

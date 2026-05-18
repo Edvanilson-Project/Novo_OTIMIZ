@@ -11,12 +11,13 @@ Vizinhança: três operadores de perturbação
   3. Split  — divide um bloco em dois em posição aleatória
 Aceita soluções piores com P = exp(-Δcost / T).
 """
+
 from __future__ import annotations
 
 import math
 import random
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional
 
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
@@ -27,9 +28,6 @@ from ..utils import is_connection_feasible, quick_cost_from_trips, preferred_pai
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-
-
 
 
 def _blocks_are_feasible(
@@ -71,9 +69,6 @@ def _blocks_are_feasible(
     return True
 
 
-
-
-
 def _copy_state(state: List[List[int]]) -> List[List[int]]:
     """Cópia profunda eficiente do estado (lista de listas de ints)."""
     return [block[:] for block in state]
@@ -88,22 +83,22 @@ def _reloc(
     """Move 1 viagem aleatória de um bloco para outro."""
     if len(state) < 2:
         return None
-    
+
     original = _copy_state(state)
     src = random.randint(0, len(state) - 1)
     if not state[src]:
         return None
-    
+
     trip_idx = random.randint(0, len(state[src]) - 1)
     trip_id = state[src][trip_idx]
     del state[src][trip_idx]
-    
+
     dst = random.choice([i for i in range(len(state)) if i != src])
     state[dst].append(trip_id)
     state[dst].sort(key=lambda tid: trip_map[tid].start_time)
-    
+
     state = [b for b in state if b]
-    
+
     if not _blocks_are_feasible(
         state,
         trip_map,
@@ -116,7 +111,7 @@ def _reloc(
         kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
     ):
         return original
-    
+
     return state
 
 
@@ -129,19 +124,19 @@ def _swap2(
     """Troca 1 viagem entre dois blocos distintos."""
     if len(state) < 2:
         return None
-    
+
     original = _copy_state(state)
     i, j = random.sample(range(len(state)), 2)
     if not state[i] or not state[j]:
         return None
-    
+
     ii = random.randint(0, len(state[i]) - 1)
     jj = random.randint(0, len(state[j]) - 1)
     state[i][ii], state[j][jj] = state[j][jj], state[i][ii]
-    
+
     for block in state:
         block.sort(key=lambda tid: trip_map[tid].start_time)
-    
+
     if not _blocks_are_feasible(
         state,
         trip_map,
@@ -154,7 +149,7 @@ def _swap2(
         kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
     ):
         return original
-    
+
     return state
 
 
@@ -167,21 +162,21 @@ def _split(
     """Divide um bloco aleatório em dois na posição aleatória."""
     if not state:
         return None
-    
+
     original = _copy_state(state)
     state = _copy_state(state)
-    
+
     idx = random.randint(0, len(state) - 1)
     if len(state[idx]) < 2:
         return None
-    
+
     cut = random.randint(1, len(state[idx]) - 1)
     new_block = state[idx][cut:]
     state[idx] = state[idx][:cut]
-    
+
     if new_block:
         state.append(new_block)
-    
+
     if trip_map is not None and not _blocks_are_feasible(
         state,
         trip_map,
@@ -194,9 +189,8 @@ def _split(
         kwargs.get("strict_hard_constraints", False),
     ):
         return original
-    
-    return state
 
+    return state
 
 
 def _merge(
@@ -208,14 +202,14 @@ def _merge(
     """Combina dois blocos em um, reduzindo o número de veículos."""
     if len(state) < 2:
         return None
-    
+
     original = _copy_state(state)
     i, j = sorted(random.sample(range(len(state)), 2))
     merged_block = [*state[i], *state[j]]
     del state[j]
     state[i] = merged_block
     state[i].sort(key=lambda tid: trip_map[tid].start_time)
-    
+
     if not _blocks_are_feasible(
         state,
         trip_map,
@@ -228,7 +222,7 @@ def _merge(
         kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
     ):
         return original
-    
+
     return state
 
 
@@ -276,7 +270,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
-        
+
         random_seed = self.vsp_params.get("random_seed")
         if random_seed is not None:
             random.seed(int(random_seed))
@@ -315,13 +309,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
 
         def cost_fn(state: List[List[int]]) -> float:
             sequences = [[trip_map[tid] for tid in block if tid in trip_map] for block in state]
-            base = quick_cost_from_trips(
-                sequences,
-                fvc,
-                icpm,
-                max_work,
-                crew_cw
-            )
+            base = quick_cost_from_trips(sequences, fvc, icpm, max_work, crew_cw)
             pairs = preferred_pair_penalty_from_trips(
                 sequences,
                 preferred_pairs,
@@ -332,7 +320,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
             return base + pairs
 
         current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
-        
+
         current_state = [[t.id for t in block.trips] for block in current_sol.blocks]
         current_cost = cost_fn(current_state)
 
@@ -346,7 +334,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
 
         while not self._check_timeout():
             temp = self.initial_temp
-            
+
             if restarts > 0:
                 current_state = _copy_state(best_state)
                 current_cost = best_cost
@@ -374,7 +362,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                 for _ in range(iterations_per_temp):
                     if self._check_timeout():
                         break
-                    
+
                     iteration += 1
                     op = random.choice(_OPERATORS)
                     candidate = op(
@@ -409,7 +397,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
             restarts += 1
 
         best_blocks = self._state_to_blocks(best_state, trip_map)
-        
+
         for block in best_blocks:
             block.trips.sort(key=lambda t: t.start_time)
 

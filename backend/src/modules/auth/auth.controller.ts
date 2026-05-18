@@ -13,11 +13,23 @@ export class AuthController {
   @Public()
   @Post('login')
   @Throttle({ short: { ttl: 60_000, limit: 10 } })
-  @ApiOperation({ summary: 'Autenticar usuário', description: 'Retorna JWT e define cookie HttpOnly.' })
-  @ApiBody({ schema: { example: { email: 'admin@empresa.com', password: 'admin123' } } })
-  @ApiResponse({ status: 200, description: 'Login bem-sucedido — retorna access_token e dados do usuário.' })
+  @ApiOperation({
+    summary: 'Autenticar usuário',
+    description: 'Retorna JWT e define cookie HttpOnly.',
+  })
+  @ApiBody({
+    schema: { example: { email: 'admin@empresa.com', password: 'admin123' } },
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Login bem-sucedido — retorna access_token e dados do usuário.',
+  })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
-  async login(@Body() body: any, @Res({ passthrough: true }) response: express.Response) {
+  async login(
+    @Body() body: any,
+    @Res({ passthrough: true }) response: express.Response,
+  ) {
     const result = await this.authService.login(body.email, body.password);
 
     // Configuração do Cookie Seguro (Regra 1.4)
@@ -37,9 +49,12 @@ export class AuthController {
 
   @Public()
   @Post('logout')
-  @ApiOperation({ summary: 'Encerrar sessão', description: 'Limpa o cookie de autenticação.' })
+  @ApiOperation({
+    summary: 'Encerrar sessão',
+    description: 'Limpa o cookie de autenticação.',
+  })
   @ApiResponse({ status: 200, description: 'Logout realizado.' })
-  async logout(@Res({ passthrough: true }) response: express.Response) {
+  logout(@Res({ passthrough: true }) response: express.Response) {
     response.clearCookie('access_token');
     return { message: 'Logout realizado com sucesso' };
   }

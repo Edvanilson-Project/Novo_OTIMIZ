@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Company } from '../database/entities/company.entity';
@@ -33,9 +37,14 @@ export class CompaniesService {
   async create(dto: Partial<Company>): Promise<Company> {
     const slug = slugify(dto.name ?? '');
     const existing = await this.repo.findOne({ where: { slug } });
-    if (existing) throw new ConflictException('Já existe uma empresa com este nome');
+    if (existing)
+      throw new ConflictException('Já existe uma empresa com este nome');
 
-    const entity = this.repo.create({ ...dto, slug, isActive: dto.isActive ?? true });
+    const entity = this.repo.create({
+      ...dto,
+      slug,
+      isActive: dto.isActive ?? true,
+    });
     return this.repo.save(entity);
   }
 

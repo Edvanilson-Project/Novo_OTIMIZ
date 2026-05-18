@@ -10,6 +10,7 @@ Funções puras para:
 Estado: módulo sem classe, todas as funções são puras (ou mutam apenas dicts
 recebidos como argumento, sem dependência de estado de service).
 """
+
 from __future__ import annotations
 
 import re
@@ -28,11 +29,7 @@ def as_dict(params: Any) -> Dict[str, Any]:
         return dict(params)
     if hasattr(params, "model_dump"):
         return params.model_dump(exclude_none=True)
-    return {
-        key: value
-        for key, value in vars(params).items()
-        if not key.startswith("_") and value is not None
-    }
+    return {key: value for key, value in vars(params).items() if not key.startswith("_") and value is not None}
 
 
 def parse_rule(rule: str) -> Dict[str, Any]:
@@ -241,6 +238,6 @@ def validate_strict_algorithm_support(
                 "algorithm": algorithm_value,
                 "strict_hard_constraints": True,
                 "grouped_trips": sum(1 for trip in trips if getattr(trip, "trip_group_id", None) is not None),
-                "recommendation": "Use an algorithm with group repair/audit, or disable strict_hard_constraints for exploratory runs.",
+                "recommendation": "Use an algorithm with group repair/audit, or disable strict_hard_constraints for exploratory runs.",  # noqa: E501
             },
         )

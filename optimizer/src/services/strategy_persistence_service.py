@@ -6,6 +6,7 @@ Removido o uso de 'filelock' e escrita em disco local.
 Utiliza um Singleton em memória para guardar cenários e relatórios durante o tempo de vida do processo.
 Em produção, esta persistência deve ser movida para o Banco de Dados (PostgreSQL) via NestJS.
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,13 +41,13 @@ class StrategyPersistenceService:
         }
         store["items"].append(item)
         store["last_id"] = scenario_id
-        
+
         logger.info("[Persistence] Cenário salvo em memória: id=%d", scenario_id)
         return item
 
     def list_scenarios(self, limit: int = 20) -> List[Dict[str, Any]]:
         items = self._storage["scenarios"]["items"]
-        return list(reversed(items[-max(1, limit):]))
+        return list(reversed(items[-max(1, limit) :]))
 
     def get_scenario(self, scenario_id: int) -> Optional[Dict[str, Any]]:
         items = self._storage["scenarios"]["items"]
@@ -125,7 +126,7 @@ class StrategyPersistenceService:
 
     def list_reconciliation_reports(self, limit: int = 20) -> List[Dict[str, Any]]:
         items = self._storage["reports"]["items"]
-        return list(reversed(items[-max(1, limit):]))
+        return list(reversed(items[-max(1, limit) :]))
 
     def prune_data(
         self,
@@ -140,14 +141,16 @@ class StrategyPersistenceService:
         reports = self._storage["reports"]["items"]
 
         old_counts = (len(scenarios), len(snapshots), len(reports))
-        
+
         self._storage["scenarios"]["items"] = self._apply_retention(scenarios, max_scenarios, max_age_days)
         self._storage["feeds"]["snapshots"] = self._apply_retention(snapshots, max_feed_snapshots, max_age_days)
         self._storage["reports"]["items"] = self._apply_retention(reports, max_reports, max_age_days)
 
-        new_counts = (len(self._storage["scenarios"]["items"]), 
-                      len(self._storage["feeds"]["snapshots"]), 
-                      len(self._storage["reports"]["items"]))
+        new_counts = (
+            len(self._storage["scenarios"]["items"]),
+            len(self._storage["feeds"]["snapshots"]),
+            len(self._storage["reports"]["items"]),
+        )
 
         return {
             "scenarios_removed": old_counts[0] - new_counts[0],
@@ -170,11 +173,7 @@ class StrategyPersistenceService:
 
         if max_age_days > 0:
             cutoff = datetime.now(timezone.utc).timestamp() - (max_age_days * 86400)
-            kept = [
-                item
-                for item in kept
-                if cls._to_timestamp(item.get("created_at")) >= cutoff
-            ]
+            kept = [item for item in kept if cls._to_timestamp(item.get("created_at")) >= cutoff]
 
         if max_items > 0 and len(kept) > max_items:
             kept = kept[-max_items:]

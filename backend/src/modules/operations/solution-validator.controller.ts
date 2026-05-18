@@ -68,7 +68,10 @@ export class SolutionValidatorController {
     @Param('scheduleId', ParseIntPipe) scheduleId: number,
   ) {
     const companyId = this.tenantContext.getCompanyId();
-    if (!companyId) throw new ForbiddenException('Empresa não identificada no contexto autenticado.');
+    if (!companyId)
+      throw new ForbiddenException(
+        'Empresa não identificada no contexto autenticado.',
+      );
     return this.validatorService.validateScheduleById(scheduleId, companyId);
   }
 }

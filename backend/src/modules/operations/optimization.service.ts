@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
@@ -9,7 +16,10 @@ import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { CompanyParameters } from '../database/entities/company-parameters.entity';
 import { Driver } from '../database/entities/driver.entity';
 import { DutyAssignment } from '../database/entities/duty-assignment.entity';
-import { OptimizationRun, OptimizationRunStatus } from '../database/entities/optimization-run.entity';
+import {
+  OptimizationRun,
+  OptimizationRunStatus,
+} from '../database/entities/optimization-run.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
 import { VehicleType } from '../database/entities/vehicle-type.entity';
@@ -32,18 +42,22 @@ export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
   private scheduleCache = new Map<number, { data: any; timestamp: number }>();
   private readonly CACHE_TTL_MS = SCHEDULE_CACHE_TTL_MS;
-  private readonly OPTIMIZER_URL = process.env.OPTIMIZER_URL || 'http://localhost:8000';
+  private readonly OPTIMIZER_URL =
+    process.env.OPTIMIZER_URL || 'http://localhost:8000';
   private readonly INTERNAL_KEY: string;
   private readonly DETAIL_LIMIT = REPORT_DETAIL_LIMIT;
 
   constructor(
     @InjectRepository(Trip) private tripRepo: Repository<Trip>,
     @InjectRepository(Driver) private driverRepo: Repository<Driver>,
-    @InjectRepository(CompanyParameters) private paramRepo: Repository<CompanyParameters>,
+    @InjectRepository(CompanyParameters)
+    private paramRepo: Repository<CompanyParameters>,
     @InjectRepository(Schedule) private scheduleRepo: Repository<Schedule>,
-    @InjectRepository(VehicleType) private vehicleTypeRepo: Repository<VehicleType>,
+    @InjectRepository(VehicleType)
+    private vehicleTypeRepo: Repository<VehicleType>,
     @InjectRepository(Vehicle) private vehicleRepo: Repository<Vehicle>,
-    @InjectRepository(OptimizationRun) private optimizationRunRepo: Repository<OptimizationRun>,
+    @InjectRepository(OptimizationRun)
+    private optimizationRunRepo: Repository<OptimizationRun>,
     private dataSource: DataSource,
     private gateway: OptimizationGateway,
     private configService: ConfigService,
@@ -51,7 +65,9 @@ export class OptimizationService implements OnModuleInit {
   ) {
     const key = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY');
     if (!key || key === 'internal-key-123456') {
-      throw new Error('INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)');
+      throw new Error(
+        'INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)',
+      );
     }
     this.INTERNAL_KEY = key;
   }
@@ -60,7 +76,10 @@ export class OptimizationService implements OnModuleInit {
     if (!process.env.OPTIMIZER_URL) {
       const fallbackMsg = `OPTIMIZER_URL não definido em env — usando fallback ${this.OPTIMIZER_URL}`;
       if (process.env.NODE_ENV === 'production') {
-        this.logger.error(fallbackMsg + '. Em produção isso é incorreto e otimizações podem falhar silenciosamente.');
+        this.logger.error(
+          fallbackMsg +
+            '. Em produção isso é incorreto e otimizações podem falhar silenciosamente.',
+        );
       } else {
         this.logger.warn(fallbackMsg);
       }
@@ -74,13 +93,16 @@ export class OptimizationService implements OnModuleInit {
           status: 'failed',
           error_type: 'system',
           error_code: 'BACKEND_RESTART_STALE_PROCESSING',
-          error_message: 'Schedule estava em processamento quando o backend iniciou.',
+          error_message:
+            'Schedule estava em processamento quando o backend iniciou.',
           failed_at: new Date().toISOString(),
         } as any,
       },
     );
     if (stale.affected && stale.affected > 0) {
-      this.logger.warn(`Cleared ${stale.affected} stale PROCESSING lock(s) on startup`);
+      this.logger.warn(
+        `Cleared ${stale.affected} stale PROCESSING lock(s) on startup`,
+      );
     }
   }
 
@@ -117,7 +139,7 @@ export class OptimizationService implements OnModuleInit {
           );
         }
         this.logger.warn(
-          `Schedule ${activeSchedule.id} preso em PROCESSING desde ${activeSchedule.createdAt}. Ignorando trava por timeout (1h).`,
+          `Schedule ${activeSchedule.id} preso em PROCESSING desde ${String(activeSchedule.createdAt)}. Ignorando trava por timeout (1h).`,
         );
       }
     }
@@ -130,18 +152,29 @@ export class OptimizationService implements OnModuleInit {
 
     try {
       // 2. Coletar Dados para o Solver
-      const [trips, drivers, params, vehicleTypes, vehicles] = await Promise.all([
-        this.tripRepo.find({ where: { companyId }, order: { startTime: 'ASC', tripId: 'ASC', id: 'ASC' } }),
-        this.driverRepo.find({ where: { companyId } }),
-        this.paramRepo.findOne({ where: { companyId } }),
-        this.vehicleTypeRepo.find({ where: { companyId } }),
-        this.vehicleRepo.find({ where: { companyId }, relations: ['type'] }),
-      ]);
+      const [trips, _drivers, params, vehicleTypes, _vehicles] =
+        await Promise.all([
+          this.tripRepo.find({
+            where: { companyId },
+            order: { startTime: 'ASC', tripId: 'ASC', id: 'ASC' },
+          }),
+          this.driverRepo.find({ where: { companyId } }),
+          this.paramRepo.findOne({ where: { companyId } }),
+          this.vehicleTypeRepo.find({ where: { companyId } }),
+          this.vehicleRepo.find({ where: { companyId }, relations: ['type'] }),
+        ]);
 
-      if (!trips.length) throw new Error('Nenhuma viagem encontrada para otimização.');
+      if (!trips.length)
+        throw new Error('Nenhuma viagem encontrada para otimização.');
 
-      const cctParams = { ...this.buildCctParams(params), ...(options?.cctParamsOverride || {}) };
-      const vspParams = { ...this.buildVspParams(params, cctParams), ...(options?.vspParamsOverride || {}) };
+      const cctParams = {
+        ...this.buildCctParams(params),
+        ...(options?.cctParamsOverride || {}),
+      };
+      const vspParams = {
+        ...this.buildVspParams(params, cctParams),
+        ...(options?.vspParamsOverride || {}),
+      };
       const forceRoundTrip =
         Boolean(params?.force_round_trip) ||
         Boolean(cctParams.enforce_trip_groups_hard) ||
@@ -150,14 +183,15 @@ export class OptimizationService implements OnModuleInit {
         ? false
         : (params?.allow_vehicle_swap ?? true);
       const backendTripGroupStats = this.summarizeTripGroupPayload(trips);
-      const requestedOperationalQualityMode = this.normalizeOperationalQualityMode(operationalQualityMode);
-      const persistedOperationalQualityMode = this.normalizeOperationalQualityMode(
-        params?.operational_quality_mode,
-      );
-      const resolvedOperationalQualityMode = this.resolveRequestedOperationalQualityMode(
-        operationalQualityMode,
-        params?.operational_quality_mode,
-      );
+      const requestedOperationalQualityMode =
+        this.normalizeOperationalQualityMode(operationalQualityMode);
+      const persistedOperationalQualityMode =
+        this.normalizeOperationalQualityMode(params?.operational_quality_mode);
+      const resolvedOperationalQualityMode =
+        this.resolveRequestedOperationalQualityMode(
+          operationalQualityMode,
+          params?.operational_quality_mode,
+        );
       if (!resolvedOperationalQualityMode) {
         throw new BadRequestException('operational_quality_mode invalido');
       }
@@ -172,20 +206,30 @@ export class OptimizationService implements OnModuleInit {
       );
 
       // 3. Chamar API Python (FastAPI/Celery)
-      const invalidLoopTrips = trips.filter(t => Number(t.originId) === Number(t.destinationId));
+      const invalidLoopTrips = trips.filter(
+        (t) => Number(t.originId) === Number(t.destinationId),
+      );
       if (invalidLoopTrips.length > 0) {
         this.logger.warn(
-          `[PRE-FLIGHT] ${invalidLoopTrips.length} trip(s) com origin==destination ignoradas: ${invalidLoopTrips.map(t => t.id).join(', ')}`,
+          `[PRE-FLIGHT] ${invalidLoopTrips.length} trip(s) com origin==destination ignoradas: ${invalidLoopTrips.map((t) => t.id).join(', ')}`,
         );
       }
-      const validTrips = trips.filter(t => Number(t.originId) !== Number(t.destinationId));
-      if (!validTrips.length) throw new Error('Nenhuma viagem válida para otimização após filtro de terminal loop.');
+      const validTrips = trips.filter(
+        (t) => Number(t.originId) !== Number(t.destinationId),
+      );
+      if (!validTrips.length)
+        throw new Error(
+          'Nenhuma viagem válida para otimização após filtro de terminal loop.',
+        );
 
       const payload = {
         trips: validTrips.map((t) => {
           const st = Number(t.startTime);
           // Normaliza virada de meia-noite: se end < start, soma 1440
-          const et = Number(t.endTime) < st ? Number(t.endTime) + 1440 : Number(t.endTime);
+          const et =
+            Number(t.endTime) < st
+              ? Number(t.endTime) + 1440
+              : Number(t.endTime);
           return {
             id: t.id,
             line_id: this.resolveLineId(t.lineId, t.lineCode, 0),
@@ -204,9 +248,12 @@ export class OptimizationService implements OnModuleInit {
             relief_point_id: t.reliefPointId ?? null,
             is_relief_point: t.isReliefPoint ?? false,
             mid_trip_relief_point_id: t.midTripReliefPointId ?? null,
-            mid_trip_relief_offset_minutes: t.midTripReliefOffsetMinutes ?? null,
-            mid_trip_relief_distance_ratio: t.midTripReliefDistanceRatio ?? null,
-            mid_trip_relief_elevation_ratio: t.midTripReliefElevationRatio ?? null,
+            mid_trip_relief_offset_minutes:
+              t.midTripReliefOffsetMinutes ?? null,
+            mid_trip_relief_distance_ratio:
+              t.midTripReliefDistanceRatio ?? null,
+            mid_trip_relief_elevation_ratio:
+              t.midTripReliefElevationRatio ?? null,
             depot_id: t.depotId ?? null,
           };
         }),
@@ -219,8 +266,10 @@ export class OptimizationService implements OnModuleInit {
           cost_duty: params?.cost_duty ?? DEFAULT_COST_DUTY,
           driver_cost_per_minute: params?.driver_cost_per_minute ?? 0.0,
           collector_cost_per_minute: params?.collector_cost_per_minute ?? 0.0,
-          cct_violation_penalty: params?.cct_violation_penalty ?? DEFAULT_CCT_VIOLATION_PENALTY,
-          ilp_timeout_seconds: params?.ilp_timeout_seconds ?? DEFAULT_ILP_TIMEOUT_SECONDS,
+          cct_violation_penalty:
+            params?.cct_violation_penalty ?? DEFAULT_CCT_VIOLATION_PENALTY,
+          ilp_timeout_seconds:
+            params?.ilp_timeout_seconds ?? DEFAULT_ILP_TIMEOUT_SECONDS,
           time_budget_s: params?.time_budget_s ?? null,
           random_seed: params?.random_seed ?? null,
           force_round_trip: forceRoundTrip,
@@ -235,9 +284,11 @@ export class OptimizationService implements OnModuleInit {
           min_break_minutes: cctParams.min_break_minutes,
           min_layover_minutes: cctParams.min_layover_minutes,
           meal_break_minutes: cctParams.meal_break_minutes,
-          mandatory_break_after_minutes: cctParams.mandatory_break_after_minutes,
+          mandatory_break_after_minutes:
+            cctParams.mandatory_break_after_minutes,
           connection_tolerance_minutes: cctParams.connection_tolerance_minutes,
-          preferred_pair_window_minutes: vspParams.preferred_pair_window_minutes,
+          preferred_pair_window_minutes:
+            vspParams.preferred_pair_window_minutes,
           preserve_preferred_pairs: vspParams.preserve_preferred_pairs,
           pair_break_penalty: vspParams.pair_break_penalty,
           paired_trip_bonus: vspParams.paired_trip_bonus,
@@ -246,13 +297,18 @@ export class OptimizationService implements OnModuleInit {
           pricing_enabled: vspParams.pricing_enabled,
           use_set_covering: vspParams.use_set_covering,
           vehicle_idle_gap_behavior: vspParams.vehicle_idle_gap_behavior,
-          vehicle_idle_gap_threshold_minutes: vspParams.vehicle_idle_gap_threshold_minutes,
+          vehicle_idle_gap_threshold_minutes:
+            vspParams.vehicle_idle_gap_threshold_minutes,
           operational_quality_mode: resolvedOperationalQualityMode,
           ...(options?.optimizationParamsOverride || {}),
         },
         vsp_params: vspParams,
-        time_budget_s: options?.optimizationParamsOverride?.time_budget_s ?? params?.time_budget_s ?? null,
-        algorithm: algorithm || params?.algorithm_preference || 'hybrid_pipeline',
+        time_budget_s:
+          options?.optimizationParamsOverride?.time_budget_s ??
+          params?.time_budget_s ??
+          null,
+        algorithm:
+          algorithm || params?.algorithm_preference || 'hybrid_pipeline',
         depot_ids: options?.depotIds?.length ? options.depotIds : null,
         company_id: companyId,
         run_id: schedule.id,
@@ -318,15 +374,22 @@ export class OptimizationService implements OnModuleInit {
             payload.optimization_params?.operational_quality_mode ?? null,
         })}`,
       );
-      const { data: submitData } = await axios.post(`${this.OPTIMIZER_URL}/optimize/`, payload, {
-        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-      });
+      const { data: submitData } = await axios.post(
+        `${this.OPTIMIZER_URL}/optimize/`,
+        payload,
+        {
+          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+        },
+      );
       const taskId = submitData.task_id;
 
-      this.gateway.notifyOptimizationQueued(companyId, { scheduleId: schedule.id, taskId });
+      this.gateway.notifyOptimizationQueued(companyId, {
+        scheduleId: schedule.id,
+        taskId,
+      });
 
-      // 4. Iniciar Polling no Backend (Processo em Background)
-      this.pollOptimizerTask(taskId, schedule.id, companyId, {
+      // 4. Iniciar Polling no Backend (Processo em Background — fire-and-forget)
+      void this.pollOptimizerTask(taskId, schedule.id, companyId, {
         algorithm: payload.algorithm,
         cctParams,
         vspParams,
@@ -346,7 +409,9 @@ export class OptimizationService implements OnModuleInit {
       };
     } catch (error) {
       this.logger.error(`Falha ao iniciar otimização: ${error.message}`);
-      await this.scheduleRepo.update(schedule.id, { status: ScheduleStatus.FAILED });
+      await this.scheduleRepo.update(schedule.id, {
+        status: ScheduleStatus.FAILED,
+      });
       throw new InternalServerErrorException(error.message);
     }
   }
@@ -397,9 +462,13 @@ export class OptimizationService implements OnModuleInit {
     const runId = context?.optimizationRunId;
     if (!runId) return;
     try {
-      const run = await this.optimizationRunRepo.findOne({ where: { id: Number(runId) } });
+      const run = await this.optimizationRunRepo.findOne({
+        where: { id: Number(runId) },
+      });
       if (!run) return;
-      const submittedAt = context?.submittedAt ? new Date(context.submittedAt).getTime() : null;
+      const submittedAt = context?.submittedAt
+        ? new Date(context.submittedAt).getTime()
+        : null;
       const durationMs = submittedAt ? Date.now() - submittedAt : null;
       await this.optimizationRunRepo.update(run.id, {
         status: update.status,
@@ -435,7 +504,8 @@ export class OptimizationService implements OnModuleInit {
       );
     }
     const params = original.params || {};
-    const algorithm = original.algorithm || params.algorithm || 'hybrid_pipeline';
+    const algorithm =
+      original.algorithm || params.algorithm || 'hybrid_pipeline';
     const optimizationParamsOverride = params.optimization_params || {};
     // Garantir seed determinística — se a original tinha randomSeed null, fixamos em 42
     // (não há reproduzibilidade real sem seed). Caso contrário, replicamos a original.
@@ -465,7 +535,12 @@ export class OptimizationService implements OnModuleInit {
   async getReplayComparison(
     companyId: number,
     inputFingerprint: string,
-  ): Promise<{ original: any; replay: any | null; diff: any | null; status: string }> {
+  ): Promise<{
+    original: any;
+    replay: any;
+    diff: any;
+    status: string;
+  }> {
     const original = await this.optimizationRunRepo.findOne({
       where: { companyId, inputFingerprint },
       order: { createdAt: 'DESC' },
@@ -483,7 +558,12 @@ export class OptimizationService implements OnModuleInit {
 
     const originalMetrics = this.extractRunMetrics(original.metrics);
     if (!replayRun) {
-      return { original: originalMetrics, replay: null, diff: null, status: 'not_started' };
+      return {
+        original: originalMetrics,
+        replay: null,
+        diff: null,
+        status: 'not_started',
+      };
     }
     if (replayRun.status !== OptimizationRunStatus.COMPLETED) {
       return {
@@ -504,7 +584,12 @@ export class OptimizationService implements OnModuleInit {
         diff[key] = r === o ? 'same' : { original: o, replay: r };
       }
     }
-    return { original: originalMetrics, replay: replayMetrics, diff, status: 'ready' };
+    return {
+      original: originalMetrics,
+      replay: replayMetrics,
+      diff,
+      status: 'ready',
+    };
   }
 
   /**
@@ -547,8 +632,16 @@ export class OptimizationService implements OnModuleInit {
       try {
         const { data } = await axios.post(
           `${this.OPTIMIZER_URL}/optimize/`,
-          { trips, vehicle_types: vehicleTypes, algorithm, time_budget_s: timeBudgetS },
-          { headers: { 'X-Internal-Key': this.INTERNAL_KEY }, timeout: (timeBudgetS + 30) * 1000 },
+          {
+            trips,
+            vehicle_types: vehicleTypes,
+            algorithm,
+            time_budget_s: timeBudgetS,
+          },
+          {
+            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+            timeout: (timeBudgetS + 30) * 1000,
+          },
         );
         result = data;
       } catch (e: any) {
@@ -579,8 +672,12 @@ export class OptimizationService implements OnModuleInit {
       totalTrips: Number(result.total_trips ?? 0),
       unassignedTrips: Number(result.unassigned_trips ?? 0),
       cctViolations: Number(result.cct_violations ?? 0),
-      hardIssueCount: Number(result.solver_explanation?.issues?.hard_count ?? 0),
-      softIssueCount: Number(result.solver_explanation?.issues?.soft_count ?? 0),
+      hardIssueCount: Number(
+        result.solver_explanation?.issues?.hard_count ?? 0,
+      ),
+      softIssueCount: Number(
+        result.solver_explanation?.issues?.soft_count ?? 0,
+      ),
       algorithm: result.vsp_algorithm ?? null,
       fairnessGini: fairness?.work_time?.gini ?? null,
       fairnessCv: fairness?.work_time?.cv ?? null,
@@ -596,24 +693,32 @@ export class OptimizationService implements OnModuleInit {
       const params = await this.paramRepo.findOne({ where: { companyId } });
       const cctParams = this.buildCctParams(params);
 
-      const { data } = await axios.post(`${this.OPTIMIZER_URL}/optimize/chat`, {
-        metrics: {
-          ...metrics,
-          current_parameters: cctParams, // Agora a IA sabe suas regras atuais!
+      const { data } = await axios.post(
+        `${this.OPTIMIZER_URL}/optimize/chat`,
+        {
+          metrics: {
+            ...metrics,
+            current_parameters: cctParams, // Agora a IA sabe suas regras atuais!
+          },
+          question,
         },
-        question,
-      }, {
-        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-        timeout: 70000,
-      });
+        {
+          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          timeout: 70000,
+        },
+      );
       return data;
     } catch (error) {
       this.logger.error(`Erro no chat de IA: ${error.message}`);
-      return { answer: 'O serviço de IA está temporariamente indisponível. Tente novamente em instantes.', status: 'error' };
+      return {
+        answer:
+          'O serviço de IA está temporariamente indisponível. Tente novamente em instantes.',
+        status: 'error',
+      };
     }
   }
 
-  private async pollOptimizerTask(
+  private pollOptimizerTask(
     taskId: string,
     scheduleId: number,
     companyId: number,
@@ -623,16 +728,20 @@ export class OptimizationService implements OnModuleInit {
     const pollIntervalMs = 5000;
     const requestedBudgetSeconds = Number(
       context?.optimizationParams?.time_budget_s ??
-      context?.vspParams?.time_budget_s ??
-      120,
+        context?.vspParams?.time_budget_s ??
+        120,
     );
     const celeryHardLimitSeconds = 1500;
     const backendPollingGraceSeconds = 120;
     const computedMaxAttempts = Math.ceil(
-      ((Math.max(requestedBudgetSeconds, celeryHardLimitSeconds) + backendPollingGraceSeconds) * 1000) /
-      pollIntervalMs,
+      ((Math.max(requestedBudgetSeconds, celeryHardLimitSeconds) +
+        backendPollingGraceSeconds) *
+        1000) /
+        pollIntervalMs,
     );
-    const maxAttempts = Number.isFinite(Number(context?.pollingMaxAttemptsOverride))
+    const maxAttempts = Number.isFinite(
+      Number(context?.pollingMaxAttemptsOverride),
+    )
       ? Math.max(1, Number(context.pollingMaxAttemptsOverride))
       : computedMaxAttempts;
     let attempts = 0;
@@ -670,7 +779,10 @@ export class OptimizationService implements OnModuleInit {
           );
         });
         this.gateway.notifyOptimizationStale(companyId, { scheduleId, taskId });
-        this.gateway.notifyOptimizationFailed(companyId, 'Timeout controlado aguardando conclusão do Celery.');
+        this.gateway.notifyOptimizationFailed(
+          companyId,
+          'Timeout controlado aguardando conclusão do Celery.',
+        );
         return;
       }
 
@@ -689,26 +801,40 @@ export class OptimizationService implements OnModuleInit {
       if (done) return;
       attempts++;
       try {
-        const { data } = await axios.get(`${this.OPTIMIZER_URL}/optimize/status/${taskId}`, {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-          timeout: 10000,
-        });
+        const { data } = await axios.get(
+          `${this.OPTIMIZER_URL}/optimize/status/${taskId}`,
+          {
+            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+            timeout: 10000,
+          },
+        );
 
         consecutiveErrors = 0; // Reset error counter on success
 
         if (data.status === 'completed') {
           done = true;
           clearNextTimer();
-          const persistedStatus = await this.persistResults(scheduleId, companyId, data.result, context);
+          const persistedStatus = await this.persistResults(
+            scheduleId,
+            companyId,
+            data.result,
+            context,
+          );
           // Invalidar cache para que o usuário veja o novo resultado imediatamente
           this.scheduleCache.delete(companyId);
           // Atualizar OptimizationRun (FASE 3 scenario tracking) — fire-and-forget
           // para não atrasar a notificação Socket.io e não introduzir microtasks extras
           // que quebram timing de testes existentes.
           void this.finalizeOptimizationRun(context, {
-            status: persistedStatus === 'failed' ? OptimizationRunStatus.FAILED : OptimizationRunStatus.COMPLETED,
+            status:
+              persistedStatus === 'failed'
+                ? OptimizationRunStatus.FAILED
+                : OptimizationRunStatus.COMPLETED,
             metrics: this.extractRunMetrics(data.result),
-            errorMessage: persistedStatus === 'failed' ? this.extractInvalidResultMessage(data.result) : null,
+            errorMessage:
+              persistedStatus === 'failed'
+                ? this.extractInvalidResultMessage(data.result)
+                : null,
           });
           // Enviamos apenas um sinal de conclusão leve via Socket.io para evitar OOM no envio.
           // O Frontend buscará os dados completos via API (fetchData).
@@ -716,15 +842,22 @@ export class OptimizationService implements OnModuleInit {
             const message = this.extractInvalidResultMessage(data.result);
             this.gateway.notifyOptimizationFailed(companyId, message);
           } else {
-            this.gateway.notifyOptimizationFinished(companyId, scheduleId, { status: 'completed' });
+            this.gateway.notifyOptimizationFinished(companyId, scheduleId, {
+              status: 'completed',
+            });
           }
         } else if (data.status === 'failed') {
           done = true;
           clearNextTimer();
-          const errMsg = data.message || data.error?.message || data.error?.error_message || 'Erro no motor de otimização.';
+          const errMsg =
+            data.message ||
+            data.error?.message ||
+            data.error?.error_message ||
+            'Erro no motor de otimização.';
           await this.persistFailure(scheduleId, companyId, {
             error_type: data.error_type ?? data.error?.error_type ?? 'business',
-            error_code: data.error_code ?? data.error?.error_code ?? 'OPTIMIZER_FAILED',
+            error_code:
+              data.error_code ?? data.error?.error_code ?? 'OPTIMIZER_FAILED',
             message: errMsg,
             details: data.details ?? data.error?.details ?? data.error ?? {},
             task_id: taskId,
@@ -747,16 +880,27 @@ export class OptimizationService implements OnModuleInit {
       } catch (error) {
         if (done) return;
         const businessError = error?.response?.data?.detail;
-        const businessType = businessError?.error_type ?? businessError?.error?.error_type;
+        const businessType =
+          businessError?.error_type ?? businessError?.error?.error_type;
         if (businessType === 'business') {
           done = true;
           clearNextTimer();
-          const errMsg = businessError.message || businessError.error?.message || 'Erro de negócio no solver.';
+          const errMsg =
+            businessError.message ||
+            businessError.error?.message ||
+            'Erro de negócio no solver.';
           await this.persistFailure(scheduleId, companyId, {
             error_type: 'business',
-            error_code: businessError.error_code ?? businessError.error?.error_code ?? businessError.code ?? 'OPTIMIZER_BUSINESS_ERROR',
+            error_code:
+              businessError.error_code ??
+              businessError.error?.error_code ??
+              businessError.code ??
+              'OPTIMIZER_BUSINESS_ERROR',
             message: errMsg,
-            details: businessError.details ?? businessError.error?.details ?? businessError,
+            details:
+              businessError.details ??
+              businessError.error?.details ??
+              businessError,
             task_id: taskId,
             context,
           });
@@ -764,7 +908,9 @@ export class OptimizationService implements OnModuleInit {
           return;
         }
         consecutiveErrors++;
-        this.logger.warn(`Erro no polling do task ${taskId} (${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`);
+        this.logger.warn(
+          `Erro no polling do task ${taskId} (${consecutiveErrors}/${maxConsecutiveErrors}): ${error.message}`,
+        );
 
         if (consecutiveErrors >= maxConsecutiveErrors) {
           done = true;
@@ -778,7 +924,10 @@ export class OptimizationService implements OnModuleInit {
             task_id: taskId,
             context,
           });
-          this.gateway.notifyOptimizationFailed(companyId, 'Erro de comunicação com o solver.');
+          this.gateway.notifyOptimizationFailed(
+            companyId,
+            'Erro de comunicação com o solver.',
+          );
           return;
         }
 
@@ -812,14 +961,19 @@ export class OptimizationService implements OnModuleInit {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const schedule = await this.scheduleRepo.findOne({ where: { id: scheduleId, companyId } });
+        const schedule = await this.scheduleRepo.findOne({
+          where: { id: scheduleId, companyId },
+        });
         let elapsedMs: number | null = null;
         try {
           const rows = await this.dataSource.query(
             'SELECT EXTRACT(EPOCH FROM (now() - "createdAt")) * 1000 AS elapsed_ms FROM schedules WHERE id = $1 AND "companyId" = $2',
             [scheduleId, companyId],
           );
-          elapsedMs = rows?.[0]?.elapsed_ms !== undefined ? Number(rows[0].elapsed_ms) : null;
+          elapsedMs =
+            rows?.[0]?.elapsed_ms !== undefined
+              ? Number(rows[0].elapsed_ms)
+              : null;
         } catch {
           elapsedMs = null;
         }
@@ -865,17 +1019,20 @@ export class OptimizationService implements OnModuleInit {
             status: ScheduleStatus.FAILED,
             totalCost: 0,
             cctViolations: hardIssues.length,
-            metadata: metadata as any,
+            metadata: metadata,
           },
         );
         this.scheduleCache.delete(companyId);
         // Sincroniza OptimizationRun (FASE 3 scenario tracking) com a falha — fire-and-forget
         void this.finalizeOptimizationRun(context, {
           status: OptimizationRunStatus.FAILED,
-          errorMessage: failure.message ?? failure.error_code ?? 'Falha na otimização',
+          errorMessage:
+            failure.message ?? failure.error_code ?? 'Falha na otimização',
           metrics: null,
         });
-        this.logger.log(`✓ Falha persistida com sucesso para Schedule ${scheduleId} (tentativa ${attempt}/${maxRetries})`);
+        this.logger.log(
+          `✓ Falha persistida com sucesso para Schedule ${scheduleId} (tentativa ${attempt}/${maxRetries})`,
+        );
         return; // Sucesso
       } catch (error) {
         lastError = error as Error;
@@ -892,7 +1049,7 @@ export class OptimizationService implements OnModuleInit {
     // Se chegou aqui, esgotou todas as tentativas
     this.logger.error(
       `CRÍTICO: Falha permanente ao persistir erro do schedule ${scheduleId} após ${maxRetries} tentativas. ` +
-      `Último erro: ${lastError?.message}. Schedule pode estar em estado INCONSISTENTE.`,
+        `Último erro: ${lastError?.message}. Schedule pode estar em estado INCONSISTENTE.`,
     );
   }
 
@@ -902,12 +1059,19 @@ export class OptimizationService implements OnModuleInit {
     result: any,
     context: Record<string, any> = {},
   ): Promise<'completed' | 'failed'> {
-    this.logger.log(`Persistindo resultados para Schedule ${scheduleId}. Blocks: ${(result.blocks || []).length}, Duties: ${(result.duties || []).length}`);
+    this.logger.log(
+      `Persistindo resultados para Schedule ${scheduleId}. Blocks: ${(result.blocks || []).length}, Duties: ${(result.duties || []).length}`,
+    );
 
     try {
       return await this.dataSource.transaction(async (manager) => {
-        const solverExplanation = this.summarizeSolverExplanation(result.solver_explanation ?? null);
-        const operationalQuality = this.extractOperationalQualityMetadata(result, context);
+        const solverExplanation = this.summarizeSolverExplanation(
+          result.solver_explanation ?? null,
+        );
+        const operationalQuality = this.extractOperationalQualityMetadata(
+          result,
+          context,
+        );
         const sourceMeta = this.pickFirstObject(
           [
             result?.meta,
@@ -923,27 +1087,42 @@ export class OptimizationService implements OnModuleInit {
           `[OP-QUALITY] persistResults source ${JSON.stringify({
             schedule_id: scheduleId,
             has_chosen_scenario: operationalQuality.chosen_scenario !== null,
-            has_operational_quality_decision: operationalQuality.operational_quality_decision !== null,
+            has_operational_quality_decision:
+              operationalQuality.operational_quality_decision !== null,
             result_keys: this.listObjectKeys(result),
             meta_keys: this.listObjectKeys(sourceMeta),
           })}`,
         );
-        const hardIssues = Array.isArray(solverExplanation?.issues?.hard) ? solverExplanation.issues.hard : [];
-        const softIssues = Array.isArray(solverExplanation?.issues?.soft) ? solverExplanation.issues.soft : [];
-        const hardIssueCount = Number(solverExplanation?.issues?.hard_count ?? hardIssues.length ?? 0);
-        const softIssueCount = Number(solverExplanation?.issues?.soft_count ?? softIssues.length ?? 0);
-        const reportedViolations = Math.max(Number(result.cct_violations ?? 0), hardIssues.length);
-        const hardConstraintReport = result.meta?.hard_constraint_report ?? null;
+        const hardIssues = Array.isArray(solverExplanation?.issues?.hard)
+          ? solverExplanation.issues.hard
+          : [];
+        const softIssues = Array.isArray(solverExplanation?.issues?.soft)
+          ? solverExplanation.issues.soft
+          : [];
+        const hardIssueCount = Number(
+          solverExplanation?.issues?.hard_count ?? hardIssues.length ?? 0,
+        );
+        const softIssueCount = Number(
+          solverExplanation?.issues?.soft_count ?? softIssues.length ?? 0,
+        );
+        const reportedViolations = Math.max(
+          Number(result.cct_violations ?? 0),
+          hardIssues.length,
+        );
+        const hardConstraintReport =
+          result.meta?.hard_constraint_report ?? null;
         const outputReport = hardConstraintReport?.output ?? null;
         // Defesa em profundidade: solver pode retornar solver_explanation.status='feasible'
         // (ou ausente) mas ainda ter hard_issue_count > 0. Visto no benchmark 2026-05-11
         // em hybrid_pipeline easy/N=1000 que retornou cost menor com 392 violações hard.
         // Tratar como FAILED — solução não é válida para operação real.
         const invalidCompleted =
-          solverExplanation?.status === 'hard_violation'
-          || outputReport?.ok === false
-          || hardIssueCount > 0;
-        const finalStatus = invalidCompleted ? ScheduleStatus.FAILED : ScheduleStatus.COMPLETED;
+          solverExplanation?.status === 'hard_violation' ||
+          outputReport?.ok === false ||
+          hardIssueCount > 0;
+        const finalStatus = invalidCompleted
+          ? ScheduleStatus.FAILED
+          : ScheduleStatus.COMPLETED;
 
         const BATCH_SIZE = 500;
 
@@ -956,7 +1135,9 @@ export class OptimizationService implements OnModuleInit {
               companyId,
               scheduleId,
               blockId: b.block_id ?? b.id ?? 0,
-              tripIds: (b.trips || []).map((t: any) => (typeof t === 'number' ? t : t.id)),
+              tripIds: (b.trips || []).map((t: any) =>
+                typeof t === 'number' ? t : t.id,
+              ),
               cost: b.total_cost ?? b.activation_cost ?? 0,
               // CORREÇÃO: Apenas os campos essenciais, sem usar "...b"
               metadata: {
@@ -966,7 +1147,7 @@ export class OptimizationService implements OnModuleInit {
                 deadhead_minutes: b.deadhead_minutes,
                 idle_minutes: b.idle_minutes,
                 start_depot_id: b.start_depot_id,
-                end_depot_id: b.end_depot_id
+                end_depot_id: b.end_depot_id,
               },
             }),
           );
@@ -980,12 +1161,18 @@ export class OptimizationService implements OnModuleInit {
           const duties = chunk.map((d: any) => {
             const dutyTripIds = Array.isArray(d.trip_ids)
               ? d.trip_ids
-              : (d.trips || []).map((t: any) => (typeof t === 'number' ? t : (t.trip_id ?? t.id)));
+              : (d.trips || []).map((t: any) =>
+                  typeof t === 'number' ? t : (t.trip_id ?? t.id),
+                );
             return manager.create(DutyAssignment, {
               companyId,
               scheduleId,
               dutyId: d.duty_id ?? d.id ?? 0,
-              tripIds: dutyTripIds.filter((id: any) => Number.isFinite(Number(id)) && Number(id) > 0).map((id: any) => Number(id)),
+              tripIds: dutyTripIds
+                .filter(
+                  (id: any) => Number.isFinite(Number(id)) && Number(id) > 0,
+                )
+                .map((id: any) => Number(id)),
               cost: d.total_cost ?? 0,
               // CORREÇÃO: Apenas os campos essenciais, sem usar "...d"
               metadata: {
@@ -1004,9 +1191,11 @@ export class OptimizationService implements OnModuleInit {
                 cct_penalties: d.cct_penalties_cost ?? d.cct_penalties,
                 shift_violations: d.shift_violations,
                 rest_violations: d.rest_violations,
-                duty_time_segments: d.meta?.duty_time_segments ?? d.segments ?? null,
-                operational_time_report: d.meta?.operational_time_report ?? null,
-                quality_metrics: d.meta?.quality_metrics ?? null
+                duty_time_segments:
+                  d.meta?.duty_time_segments ?? d.segments ?? null,
+                operational_time_report:
+                  d.meta?.operational_time_report ?? null,
+                quality_metrics: d.meta?.quality_metrics ?? null,
               },
             });
           });
@@ -1019,16 +1208,28 @@ export class OptimizationService implements OnModuleInit {
           hard_issue_count: hardIssueCount,
           soft_issue_count: softIssueCount,
           unassigned_trips: result.unassigned_trips ?? 0,
-          cost_breakdown: this.summarizeCostBreakdown(result.cost_breakdown ?? {}),
-          phase_summary: result.phase_summary ?? result.meta?.phase_summary ?? null,
-          trip_group_audit: this.summarizeTripGroupAudit(result.trip_group_audit ?? result.meta?.trip_group_audit ?? null),
-          reproducibility: result.reproducibility ?? result.meta?.reproducibility ?? null,
+          cost_breakdown: this.summarizeCostBreakdown(
+            result.cost_breakdown ?? {},
+          ),
+          phase_summary:
+            result.phase_summary ?? result.meta?.phase_summary ?? null,
+          trip_group_audit: this.summarizeTripGroupAudit(
+            result.trip_group_audit ?? result.meta?.trip_group_audit ?? null,
+          ),
+          reproducibility:
+            result.reproducibility ?? result.meta?.reproducibility ?? null,
           performance: result.performance ?? result.meta?.performance ?? null,
           hard_constraint_report: result.meta?.hard_constraint_report ?? null,
-          operational_time_reports: result.operational_time_reports ?? result.meta?.operational_time_reports ?? null,
+          operational_time_reports:
+            result.operational_time_reports ??
+            result.meta?.operational_time_reports ??
+            null,
           operational_kpis: result.meta?.operational_kpis ?? null,
           resolved_params: result.meta?.input ?? null,
-          run_snapshot: result.meta?.run_snapshot ?? result.meta?.input?.run_snapshot ?? null,
+          run_snapshot:
+            result.meta?.run_snapshot ??
+            result.meta?.input?.run_snapshot ??
+            null,
           num_vehicles: result.vehicles ?? 0,
           num_duties: result.crew ?? (result.meta?.roster_count || 0),
           roster_count: result.meta?.roster_count ?? 0,
@@ -1039,14 +1240,16 @@ export class OptimizationService implements OnModuleInit {
           rejected_scenarios: operationalQuality.rejected_scenarios,
           justification: operationalQuality.justification,
           trade_offs: operationalQuality.trade_offs,
-          operational_quality_decision: operationalQuality.operational_quality_decision,
+          operational_quality_decision:
+            operationalQuality.operational_quality_decision,
         };
 
         if (invalidCompleted) {
           scheduleMetadata.status = 'failed';
           scheduleMetadata.error_type = 'business';
           scheduleMetadata.error_code = 'HARD_CONSTRAINT_OUTPUT';
-          scheduleMetadata.error_message = this.extractInvalidResultMessage(result);
+          scheduleMetadata.error_message =
+            this.extractInvalidResultMessage(result);
         }
 
         await manager.update(Schedule, scheduleId, {
@@ -1058,15 +1261,25 @@ export class OptimizationService implements OnModuleInit {
         return finalStatus === ScheduleStatus.FAILED ? 'failed' : 'completed';
       });
     } catch (err: any) {
-      this.logger.error(`persistResults FALHOU para Schedule ${scheduleId}: ${err.message}`, err.stack);
+      this.logger.error(
+        `persistResults FALHOU para Schedule ${scheduleId}: ${err.message}`,
+        err.stack,
+      );
       throw err;
     }
   }
 
-  async reassignTrip(companyId: number, scheduleId: number, tripId: number, targetBlockId: number) {
+  async reassignTrip(
+    companyId: number,
+    scheduleId: number,
+    tripId: number,
+    targetBlockId: number,
+  ) {
     return this.dataSource.transaction(async (manager) => {
       // 1. Buscar a viagem e os blocos envolvidos
-      const trip = await manager.findOne(Trip, { where: { id: tripId, companyId } });
+      const trip = await manager.findOne(Trip, {
+        where: { id: tripId, companyId },
+      });
       const sourceBlock = await manager
         .createQueryBuilder(BlockAssignment, 'b')
         .where('b.scheduleId = :scheduleId', { scheduleId })
@@ -1078,7 +1291,9 @@ export class OptimizationService implements OnModuleInit {
       });
 
       if (!trip || !targetBlock) {
-        throw new InternalServerErrorException('Viagem ou Bloco de destino não encontrado.');
+        throw new InternalServerErrorException(
+          'Viagem ou Bloco de destino não encontrado.',
+        );
       }
 
       // 2. Rule Checker: Sobreposição e Viabilidade
@@ -1090,16 +1305,22 @@ export class OptimizationService implements OnModuleInit {
       // Validar sobreposição temporal no bloco de destino
       for (const t of targetTrips) {
         if (trip.startTime < t.endTime && trip.endTime > t.startTime) {
-          violations.push(`Sobreposição temporal com Viagem ${t.tripId || t.id}.`);
+          violations.push(
+            `Sobreposição temporal com Viagem ${t.tripId || t.id}.`,
+          );
         }
       }
 
       // 4. Sincronização com Motor Python (What-If) para recálculo de custo real
-      const companyParams = await manager.findOne(CompanyParameters, { where: { companyId } });
-      const allBlocks = await manager.find(BlockAssignment, { where: { scheduleId, companyId } });
+      const companyParams = await manager.findOne(CompanyParameters, {
+        where: { companyId },
+      });
+      const allBlocks = await manager.find(BlockAssignment, {
+        where: { scheduleId, companyId },
+      });
 
       const whatIfPayload = {
-        blocks: allBlocks.map(b => ({
+        blocks: allBlocks.map((b) => ({
           id: b.blockId,
           vehicle_type_id: 1, // Padrao
           trips: b.metadata?.trips || [],
@@ -1114,23 +1335,36 @@ export class OptimizationService implements OnModuleInit {
           cost_km: companyParams?.cost_km ?? DEFAULT_COST_KM,
           cost_duty: companyParams?.cost_duty ?? DEFAULT_COST_DUTY,
           driver_cost_per_minute: companyParams?.driver_cost_per_minute ?? 0.0,
-          collector_cost_per_minute: companyParams?.collector_cost_per_minute ?? 0.0,
+          collector_cost_per_minute:
+            companyParams?.collector_cost_per_minute ?? 0.0,
         },
       };
 
       try {
-        const { data: whatIfResult } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-delta`, whatIfPayload, {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-        });
+        const { data: whatIfResult } = await axios.post(
+          `${this.OPTIMIZER_URL}/api/v1/evaluate-delta`,
+          whatIfPayload,
+          {
+            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          },
+        );
 
         // 5. Atualizar custos persistidos no banco
         if (whatIfResult.status === 'ok') {
           // Atualizar custo individual de cada bloco alterado
           for (const bResp of whatIfResult.blocks) {
-            await manager.update(BlockAssignment, { scheduleId, blockId: bResp.block_id, companyId }, {
-              cost: bResp.total_cost,
-              metadata: { ... (allBlocks.find(b => b.blockId === bResp.block_id)?.metadata || {}), ...bResp }
-            });
+            await manager.update(
+              BlockAssignment,
+              { scheduleId, blockId: bResp.block_id, companyId },
+              {
+                cost: bResp.total_cost,
+                metadata: {
+                  ...(allBlocks.find((b) => b.blockId === bResp.block_id)
+                    ?.metadata || {}),
+                  ...bResp,
+                },
+              },
+            );
           }
 
           // Atualizar custo total do Schedule (KPI Global)
@@ -1147,7 +1381,7 @@ export class OptimizationService implements OnModuleInit {
           scheduleId,
           costBreakdown: whatIfResult.cost_breakdown,
         };
-      } catch (error) {
+      } catch (_error) {
         // CORREÇÃO: Limpar o cache para forçar a re-hidratação no próximo request
         this.scheduleCache.delete(companyId);
 
@@ -1175,16 +1409,26 @@ export class OptimizationService implements OnModuleInit {
     }
 
     if (source_block_id === null) {
-      return { isValid: false, violations: [`Viagem ${move.trip_id} não encontrada nos blocos`], blocks: [], totalCost: null, deltaCost: null };
+      return {
+        isValid: false,
+        violations: [`Viagem ${move.trip_id} não encontrada nos blocos`],
+        blocks: [],
+        totalCost: null,
+        deltaCost: null,
+      };
     }
 
     const pythonBlocks = blocks.map((b: any) => ({
-      id: b.block_id ?? b.id,  // Python whatif.py lê 'id', não 'block_id'
+      id: b.block_id ?? b.id, // Python whatif.py lê 'id', não 'block_id'
       trips: (b.trips || []).map((t: any) => ({
         id: t.id ?? t.tripId,
         start_time: t.start_time ?? t.startTime,
         end_time: t.end_time ?? t.endTime,
-        line_id: this.resolveLineId(t.line_id ?? t.lineId, t.line_code ?? t.lineCode, 0),
+        line_id: this.resolveLineId(
+          t.line_id ?? t.lineId,
+          t.line_code ?? t.lineCode,
+          0,
+        ),
         origin_id: t.origin_id ?? t.originId ?? 0,
         destination_id: t.destination_id ?? t.destinationId ?? 0,
         duration: t.duration ?? 0,
@@ -1204,10 +1448,14 @@ export class OptimizationService implements OnModuleInit {
     };
 
     try {
-      const { data } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-delta`, pythonPayload, {
-        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-        timeout: 15000,
-      });
+      const { data } = await axios.post(
+        `${this.OPTIMIZER_URL}/api/v1/evaluate-delta`,
+        pythonPayload,
+        {
+          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          timeout: 15000,
+        },
+      );
       return {
         isValid: true,
         violations: [],
@@ -1216,8 +1464,16 @@ export class OptimizationService implements OnModuleInit {
         blocks: data.blocks,
       };
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Movimento viola restrições operacionais';
-      return { isValid: false, violations: [detail], blocks: [], totalCost: null, deltaCost: null };
+      const detail =
+        error.response?.data?.detail ||
+        'Movimento viola restrições operacionais';
+      return {
+        isValid: false,
+        violations: [detail],
+        blocks: [],
+        totalCost: null,
+        deltaCost: null,
+      };
     }
   }
 
@@ -1230,7 +1486,11 @@ export class OptimizationService implements OnModuleInit {
         id: t.id ?? t.tripId,
         start_time: t.start_time ?? t.startTime,
         end_time: t.end_time ?? t.endTime,
-        line_id: this.resolveLineId(t.line_id ?? t.lineId, t.line_code ?? t.lineCode, 0),
+        line_id: this.resolveLineId(
+          t.line_id ?? t.lineId,
+          t.line_code ?? t.lineCode,
+          0,
+        ),
         origin_id: t.origin_id ?? t.originId ?? 0,
         destination_id: t.destination_id ?? t.destinationId ?? 0,
         duration: t.duration ?? 0,
@@ -1242,22 +1502,34 @@ export class OptimizationService implements OnModuleInit {
     }));
 
     try {
-      const { data } = await axios.post(`${this.OPTIMIZER_URL}/api/v1/evaluate-baseline`, { blocks: pythonBlocks }, {
-        headers: { 'X-Internal-Key': this.INTERNAL_KEY },
-        timeout: 15000,
-      });
+      const { data } = await axios.post(
+        `${this.OPTIMIZER_URL}/api/v1/evaluate-baseline`,
+        { blocks: pythonBlocks },
+        {
+          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          timeout: 15000,
+        },
+      );
       return {
         totalCost: data.cost_breakdown?.total ?? data.total_cost ?? 0,
         costBreakdown: data.cost_breakdown ?? null,
         blocks: data.blocks ?? [],
       };
     } catch (error: any) {
-      const detail = error.response?.data?.detail || 'Erro ao calcular baseline';
-      return { totalCost: null, costBreakdown: null, blocks: [], error: detail };
+      const detail =
+        error.response?.data?.detail || 'Erro ao calcular baseline';
+      return {
+        totalCost: null,
+        costBreakdown: null,
+        blocks: [],
+        error: detail,
+      };
     }
   }
 
-  private buildCctParams(params: CompanyParameters | null): Record<string, any> {
+  private buildCctParams(
+    params: CompanyParameters | null,
+  ): Record<string, any> {
     const runtimeParams = normalizeLegacyCompanyParameters(params).normalized;
 
     if (!runtimeParams) {
@@ -1276,29 +1548,66 @@ export class OptimizationService implements OnModuleInit {
     // Envia para o Python APENAS campos com valor preenchido (non-null).
     // Isso permite que o solver use seus defaults internos para campos nao configurados.
     const cctFields: (keyof CompanyParameters)[] = [
-      'max_shift_minutes', 'max_work_minutes', 'min_work_minutes', 'min_shift_minutes',
-      'overtime_limit_minutes', 'max_driving_minutes', 'min_break_minutes',
-      'connection_tolerance_minutes', 'mandatory_break_after_minutes',
-      'split_break_first_minutes', 'split_break_second_minutes', 'meal_break_minutes',
-      'inter_shift_rest_minutes', 'weekly_rest_minutes', 'reduced_weekly_rest_minutes',
-      'allow_reduced_weekly_rest', 'daily_driving_limit_minutes',
-      'extended_daily_driving_limit_minutes', 'max_extended_driving_days_per_week',
-      'weekly_driving_limit_minutes', 'fortnight_driving_limit_minutes',
-      'min_layover_minutes', 'pullout_minutes', 'pullback_minutes',
-      'pullout_counts_in_driver_shift', 'pullback_counts_in_driver_shift',
-      'idle_time_is_paid', 'waiting_time_pay_pct', 'min_guaranteed_work_minutes',
-      'max_unpaid_break_minutes', 'max_total_unpaid_break_minutes',
-      'long_unpaid_break_limit_minutes', 'long_unpaid_break_penalty_weight',
-      'allow_relief_points', 'enforce_same_depot_start_end',
-      'fairness_weight', 'fairness_target_work_minutes', 'fairness_tolerance_minutes',
-      'operator_change_terminals_only', 'enforce_trip_groups_hard', 'operator_pairing_hard',
+      'max_shift_minutes',
+      'max_work_minutes',
+      'min_work_minutes',
+      'min_shift_minutes',
+      'overtime_limit_minutes',
+      'max_driving_minutes',
+      'min_break_minutes',
+      'connection_tolerance_minutes',
+      'mandatory_break_after_minutes',
+      'split_break_first_minutes',
+      'split_break_second_minutes',
+      'meal_break_minutes',
+      'inter_shift_rest_minutes',
+      'weekly_rest_minutes',
+      'reduced_weekly_rest_minutes',
+      'allow_reduced_weekly_rest',
+      'daily_driving_limit_minutes',
+      'extended_daily_driving_limit_minutes',
+      'max_extended_driving_days_per_week',
+      'weekly_driving_limit_minutes',
+      'fortnight_driving_limit_minutes',
+      'min_layover_minutes',
+      'pullout_minutes',
+      'pullback_minutes',
+      'pullout_counts_in_driver_shift',
+      'pullback_counts_in_driver_shift',
+      'idle_time_is_paid',
+      'waiting_time_pay_pct',
+      'min_guaranteed_work_minutes',
+      'max_unpaid_break_minutes',
+      'max_total_unpaid_break_minutes',
+      'long_unpaid_break_limit_minutes',
+      'long_unpaid_break_penalty_weight',
+      'allow_relief_points',
+      'enforce_same_depot_start_end',
+      'fairness_weight',
+      'fairness_target_work_minutes',
+      'fairness_tolerance_minutes',
+      'operator_change_terminals_only',
+      'enforce_trip_groups_hard',
+      'operator_pairing_hard',
       'trip_group_keep_bonus',
-      'sunday_off_weight', 'holiday_extra_pct', 'enforce_single_line_duty',
-      'operator_single_vehicle_only', 'nocturnal_start_hour', 'nocturnal_end_hour',
-      'nocturnal_factor', 'nocturnal_extra_pct', 'apply_cct',
-      'strict_hard_validation', 'strict_union_rules', 'terminal_location_ids',
-      'goal_weights', 'dynamic_rules', 'enforce_min_interval',
-      'strict_zero_gap_validation', 'strict_operational_mode', 'strict_hard_constraints',
+      'sunday_off_weight',
+      'holiday_extra_pct',
+      'enforce_single_line_duty',
+      'operator_single_vehicle_only',
+      'nocturnal_start_hour',
+      'nocturnal_end_hour',
+      'nocturnal_factor',
+      'nocturnal_extra_pct',
+      'apply_cct',
+      'strict_hard_validation',
+      'strict_union_rules',
+      'terminal_location_ids',
+      'goal_weights',
+      'dynamic_rules',
+      'enforce_min_interval',
+      'strict_zero_gap_validation',
+      'strict_operational_mode',
+      'strict_hard_constraints',
       'strict_gps_validation',
       'strict_terminal_sync_validation',
       'group_infeasibility_mode',
@@ -1313,12 +1622,19 @@ export class OptimizationService implements OnModuleInit {
     }
 
     // Fallbacks obrigatorios
-    if (!result.max_work_minutes) result.max_work_minutes = runtimeParams.max_driving_time_minutes || 480;
-    if (!result.max_driving_minutes && runtimeParams.max_driving_time_minutes !== null && runtimeParams.max_driving_time_minutes !== undefined) {
+    if (!result.max_work_minutes)
+      result.max_work_minutes = runtimeParams.max_driving_time_minutes || 480;
+    if (
+      !result.max_driving_minutes &&
+      runtimeParams.max_driving_time_minutes !== null &&
+      runtimeParams.max_driving_time_minutes !== undefined
+    ) {
       result.max_driving_minutes = runtimeParams.max_driving_time_minutes;
     }
-    if (!result.max_shift_minutes) result.max_shift_minutes = runtimeParams.max_shift_minutes || 720;
-    if (!result.meal_break_minutes) result.meal_break_minutes = runtimeParams.meal_break_minutes || 60;
+    if (!result.max_shift_minutes)
+      result.max_shift_minutes = runtimeParams.max_shift_minutes || 720;
+    if (!result.meal_break_minutes)
+      result.meal_break_minutes = runtimeParams.meal_break_minutes || 60;
 
     if (result.enforce_min_interval === undefined) {
       result.enforce_min_interval = true;
@@ -1329,7 +1645,8 @@ export class OptimizationService implements OnModuleInit {
     }
 
     if (result.min_layover_minutes === undefined) {
-      result.min_layover_minutes = runtimeParams.min_layover_minutes ?? result.min_break_minutes ?? 30;
+      result.min_layover_minutes =
+        runtimeParams.min_layover_minutes ?? result.min_break_minutes ?? 30;
     }
 
     if (runtimeParams.force_round_trip) {
@@ -1340,13 +1657,18 @@ export class OptimizationService implements OnModuleInit {
       result.operator_single_vehicle_only = true;
     }
     if (result.apply_cct === undefined) result.apply_cct = true;
-    if (result.strict_hard_validation === undefined) result.strict_hard_validation = true;
-    if (result.strict_union_rules === undefined) result.strict_union_rules = true;
+    if (result.strict_hard_validation === undefined)
+      result.strict_hard_validation = true;
+    if (result.strict_union_rules === undefined)
+      result.strict_union_rules = true;
 
     return result;
   }
 
-  private buildVspParams(params: CompanyParameters | null, cctParams: Record<string, any> = {}): Record<string, any> {
+  private buildVspParams(
+    params: CompanyParameters | null,
+    cctParams: Record<string, any> = {},
+  ): Record<string, any> {
     if (!params) {
       return {
         force_round_trip: true,
@@ -1357,20 +1679,42 @@ export class OptimizationService implements OnModuleInit {
     }
 
     const vspFields: (keyof CompanyParameters)[] = [
-      'time_budget_s', 'random_seed', 'max_vehicle_shift_minutes', 'max_vehicles',
+      'time_budget_s',
+      'random_seed',
+      'max_vehicle_shift_minutes',
+      'max_vehicles',
       'ilp_timeout_seconds',
-      'min_layover_minutes', 'deadhead_cost_per_minute', 'idle_cost_per_minute',
-      'strict_zero_gap_validation', 'strict_operational_mode', 'strict_hard_constraints',
-      'allow_multi_line_block', 'allow_vehicle_split_shifts',
-      'split_shift_min_gap_minutes', 'split_shift_max_gap_minutes',
-      'max_simultaneous_chargers', 'enable_column_generation', 'pricing_enabled',
-      'use_set_covering', 'min_workpiece_minutes', 'max_workpiece_minutes',
-      'min_trips_per_piece', 'max_trips_per_piece', 'peak_energy_cost_per_kwh',
-      'offpeak_energy_cost_per_kwh', 'preferred_pair_window_minutes',
-      'preserve_preferred_pairs', 'pair_break_penalty', 'paired_trip_bonus',
-      'max_connection_cost_for_reuse_ratio', 'max_candidate_successors_per_task',
-      'max_generated_columns', 'max_pricing_iterations', 'max_pricing_additions',
-      'vehicle_idle_gap_behavior', 'vehicle_idle_gap_threshold_minutes',
+      'min_layover_minutes',
+      'deadhead_cost_per_minute',
+      'idle_cost_per_minute',
+      'strict_zero_gap_validation',
+      'strict_operational_mode',
+      'strict_hard_constraints',
+      'allow_multi_line_block',
+      'allow_vehicle_split_shifts',
+      'split_shift_min_gap_minutes',
+      'split_shift_max_gap_minutes',
+      'max_simultaneous_chargers',
+      'enable_column_generation',
+      'pricing_enabled',
+      'use_set_covering',
+      'min_workpiece_minutes',
+      'max_workpiece_minutes',
+      'min_trips_per_piece',
+      'max_trips_per_piece',
+      'peak_energy_cost_per_kwh',
+      'offpeak_energy_cost_per_kwh',
+      'preferred_pair_window_minutes',
+      'preserve_preferred_pairs',
+      'pair_break_penalty',
+      'paired_trip_bonus',
+      'max_connection_cost_for_reuse_ratio',
+      'max_candidate_successors_per_task',
+      'max_generated_columns',
+      'max_pricing_iterations',
+      'max_pricing_additions',
+      'vehicle_idle_gap_behavior',
+      'vehicle_idle_gap_threshold_minutes',
       'goal_weights',
       'group_infeasibility_mode',
     ];
@@ -1378,10 +1722,12 @@ export class OptimizationService implements OnModuleInit {
     const result: Record<string, any> = {
       force_round_trip: params.force_round_trip ?? true,
       allow_vehicle_swap: params.allow_vehicle_swap ?? true,
-      fixed_vehicle_activation_cost: params.vehicle_fixed_cost ?? DEFAULT_VEHICLE_FIXED_COST,
+      fixed_vehicle_activation_cost:
+        params.vehicle_fixed_cost ?? DEFAULT_VEHICLE_FIXED_COST,
       preferred_pair_window_minutes: params.preferred_pair_window_minutes ?? 30,
       preserve_preferred_pairs: params.preserve_preferred_pairs ?? true,
-      vehicle_idle_gap_behavior: params.vehicle_idle_gap_behavior ?? 'solver_decides',
+      vehicle_idle_gap_behavior:
+        params.vehicle_idle_gap_behavior ?? 'solver_decides',
     };
 
     for (const field of vspFields) {
@@ -1391,32 +1737,52 @@ export class OptimizationService implements OnModuleInit {
       }
     }
 
-    if (cctParams.connection_tolerance_minutes !== undefined && result.connection_tolerance_minutes === undefined) {
-      result.connection_tolerance_minutes = cctParams.connection_tolerance_minutes;
+    if (
+      cctParams.connection_tolerance_minutes !== undefined &&
+      result.connection_tolerance_minutes === undefined
+    ) {
+      result.connection_tolerance_minutes =
+        cctParams.connection_tolerance_minutes;
     }
-    if (params.paired_trip_bonus !== null && params.paired_trip_bonus !== undefined) {
+    if (
+      params.paired_trip_bonus !== null &&
+      params.paired_trip_bonus !== undefined
+    ) {
       result.paired_trip_bonus = params.paired_trip_bonus;
-    } else if (params.trip_group_keep_bonus !== null && params.trip_group_keep_bonus !== undefined) {
+    } else if (
+      params.trip_group_keep_bonus !== null &&
+      params.trip_group_keep_bonus !== undefined
+    ) {
       result.paired_trip_bonus = params.trip_group_keep_bonus;
     }
-    if (cctParams.strict_hard_validation !== undefined && result.strict_hard_validation === undefined) {
+    if (
+      cctParams.strict_hard_validation !== undefined &&
+      result.strict_hard_validation === undefined
+    ) {
       result.strict_hard_validation = cctParams.strict_hard_validation;
     }
-    if (cctParams.enforce_same_depot_start_end !== undefined && result.same_depot_required === undefined) {
-      result.same_depot_required = Boolean(cctParams.enforce_same_depot_start_end);
+    if (
+      cctParams.enforce_same_depot_start_end !== undefined &&
+      result.same_depot_required === undefined
+    ) {
+      result.same_depot_required = Boolean(
+        cctParams.enforce_same_depot_start_end,
+      );
     }
-    if (cctParams.max_shift_minutes !== undefined && result.max_vehicle_shift_minutes === undefined) {
+    if (
+      cctParams.max_shift_minutes !== undefined &&
+      result.max_vehicle_shift_minutes === undefined
+    ) {
       result.max_vehicle_shift_minutes = cctParams.max_shift_minutes;
     }
 
     const enforceMinInterval = cctParams.enforce_min_interval !== false;
     result.enforce_min_interval = enforceMinInterval;
-    result.min_break_minutes = cctParams.min_break_minutes ?? params.min_break_minutes ?? 30;
+    result.min_break_minutes =
+      cctParams.min_break_minutes ?? params.min_break_minutes ?? 30;
 
     const baseLayover =
-      params.min_layover_minutes ??
-      cctParams.min_layover_minutes ??
-      8;
+      params.min_layover_minutes ?? cctParams.min_layover_minutes ?? 8;
 
     result.min_layover_minutes = enforceMinInterval
       ? Math.max(baseLayover, result.min_break_minutes)
@@ -1433,7 +1799,10 @@ export class OptimizationService implements OnModuleInit {
     return result;
   }
 
-  private buildVehicleTypesPayload(vehicleTypes: VehicleType[], params: CompanyParameters | null): any[] {
+  private buildVehicleTypesPayload(
+    vehicleTypes: VehicleType[],
+    params: CompanyParameters | null,
+  ): any[] {
     // If we have vehicle types in the database, use them
     if (vehicleTypes && vehicleTypes.length > 0) {
       return vehicleTypes.map((vt) => ({
@@ -1442,7 +1811,9 @@ export class OptimizationService implements OnModuleInit {
         passenger_capacity: vt.capacity,
         cost_per_km: 1.0, // Default, can be enhanced
         cost_per_hour: 10.0, // Default, can be enhanced
-        fixed_cost: vt.costPerDay || Number(params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST),
+        fixed_cost:
+          vt.costPerDay ||
+          Number(params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST),
         is_electric: false, // Default
         battery_capacity_kwh: 0.0,
         minimum_soc: 0.15,
@@ -1459,7 +1830,9 @@ export class OptimizationService implements OnModuleInit {
         passenger_capacity: 40,
         cost_per_km: 1.0,
         cost_per_hour: 10.0,
-        fixed_cost: Number(params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST),
+        fixed_cost: Number(
+          params?.vehicle_fixed_cost || DEFAULT_VEHICLE_FIXED_COST,
+        ),
         is_electric: false,
         battery_capacity_kwh: 0.0,
         minimum_soc: 0.15,
@@ -1470,9 +1843,13 @@ export class OptimizationService implements OnModuleInit {
   }
 
   private extractInvalidResultMessage(result: any): string {
-    const solverStatus = result?.solver_explanation?.status ?? result?.meta?.solver_explanation?.status;
+    const solverStatus =
+      result?.solver_explanation?.status ??
+      result?.meta?.solver_explanation?.status;
     const outputReport = result?.meta?.hard_constraint_report?.output;
-    const hardCount = Number(result?.solver_explanation?.issues?.hard_count ?? 0);
+    const hardCount = Number(
+      result?.solver_explanation?.issues?.hard_count ?? 0,
+    );
     if (solverStatus === 'hard_violation') {
       return 'Resultado inválido: solver_explanation.status=hard_violation.';
     }
@@ -1490,7 +1867,14 @@ export class OptimizationService implements OnModuleInit {
       where: { companyId },
       order: { createdAt: 'DESC' },
     });
-    if (!schedule) return { status: 'idle', scheduleId: null, startedAt: null, totalCost: null, cctViolations: 0 };
+    if (!schedule)
+      return {
+        status: 'idle',
+        scheduleId: null,
+        startedAt: null,
+        totalCost: null,
+        cctViolations: 0,
+      };
     return {
       status: schedule.status,
       scheduleId: schedule.id,
@@ -1504,7 +1888,7 @@ export class OptimizationService implements OnModuleInit {
     const cached = this.scheduleCache.get(companyId);
     const now = Date.now();
     if (cached) {
-      if ((now - cached.timestamp) < this.CACHE_TTL_MS) {
+      if (now - cached.timestamp < this.CACHE_TTL_MS) {
         return cached.data; // Cache válido
       } else {
         this.scheduleCache.delete(companyId); // CORREÇÃO: Remove ativamente da RAM se expirou
@@ -1565,57 +1949,62 @@ export class OptimizationService implements OnModuleInit {
       trips.forEach((t) => tripMap.set(t.id, t));
     }
 
-    const hydratedBlocks = blocks.map((block) => {
-      const meta = (block.metadata || {}) as any;
-      const st = meta.start_time ?? 0;
-      const et = meta.end_time ?? 0;
+    const hydratedBlocks = blocks
+      .map((block) => {
+        const meta = block.metadata || {};
+        const st = meta.start_time ?? 0;
+        const et = meta.end_time ?? 0;
 
-      const hydratedTrips = (block.tripIds || [])
-        .map((id) => tripMap.get(id))
-        .filter((t): t is Trip => !!t)
-        .map((t) => ({
-          id: t.id,
-          trip_id: t.tripId,
-          start_time: Number(t.startTime),
-          end_time: Number(t.endTime) < Number(t.startTime) ? Number(t.endTime) + 1440 : Number(t.endTime),
-          line_id: this.resolveLineId(t.lineId, t.lineCode, null),
-          line_code: t.lineCode ?? null,
-          trip_group_id: t.tripGroupId
-            ? Number(t.tripGroupId)
-            : t.pairId
-              ? parseInt(t.pairId.replace(/\D/g, ''), 10) || null
-              : null,
-          origin_id: Number(t.originId),
-          destination_id: Number(t.destinationId),
-          duration: Number(t.duration),
-          distance_km: Number(t.distanceKm),
-          direction: t.direction ?? null,
-          pair_id: t.pairId ?? null,
-        }))
-        .sort((a, b) => a.start_time - b.start_time);
+        const hydratedTrips = (block.tripIds || [])
+          .map((id) => tripMap.get(id))
+          .filter((t): t is Trip => !!t)
+          .map((t) => ({
+            id: t.id,
+            trip_id: t.tripId,
+            start_time: Number(t.startTime),
+            end_time:
+              Number(t.endTime) < Number(t.startTime)
+                ? Number(t.endTime) + 1440
+                : Number(t.endTime),
+            line_id: this.resolveLineId(t.lineId, t.lineCode, null),
+            line_code: t.lineCode ?? null,
+            trip_group_id: t.tripGroupId
+              ? Number(t.tripGroupId)
+              : t.pairId
+                ? parseInt(t.pairId.replace(/\D/g, ''), 10) || null
+                : null,
+            origin_id: Number(t.originId),
+            destination_id: Number(t.destinationId),
+            duration: Number(t.duration),
+            distance_km: Number(t.distanceKm),
+            direction: t.direction ?? null,
+            pair_id: t.pairId ?? null,
+          }))
+          .sort((a, b) => a.start_time - b.start_time);
 
-      return {
-        id: block.id,
-        block_id: block.blockId,
-        scheduleId: block.scheduleId,
-        companyId: block.companyId,
-        start_time: st,
-        end_time: et,
-        total_cost: Number(block.cost),
-        trips: hydratedTrips,
-        // Limpeza agressiva: enviamos apenas o necessário para o Gantt
-        metadata: {
-          activation_cost: meta.activation_cost,
-          deadhead_minutes: meta.deadhead_minutes,
-          idle_minutes: meta.idle_minutes,
-          start_depot_id: meta.start_depot_id,
-          end_depot_id: meta.end_depot_id,
-          start_buffer_minutes: meta.start_buffer_minutes ?? 0,
-          end_buffer_minutes: meta.end_buffer_minutes ?? 0,
-          // ...meta // Comentado para evitar carregar dumps pesados do solver no Gantt
-        },
-      };
-    }).sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
+        return {
+          id: block.id,
+          block_id: block.blockId,
+          scheduleId: block.scheduleId,
+          companyId: block.companyId,
+          start_time: st,
+          end_time: et,
+          total_cost: Number(block.cost),
+          trips: hydratedTrips,
+          // Limpeza agressiva: enviamos apenas o necessário para o Gantt
+          metadata: {
+            activation_cost: meta.activation_cost,
+            deadhead_minutes: meta.deadhead_minutes,
+            idle_minutes: meta.idle_minutes,
+            start_depot_id: meta.start_depot_id,
+            end_depot_id: meta.end_depot_id,
+            start_buffer_minutes: meta.start_buffer_minutes ?? 0,
+            end_buffer_minutes: meta.end_buffer_minutes ?? 0,
+            // ...meta // Comentado para evitar carregar dumps pesados do solver no Gantt
+          },
+        };
+      })
+      .sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
 
     const tripDetailsById = new Map<number, any>();
     hydratedBlocks.forEach((block) => {
@@ -1640,22 +2029,29 @@ export class OptimizationService implements OnModuleInit {
     });
 
     // Monta resultSummary a partir do metadata salvo
-    const meta = (schedule.metadata || {}) as any;
-    const rawMeta = (meta.meta || {}) as any;
+    const meta = schedule.metadata || {};
+    const rawMeta = meta.meta || {};
     const resolvedParams = meta.resolved_params ?? rawMeta.input ?? null;
     const fallbackFailedMessage = 'Falha sem erro estruturado persistido.';
-    const effectiveErrorType = schedule.status === ScheduleStatus.FAILED
-      ? (meta.error_type ?? 'unknown')
-      : (meta.error_type ?? null);
-    const effectiveErrorCode = schedule.status === ScheduleStatus.FAILED
-      ? (meta.error_code ?? 'UNKNOWN_FAILURE')
-      : (meta.error_code ?? null);
-    const effectiveErrorMessage = schedule.status === ScheduleStatus.FAILED
-      ? (meta.error_message ?? fallbackFailedMessage)
-      : (meta.error_message ?? null);
+    const effectiveErrorType =
+      schedule.status === ScheduleStatus.FAILED
+        ? (meta.error_type ?? 'unknown')
+        : (meta.error_type ?? null);
+    const effectiveErrorCode =
+      schedule.status === ScheduleStatus.FAILED
+        ? (meta.error_code ?? 'UNKNOWN_FAILURE')
+        : (meta.error_code ?? null);
+    const effectiveErrorMessage =
+      schedule.status === ScheduleStatus.FAILED
+        ? (meta.error_message ?? fallbackFailedMessage)
+        : (meta.error_message ?? null);
     const operationalQuality = this.extractOperationalQualityMetadata(meta);
-    const hardIssueCount = meta.hard_issue_count ?? (((meta.solver_explanation || {}).issues || {}).hard || []).length;
-    const softIssueCount = meta.soft_issue_count ?? (((meta.solver_explanation || {}).issues || {}).soft || []).length;
+    const hardIssueCount =
+      meta.hard_issue_count ??
+      (((meta.solver_explanation || {}).issues || {}).hard || []).length;
+    const softIssueCount =
+      meta.soft_issue_count ??
+      (((meta.solver_explanation || {}).issues || {}).soft || []).length;
     const tripGroupAudit = meta.trip_group_audit ?? null;
     const lightMetadata = {
       input: resolvedParams,
@@ -1699,20 +2095,22 @@ export class OptimizationService implements OnModuleInit {
       justification: operationalQuality.justification,
       tradeOffs: operationalQuality.trade_offs,
       trade_offs: operationalQuality.trade_offs,
-      operationalQualityDecision: operationalQuality.operational_quality_decision,
-      operational_quality_decision: operationalQuality.operational_quality_decision,
+      operationalQualityDecision:
+        operationalQuality.operational_quality_decision,
+      operational_quality_decision:
+        operationalQuality.operational_quality_decision,
       partial_result: meta.partial_result ?? null,
       metadata: lightMetadata,
       meta: lightMetadata,
       runSnapshot: meta.run_snapshot ?? null,
       // blocks: hydratedBlocks, // REMOVIDO: Já enviado na raiz do objeto finalResult
       duties: duties.map((d) => {
-        const dm = (d.metadata || {}) as any;
+        const dm = d.metadata || {};
         const dutyId = d.dutyId;
         const dutyTripIds = Array.isArray(d.tripIds)
           ? d.tripIds
-            .map((tripId) => this.toPositiveInteger(tripId))
-            .filter((tripId): tripId is number => tripId != null)
+              .map((tripId) => this.toPositiveInteger(tripId))
+              .filter((tripId): tripId is number => tripId != null)
           : [];
         const dutyTimeSegments = this.normalizeDutyTimeSegments(
           dm.duty_time_segments ?? [],
@@ -1772,7 +2170,8 @@ export class OptimizationService implements OnModuleInit {
       rejected_scenarios: operationalQuality.rejected_scenarios,
       justification: operationalQuality.justification,
       trade_offs: operationalQuality.trade_offs,
-      operational_quality_decision: operationalQuality.operational_quality_decision,
+      operational_quality_decision:
+        operationalQuality.operational_quality_decision,
       createdAt: schedule.createdAt,
       updatedAt: schedule.updatedAt,
       blocks: hydratedBlocks,
@@ -1784,7 +2183,10 @@ export class OptimizationService implements OnModuleInit {
     };
 
     // 4. Salvar no Cache antes de retornar
-    this.scheduleCache.set(companyId, { data: finalResult, timestamp: Date.now() });
+    this.scheduleCache.set(companyId, {
+      data: finalResult,
+      timestamp: Date.now(),
+    });
 
     return finalResult;
   }
@@ -1801,8 +2203,8 @@ export class OptimizationService implements OnModuleInit {
       const type = String(segment?.type ?? segment?.event_type ?? 'unknown');
       const tripIds = Array.isArray(segment?.trip_ids)
         ? segment.trip_ids
-          .map((tripId: unknown) => this.toPositiveInteger(tripId))
-          .filter((tripId): tripId is number => tripId != null)
+            .map((tripId: unknown) => this.toPositiveInteger(tripId))
+            .filter((tripId): tripId is number => tripId != null)
         : [];
       const tripDetails = this.sortOperationalTrips(
         tripIds
@@ -1810,19 +2212,28 @@ export class OptimizationService implements OnModuleInit {
           .filter((trip): trip is Record<string, any> => !!trip),
       );
       const inferredBlockId = this.resolveSegmentBlockId(segment, tripDetails);
-      const directions = [...new Set(tripDetails.map((trip) => trip.direction).filter(Boolean))];
-      const tripGroupIds = [...new Set(
-        tripDetails
-          .map((trip) => this.toPositiveInteger(trip.trip_group_id))
-          .filter((value): value is number => value != null),
-      )];
+      const directions = [
+        ...new Set(tripDetails.map((trip) => trip.direction).filter(Boolean)),
+      ];
+      const tripGroupIds = [
+        ...new Set(
+          tripDetails
+            .map((trip) => this.toPositiveInteger(trip.trip_group_id))
+            .filter((value): value is number => value != null),
+        ),
+      ];
       const tripCount = tripIds.length;
-      const bundleEventType = type === 'commercial_trip' && tripCount > 1
-        ? 'commercial_trip_bundle'
-        : type;
-      const eventScope = typeof segment?.event_scope === 'string' && segment.event_scope.trim().length > 0
-        ? segment.event_scope.trim()
-        : (type === 'commercial_trip' || type === 'deadhead' ? 'driver_vehicle' : 'driver');
+      const bundleEventType =
+        type === 'commercial_trip' && tripCount > 1
+          ? 'commercial_trip_bundle'
+          : type;
+      const eventScope =
+        typeof segment?.event_scope === 'string' &&
+        segment.event_scope.trim().length > 0
+          ? segment.event_scope.trim()
+          : type === 'commercial_trip' || type === 'deadhead'
+            ? 'driver_vehicle'
+            : 'driver';
       const normalizedSegment: Record<string, any> = {
         ...segment,
         type,
@@ -1838,8 +2249,9 @@ export class OptimizationService implements OnModuleInit {
 
       if (bundleEventType !== type) {
         normalizedSegment.bundle_event_type = bundleEventType;
-        normalizedSegment.explanation = normalizedSegment.explanation
-          ?? `Segmento operacional agrupado com ${tripCount} viagens reais.`;
+        normalizedSegment.explanation =
+          normalizedSegment.explanation ??
+          `Segmento operacional agrupado com ${tripCount} viagens reais.`;
       }
 
       return normalizedSegment;
@@ -1848,23 +2260,33 @@ export class OptimizationService implements OnModuleInit {
     // Gap/boundary types already have driver_vehicle_change emitted by the Python solver before them.
     // Only non-gap commercial segments could ever need a synthetic insertion as a safety net.
     const GAP_SEGMENT_TYPES = new Set([
-      'driver_idle', 'idle', 'normal_break', 'mandatory_rest',
-      'duty_start', 'duty_end', 'pullout', 'pullback',
+      'driver_idle',
+      'idle',
+      'normal_break',
+      'mandatory_rest',
+      'duty_start',
+      'duty_end',
+      'pullout',
+      'pullback',
     ]);
 
     const normalizedSegments: Record<string, any>[] = [];
     segments.forEach((segment, index) => {
-      const segmentType = String(segment.type ?? segment.event_type ?? 'unknown');
+      const segmentType = String(
+        segment.type ?? segment.event_type ?? 'unknown',
+      );
       const fromBlockId = this.toPositiveInteger(segment.from_block_id);
       const toBlockId = this.toPositiveInteger(segment.to_block_id);
       if (
-        fromBlockId != null
-        && toBlockId != null
-        && fromBlockId !== toBlockId
-        && segmentType !== 'driver_vehicle_change'
-        && !GAP_SEGMENT_TYPES.has(segmentType)
+        fromBlockId != null &&
+        toBlockId != null &&
+        fromBlockId !== toBlockId &&
+        segmentType !== 'driver_vehicle_change' &&
+        !GAP_SEGMENT_TYPES.has(segmentType)
       ) {
-        normalizedSegments.push(this.buildDriverVehicleChangeSegment(segment, fromBlockId, toBlockId));
+        normalizedSegments.push(
+          this.buildDriverVehicleChangeSegment(segment, fromBlockId, toBlockId),
+        );
       }
 
       normalizedSegments.push(segment);
@@ -1873,7 +2295,9 @@ export class OptimizationService implements OnModuleInit {
       if (!nextSegment) {
         return;
       }
-      const nextType = String(nextSegment.type ?? nextSegment.event_type ?? 'unknown');
+      const nextType = String(
+        nextSegment.type ?? nextSegment.event_type ?? 'unknown',
+      );
       if (segmentType !== 'commercial_trip' || nextType !== 'commercial_trip') {
         return;
       }
@@ -1883,12 +2307,18 @@ export class OptimizationService implements OnModuleInit {
       const currentEnd = Number(segment.end ?? segment.start ?? 0);
       const nextStart = Number(nextSegment.start ?? currentEnd);
       if (
-        currentBlockId != null
-        && nextBlockId != null
-        && currentBlockId !== nextBlockId
-        && nextStart <= currentEnd
+        currentBlockId != null &&
+        nextBlockId != null &&
+        currentBlockId !== nextBlockId &&
+        nextStart <= currentEnd
       ) {
-        normalizedSegments.push(this.buildDriverVehicleChangeSegment(segment, currentBlockId, nextBlockId));
+        normalizedSegments.push(
+          this.buildDriverVehicleChangeSegment(
+            segment,
+            currentBlockId,
+            nextBlockId,
+          ),
+        );
       }
     });
 
@@ -1911,7 +2341,9 @@ export class OptimizationService implements OnModuleInit {
       bundleTripCount: number,
       bundleType: string,
     ) => {
-      const sourceTripId = this.toPositiveInteger(trip.source_trip_id ?? trip.id);
+      const sourceTripId = this.toPositiveInteger(
+        trip.source_trip_id ?? trip.id,
+      );
       if (sourceTripId == null || seenTripIds.has(sourceTripId)) {
         return;
       }
@@ -1932,7 +2364,9 @@ export class OptimizationService implements OnModuleInit {
     };
 
     dutyTimeSegments.forEach((segment, index) => {
-      const segmentType = String(segment.type ?? segment.event_type ?? 'unknown');
+      const segmentType = String(
+        segment.type ?? segment.event_type ?? 'unknown',
+      );
       if (segmentType !== 'commercial_trip') {
         return;
       }
@@ -1949,7 +2383,9 @@ export class OptimizationService implements OnModuleInit {
           index + 1,
           tripIndex + 1,
           segmentTrips.length,
-          String(segment.bundle_event_type ?? segment.type ?? 'commercial_trip'),
+          String(
+            segment.bundle_event_type ?? segment.type ?? 'commercial_trip',
+          ),
         );
       });
     });
@@ -1965,7 +2401,11 @@ export class OptimizationService implements OnModuleInit {
     return detailedTrips;
   }
 
-  private buildDriverVehicleChangeSegment(segment: Record<string, any>, fromBlockId: number, toBlockId: number) {
+  private buildDriverVehicleChangeSegment(
+    segment: Record<string, any>,
+    fromBlockId: number,
+    toBlockId: number,
+  ) {
     const timestamp = Number(segment.start ?? segment.end ?? 0);
     return {
       type: 'driver_vehicle_change',
@@ -1974,16 +2414,24 @@ export class OptimizationService implements OnModuleInit {
       start: timestamp,
       end: timestamp,
       duration: 0,
-      location: segment.location ?? segment.location_start ?? segment.location_end ?? null,
+      location:
+        segment.location ??
+        segment.location_start ??
+        segment.location_end ??
+        null,
       from_block_id: fromBlockId,
       to_block_id: toBlockId,
       from_vehicle_id: fromBlockId,
       to_vehicle_id: toBlockId,
-      explanation: 'Motorista troca de veículo entre blocos distintos da mesma jornada.',
+      explanation:
+        'Motorista troca de veículo entre blocos distintos da mesma jornada.',
     };
   }
 
-  private resolveSegmentBlockId(segment: Record<string, any>, tripDetails: Record<string, any>[]): number | null {
+  private resolveSegmentBlockId(
+    segment: Record<string, any>,
+    tripDetails: Record<string, any>[],
+  ): number | null {
     const explicitBlockId = this.toPositiveInteger(segment.block_id);
     if (explicitBlockId != null) {
       return explicitBlockId;
@@ -2000,7 +2448,9 @@ export class OptimizationService implements OnModuleInit {
     }
 
     for (const trip of tripDetails) {
-      const tripBlockId = this.toPositiveInteger(trip.block_id ?? trip.vehicle_id);
+      const tripBlockId = this.toPositiveInteger(
+        trip.block_id ?? trip.vehicle_id,
+      );
       if (tripBlockId != null) {
         return tripBlockId;
       }
@@ -2009,9 +2459,12 @@ export class OptimizationService implements OnModuleInit {
     return null;
   }
 
-  private sortOperationalTrips(trips: Record<string, any>[]): Record<string, any>[] {
+  private sortOperationalTrips(
+    trips: Record<string, any>[],
+  ): Record<string, any>[] {
     return [...trips].sort((left, right) => {
-      const startDiff = Number(left.start_time ?? 0) - Number(right.start_time ?? 0);
+      const startDiff =
+        Number(left.start_time ?? 0) - Number(right.start_time ?? 0);
       if (startDiff !== 0) {
         return startDiff;
       }
@@ -2064,7 +2517,11 @@ export class OptimizationService implements OnModuleInit {
     return parsed;
   }
 
-  private resolveLineId(lineId: unknown, lineCode: unknown, fallback: number | null): number | null {
+  private resolveLineId(
+    lineId: unknown,
+    lineCode: unknown,
+    fallback: number | null,
+  ): number | null {
     const numericLineId = this.toPositiveInteger(lineId);
     if (numericLineId !== null) {
       return numericLineId;
@@ -2097,6 +2554,7 @@ export class OptimizationService implements OnModuleInit {
       return null;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const digits = String(value).replace(/\D/g, '');
     if (!digits) {
       return null;
@@ -2111,19 +2569,30 @@ export class OptimizationService implements OnModuleInit {
     persistedValue: unknown,
   ): 'strict' | 'balanced' | 'optimized' | null {
     const normalizedOverride = this.normalizeOperationalQualityMode(override);
-    const overrideWasProvided = override !== null && override !== undefined && String(override).trim() !== '';
+    const overrideWasProvided =
+      override !== null &&
+      override !== undefined &&
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      String(override).trim() !== '';
     if (overrideWasProvided) {
       return normalizedOverride;
     }
     return this.normalizeOperationalQualityMode(persistedValue) ?? 'balanced';
   }
 
-  private normalizeOperationalQualityMode(value: unknown): 'strict' | 'balanced' | 'optimized' | null {
+  private normalizeOperationalQualityMode(
+    value: unknown,
+  ): 'strict' | 'balanced' | 'optimized' | null {
     if (value === null || value === undefined) {
       return null;
     }
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
     const normalized = String(value).trim().toLowerCase();
-    if (normalized === 'strict' || normalized === 'balanced' || normalized === 'optimized') {
+    if (
+      normalized === 'strict' ||
+      normalized === 'balanced' ||
+      normalized === 'optimized'
+    ) {
       return normalized;
     }
     return null;
@@ -2163,29 +2632,41 @@ export class OptimizationService implements OnModuleInit {
       populatedDecision?.chosen_scenario,
     ]);
     const rejectedScenarios = this.pickFirstArray(
-      [...containers.map((item) => item.rejected_scenarios), populatedDecision?.rejected_scenarios],
+      [
+        ...containers.map((item) => item.rejected_scenarios),
+        populatedDecision?.rejected_scenarios,
+      ],
       [],
     );
     const justification = this.pickFirstArray(
-      [...containers.map((item) => item.justification), populatedDecision?.justification],
+      [
+        ...containers.map((item) => item.justification),
+        populatedDecision?.justification,
+      ],
       [],
     ) as string[];
     const tradeOffs = this.pickFirstArray(
-      [...containers.map((item) => item.trade_offs), populatedDecision?.trade_offs],
+      [
+        ...containers.map((item) => item.trade_offs),
+        populatedDecision?.trade_offs,
+      ],
       [],
     ) as string[];
     const resolvedMode =
       this.normalizeOperationalQualityMode(
-        populatedDecision?.mode
-        ?? this.pickFirstString([
-          ...containers.map((item) => item.operational_quality_mode),
-          context?.optimizationParams?.operational_quality_mode,
-          context?.request_metadata?.operational_quality_mode,
-        ]),
+        populatedDecision?.mode ??
+          this.pickFirstString([
+            ...containers.map((item) => item.operational_quality_mode),
+            context?.optimizationParams?.operational_quality_mode,
+            context?.request_metadata?.operational_quality_mode,
+          ]),
       ) ?? 'balanced';
     const decision =
-      populatedDecision
-      ?? (chosenScenario || rejectedScenarios.length || justification.length || tradeOffs.length
+      populatedDecision ??
+      (chosenScenario ||
+      rejectedScenarios.length ||
+      justification.length ||
+      tradeOffs.length
         ? {
             mode: resolvedMode,
             chosen_scenario: chosenScenario,
@@ -2235,12 +2716,18 @@ export class OptimizationService implements OnModuleInit {
     return fallback;
   }
 
-  private pickFirstObject(values: unknown[], requireKeys = false): Record<string, any> | null {
+  private pickFirstObject(
+    values: unknown[],
+    requireKeys = false,
+  ): Record<string, any> | null {
     for (const value of values) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         continue;
       }
-      if (!requireKeys || Object.keys(value as Record<string, any>).length > 0) {
+      if (
+        !requireKeys ||
+        Object.keys(value as Record<string, any>).length > 0
+      ) {
         return value as Record<string, any>;
       }
     }
@@ -2262,7 +2749,9 @@ export class OptimizationService implements OnModuleInit {
       }
       if (!value || typeof value !== 'object') continue;
       summary[key] = Object.fromEntries(
-        Object.entries(value).filter(([bucketKey]) => bucketKey !== 'blocks' && bucketKey !== 'duties')
+        Object.entries(value).filter(
+          ([bucketKey]) => bucketKey !== 'blocks' && bucketKey !== 'duties',
+        ),
       );
     }
     return summary;
@@ -2271,8 +2760,12 @@ export class OptimizationService implements OnModuleInit {
   private summarizeSolverExplanation(explanation: any) {
     if (!explanation || typeof explanation !== 'object') return null;
 
-    const hard = Array.isArray(explanation?.issues?.hard) ? explanation.issues.hard : [];
-    const soft = Array.isArray(explanation?.issues?.soft) ? explanation.issues.soft : [];
+    const hard = Array.isArray(explanation?.issues?.hard)
+      ? explanation.issues.hard
+      : [];
+    const soft = Array.isArray(explanation?.issues?.soft)
+      ? explanation.issues.soft
+      : [];
     const trimIssue = (issue: any) => {
       if (!issue || typeof issue !== 'object') return issue;
       return {
@@ -2288,7 +2781,9 @@ export class OptimizationService implements OnModuleInit {
     return {
       status: explanation.status ?? null,
       headline: explanation.headline ?? null,
-      summary: Array.isArray(explanation.summary) ? explanation.summary.slice(0, 5) : [],
+      summary: Array.isArray(explanation.summary)
+        ? explanation.summary.slice(0, 5)
+        : [],
       issues: {
         hard: hard.slice(0, this.DETAIL_LIMIT).map(trimIssue),
         soft: soft.slice(0, this.DETAIL_LIMIT).map(trimIssue),
@@ -2312,7 +2807,9 @@ export class OptimizationService implements OnModuleInit {
       split_groups: audit.split_groups ?? null,
       missing_groups: audit.missing_groups ?? null,
       same_roster_ratio: audit.same_roster_ratio ?? null,
-      sample_splits: Array.isArray(audit.sample_splits) ? audit.sample_splits.slice(0, this.DETAIL_LIMIT) : [],
+      sample_splits: Array.isArray(audit.sample_splits)
+        ? audit.sample_splits.slice(0, this.DETAIL_LIMIT)
+        : [],
     };
   }
 }

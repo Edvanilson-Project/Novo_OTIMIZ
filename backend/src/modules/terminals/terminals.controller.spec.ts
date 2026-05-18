@@ -10,8 +10,13 @@ describe('TerminalsController', () => {
 
   beforeEach(async () => {
     service = {
-      findAll: jest.fn().mockResolvedValue([{ id: 1, name: 'T1' }, { id: 2, name: 'T2', isDepot: true }]),
-      findDepots: jest.fn().mockResolvedValue([{ id: 2, name: 'T2', isDepot: true }]),
+      findAll: jest.fn().mockResolvedValue([
+        { id: 1, name: 'T1' },
+        { id: 2, name: 'T2', isDepot: true },
+      ]),
+      findDepots: jest
+        .fn()
+        .mockResolvedValue([{ id: 2, name: 'T2', isDepot: true }]),
       findOne: jest.fn().mockResolvedValue({ id: 1, name: 'T1' }),
       create: jest.fn().mockResolvedValue({ id: 2, name: 'T2' }),
       update: jest.fn().mockResolvedValue({ id: 1, name: 'Updated' }),
@@ -22,7 +27,8 @@ describe('TerminalsController', () => {
       controllers: [TerminalsController],
       providers: [{ provide: TerminalsService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(TerminalsController);

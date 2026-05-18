@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CustomReportsController } from './custom-reports.controller';
-import { CustomReportsService, SUPPORTED_METRICS } from './custom-reports.service';
+import {
+  CustomReportsService,
+  SUPPORTED_METRICS,
+} from './custom-reports.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 describe('CustomReportsController', () => {
@@ -24,7 +27,8 @@ describe('CustomReportsController', () => {
       controllers: [CustomReportsController],
       providers: [{ provide: CustomReportsService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(CustomReportsController);
@@ -62,7 +66,10 @@ describe('CustomReportsController', () => {
   });
 
   it('preview calls service.preview with metrics and filters', async () => {
-    const result = await controller.preview({ metrics: ['trips'], filters: { companyId: 1 } });
+    const result = await controller.preview({
+      metrics: ['trips'],
+      filters: { companyId: 1 },
+    });
     expect(service.preview).toHaveBeenCalledWith(['trips'], { companyId: 1 });
     expect(result).toMatchObject({ rows: [] });
   });

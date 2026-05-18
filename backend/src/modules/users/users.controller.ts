@@ -1,6 +1,15 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, ParseIntPipe, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -30,7 +39,10 @@ export class UsersController {
 
   @Patch(':id')
   @Roles(UserRole.COMPANY_ADMIN, UserRole.SUPER_ADMIN)
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, any>,
+  ) {
     return this.service.update(id, body);
   }
 

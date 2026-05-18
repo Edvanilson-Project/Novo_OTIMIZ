@@ -9,13 +9,16 @@ export class ParametersService {
   constructor(
     private readonly parametersRepository: CompanyParametersRepository,
     private readonly tenantContext: TenantContext,
-  ) { }
+  ) {}
 
   async getParameters(): Promise<CompanyParameters> {
     const companyId = this.tenantContext.getCompanyId();
-    if (!companyId) throw new BadRequestException('Company ID not found in context');
+    if (!companyId)
+      throw new BadRequestException('Company ID not found in context');
 
-    const params = await this.parametersRepository.findOne({ where: { companyId } });
+    const params = await this.parametersRepository.findOne({
+      where: { companyId },
+    });
     if (!params) {
       // Se não houver, criamos o padrão para o tenant
       return this.createDefaultParameters();
@@ -28,11 +31,16 @@ export class ParametersService {
     return params;
   }
 
-  async updateParameters(updateData: Partial<CompanyParameters>): Promise<CompanyParameters> {
+  async updateParameters(
+    updateData: Partial<CompanyParameters>,
+  ): Promise<CompanyParameters> {
     const companyId = this.tenantContext.getCompanyId();
-    if (!companyId) throw new BadRequestException('Company ID not found in context');
+    if (!companyId)
+      throw new BadRequestException('Company ID not found in context');
 
-    let params = await this.parametersRepository.findOne({ where: { companyId } });
+    let params = await this.parametersRepository.findOne({
+      where: { companyId },
+    });
 
     if (!params) {
       params = await this.createDefaultParameters();
@@ -41,10 +49,10 @@ export class ParametersService {
     this.applyLegacyPercentageNormalization(params);
 
     const {
-      id,
-      companyId: ignoredCompanyId,
-      createdAt,
-      updatedAt,
+      id: _id,
+      companyId: _ignoredCompanyId,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
       ...validData
     } = updateData as any;
 
@@ -56,7 +64,9 @@ export class ParametersService {
     return this.parametersRepository.save(params);
   }
 
-  private applyLegacyPercentageNormalization(params: CompanyParameters): boolean {
+  private applyLegacyPercentageNormalization(
+    params: CompanyParameters,
+  ): boolean {
     const { normalized, changed } = normalizeLegacyCompanyParameters(params);
     if (changed) {
       Object.assign(params, normalized);
@@ -115,33 +125,57 @@ export class ParametersService {
   }
 
   private validateCrossFieldRelations(params: CompanyParameters) {
-    if (params.min_shift_minutes !== null && params.max_shift_minutes !== null) {
+    if (
+      params.min_shift_minutes !== null &&
+      params.max_shift_minutes !== null
+    ) {
       if (params.min_shift_minutes > params.max_shift_minutes) {
-        throw new BadRequestException('min_shift_minutes nao pode ser maior que max_shift_minutes');
+        throw new BadRequestException(
+          'min_shift_minutes nao pode ser maior que max_shift_minutes',
+        );
       }
     }
 
     if (params.min_work_minutes !== null && params.max_work_minutes !== null) {
       if (params.min_work_minutes > params.max_work_minutes) {
-        throw new BadRequestException('min_work_minutes nao pode ser maior que max_work_minutes');
+        throw new BadRequestException(
+          'min_work_minutes nao pode ser maior que max_work_minutes',
+        );
       }
     }
 
-    if (params.min_trips_per_piece !== null && params.max_trips_per_piece !== null) {
+    if (
+      params.min_trips_per_piece !== null &&
+      params.max_trips_per_piece !== null
+    ) {
       if (params.min_trips_per_piece > params.max_trips_per_piece) {
-        throw new BadRequestException('min_trips_per_piece nao pode ser maior que max_trips_per_piece');
+        throw new BadRequestException(
+          'min_trips_per_piece nao pode ser maior que max_trips_per_piece',
+        );
       }
     }
 
-    if (params.min_workpiece_minutes !== null && params.max_workpiece_minutes !== null) {
+    if (
+      params.min_workpiece_minutes !== null &&
+      params.max_workpiece_minutes !== null
+    ) {
       if (params.min_workpiece_minutes > params.max_workpiece_minutes) {
-        throw new BadRequestException('min_workpiece_minutes nao pode ser maior que max_workpiece_minutes');
+        throw new BadRequestException(
+          'min_workpiece_minutes nao pode ser maior que max_workpiece_minutes',
+        );
       }
     }
 
-    if (params.split_shift_min_gap_minutes !== null && params.split_shift_max_gap_minutes !== null) {
-      if (params.split_shift_min_gap_minutes > params.split_shift_max_gap_minutes) {
-        throw new BadRequestException('split_shift_min_gap_minutes nao pode ser maior que split_shift_max_gap_minutes');
+    if (
+      params.split_shift_min_gap_minutes !== null &&
+      params.split_shift_max_gap_minutes !== null
+    ) {
+      if (
+        params.split_shift_min_gap_minutes > params.split_shift_max_gap_minutes
+      ) {
+        throw new BadRequestException(
+          'split_shift_min_gap_minutes nao pode ser maior que split_shift_max_gap_minutes',
+        );
       }
     }
 
@@ -160,7 +194,10 @@ export class ParametersService {
       params.max_work_minutes !== null &&
       params.meal_break_minutes !== null
     ) {
-      if (params.max_shift_minutes < params.max_work_minutes + params.meal_break_minutes) {
+      if (
+        params.max_shift_minutes <
+        params.max_work_minutes + params.meal_break_minutes
+      ) {
         throw new BadRequestException(
           'max_shift_minutes deve ser maior ou igual a max_work_minutes + meal_break_minutes',
         );
@@ -170,7 +207,8 @@ export class ParametersService {
 
   private async createDefaultParameters(): Promise<CompanyParameters> {
     const companyId = this.tenantContext.getCompanyId();
-    if (!companyId) throw new BadRequestException('Company ID not found in context');
+    if (!companyId)
+      throw new BadRequestException('Company ID not found in context');
 
     const newParams = this.parametersRepository.create({
       companyId,
@@ -210,6 +248,8 @@ export class ParametersService {
       trip_group_keep_bonus: 240.0,
       algorithm_preference: 'hybrid_pipeline',
       ilp_timeout_seconds: 120,
+      nocturnal_start_hour: null,
+      nocturnal_end_hour: null,
     });
 
     return this.parametersRepository.save(newParams);
@@ -230,7 +270,6 @@ export class ParametersService {
       'joint_solver',
       'vcsp_pulp',
     ];
-
 
     const allowedIdleGapBehaviors = [
       'solver_decides',
@@ -363,7 +402,9 @@ export class ParametersService {
         const parsed = Number(value);
 
         if (!Number.isInteger(parsed) || parsed < 0) {
-          throw new BadRequestException(`${key} deve ser um numero inteiro maior ou igual a zero`);
+          throw new BadRequestException(
+            `${key} deve ser um numero inteiro maior ou igual a zero`,
+          );
         }
 
         if (
@@ -392,7 +433,9 @@ export class ParametersService {
         const parsed = Number(value);
 
         if (!Number.isFinite(parsed) || parsed < 0) {
-          throw new BadRequestException(`${key} deve ser um numero maior ou igual a zero`);
+          throw new BadRequestException(
+            `${key} deve ser um numero maior ou igual a zero`,
+          );
         }
 
         (sanitized as any)[key] = parsed;
@@ -400,7 +443,11 @@ export class ParametersService {
       }
 
       if (booleanFields.includes(key as keyof CompanyParameters)) {
-        if (typeof value !== 'boolean' && value !== 'true' && value !== 'false') {
+        if (
+          typeof value !== 'boolean' &&
+          value !== 'true' &&
+          value !== 'false'
+        ) {
           throw new BadRequestException(`${key} deve ser um booleano`);
         }
         (sanitized as any)[key] = value === true || value === 'true';
@@ -408,24 +455,27 @@ export class ParametersService {
       }
 
       if (key === 'algorithm_preference') {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         if (!allowedAlgorithms.includes(String(value))) {
           throw new BadRequestException(`algorithm_preference invalido`);
         }
-
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         (sanitized as any)[key] = String(value);
         continue;
       }
 
       if (key === 'vehicle_idle_gap_behavior') {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         if (!allowedIdleGapBehaviors.includes(String(value))) {
           throw new BadRequestException(`vehicle_idle_gap_behavior invalido`);
         }
-
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         (sanitized as any)[key] = String(value);
         continue;
       }
 
       if (key === 'group_infeasibility_mode') {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const normalized = String(value).trim().toLowerCase();
         if (!['strict', 'production', 'assisted'].includes(normalized)) {
           throw new BadRequestException(`group_infeasibility_mode invalido`);
@@ -436,6 +486,7 @@ export class ParametersService {
       }
 
       if (key === 'operational_quality_mode') {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
         const normalized = String(value).trim().toLowerCase();
         if (!allowedOperationalQualityModes.includes(normalized)) {
           throw new BadRequestException(`operational_quality_mode invalido`);
@@ -447,13 +498,17 @@ export class ParametersService {
 
       if (key === 'terminal_location_ids') {
         if (!Array.isArray(value)) {
-          throw new BadRequestException(`terminal_location_ids deve ser uma lista`);
+          throw new BadRequestException(
+            `terminal_location_ids deve ser uma lista`,
+          );
         }
 
         const ids = value.map(Number);
 
         if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
-          throw new BadRequestException(`terminal_location_ids contem IDs invalidos`);
+          throw new BadRequestException(
+            `terminal_location_ids contem IDs invalidos`,
+          );
         }
 
         (sanitized as any)[key] = ids;
@@ -465,11 +520,15 @@ export class ParametersService {
           throw new BadRequestException(`goal_weights deve ser um objeto JSON`);
         }
 
-        for (const [goalKey, goalValue] of Object.entries(value as Record<string, any>)) {
+        for (const [goalKey, goalValue] of Object.entries(
+          value as Record<string, any>,
+        )) {
           const parsed = Number(goalValue);
 
           if (!Number.isFinite(parsed) || parsed < 0) {
-            throw new BadRequestException(`Peso invalido em goal_weights.${goalKey}`);
+            throw new BadRequestException(
+              `Peso invalido em goal_weights.${goalKey}`,
+            );
           }
         }
 
@@ -486,7 +545,9 @@ export class ParametersService {
         continue;
       }
 
-      throw new BadRequestException(`Parametro nao permitido ou sem validacao: ${key}`);
+      throw new BadRequestException(
+        `Parametro nao permitido ou sem validacao: ${key}`,
+      );
     }
 
     return sanitized;

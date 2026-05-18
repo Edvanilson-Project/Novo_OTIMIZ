@@ -17,12 +17,13 @@ GARANTIAS:
     - Restrições duras (CLT) são respeitadas dentro de cada chunk
     - Boundary stitching é feito por joint_opt_boundary (não aqui)
 """
+
 from __future__ import annotations
 
 import logging
 import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from ...domain.interfaces import ICSPAlgorithm
 from ...domain.models import Block, CSPSolution, Duty, Trip
@@ -64,6 +65,7 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             return self._base_solver_factory
         # Lazy import para evitar circular dep
         from .set_partitioning_optimized import SetPartitioningOptimizedCSP
+
         return SetPartitioningOptimizedCSP(vsp_params=self.vsp_params, **self.params)
 
     def solve(
@@ -76,9 +78,7 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             return CSPSolution(algorithm=self.name, meta={"roster_count": 0})
 
         n_blocks = len(blocks)
-        _log.info(
-            f"ChunkedCSP iniciado: {n_blocks} blocos (threshold={self.chunk_threshold})"
-        )
+        _log.info(f"ChunkedCSP iniciado: {n_blocks} blocos (threshold={self.chunk_threshold})")
 
         if n_blocks <= self.chunk_threshold:
             _log.info("Abaixo do threshold — execução direta sem chunking")
@@ -96,9 +96,7 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             if not chunk_blocks:
                 continue
             chunk_trip_ids = {t.id for b in chunk_blocks for t in b.trips}
-            chunk_trips = (
-                [t for t in trips if t.id in chunk_trip_ids] if trips else None
-            )
+            chunk_trips = [t for t in trips if t.id in chunk_trip_ids] if trips else None
             ts = time.perf_counter()
             solver = self._make_solver()
             try:
@@ -118,19 +116,18 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
                 )
             elapsed = (time.perf_counter() - ts) * 1000
             chunk_solutions.append(sol)
-            chunk_meta.append({
-                "chunk_idx": idx,
-                "blocks": len(chunk_blocks),
-                "duties": len(sol.duties),
-                "uncovered_blocks": len(sol.uncovered_blocks or []),
-                "failed": bool((sol.meta or {}).get("chunk_failed")),
-                "elapsed_ms": round(elapsed, 1),
-                "violations": sol.cct_violations,
-            })
-            _log.info(
-                f"  chunk[{idx}]: {len(chunk_blocks)} blocks → "
-                f"{len(sol.duties)} duties em {elapsed:.0f}ms"
+            chunk_meta.append(
+                {
+                    "chunk_idx": idx,
+                    "blocks": len(chunk_blocks),
+                    "duties": len(sol.duties),
+                    "uncovered_blocks": len(sol.uncovered_blocks or []),
+                    "failed": bool((sol.meta or {}).get("chunk_failed")),
+                    "elapsed_ms": round(elapsed, 1),
+                    "violations": sol.cct_violations,
+                }
             )
+            _log.info(f"  chunk[{idx}]: {len(chunk_blocks)} blocks → " f"{len(sol.duties)} duties em {elapsed:.0f}ms")
 
         merged = self._merge(chunk_solutions, chunk_meta)
         merged.elapsed_ms = self._elapsed_ms()
@@ -145,10 +142,7 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             "chunks": chunk_meta,
             "total_chunk_solve_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
-        _log.info(
-            f"ChunkedCSP concluído: {len(merged.duties)} duties totais, "
-            f"{merged.cct_violations} violações"
-        )
+        _log.info(f"ChunkedCSP concluído: {len(merged.duties)} duties totais, " f"{merged.cct_violations} violações")
         return merged
 
     def _partition(self, blocks: List[Block]) -> List[List[Block]]:
@@ -178,10 +172,7 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
             current: List[Block] = []
             window_start = grp_sorted[0].start_time
             for b in grp_sorted:
-                if (
-                    b.start_time - window_start > win
-                    or len(current) >= self.chunk_threshold
-                ):
+                if b.start_time - window_start > win or len(current) >= self.chunk_threshold:
                     if current:
                         chunks.append(current)
                     current = [b]

@@ -20,7 +20,7 @@ export class AuthService {
       select: ['id', 'email', 'passwordHash', 'companyId', 'name', 'role'],
     });
 
-    const valid = user && await bcrypt.compare(pass, user.passwordHash);
+    const valid = user && (await bcrypt.compare(pass, user.passwordHash));
     if (!valid) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
@@ -39,7 +39,7 @@ export class AuthService {
         name: user.name,
         companyId: user.companyId,
         role: user.role,
-      }
+      },
     };
   }
 }

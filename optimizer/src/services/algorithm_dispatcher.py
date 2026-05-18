@@ -6,6 +6,7 @@ A escolha do CSP (greedy_csp ou set_partitioning) é injetada via callable `csp_
 mantendo OptimizerService responsável pela construção dos CSPs (que dependem de seu
 estado interno como evaluator/validator).
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,9 +40,15 @@ SetCoveringFactory = Callable[[Dict[str, Any], Dict[str, Any]], ICSPAlgorithm]
 
 
 def _run_greedy(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: Optional[float],
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
@@ -49,9 +56,15 @@ def _run_greedy(
 
 
 def _run_genetic(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     ga = GeneticVSP(vsp_params=vsp_params)
@@ -61,9 +74,15 @@ def _run_genetic(
 
 
 def _run_sa(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     sa = SimulatedAnnealingVSP(vsp_params=vsp_params)
@@ -73,9 +92,15 @@ def _run_sa(
 
 
 def _run_ts(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     ts = TabuSearchVSP(vsp_params=vsp_params)
@@ -85,10 +110,16 @@ def _run_ts(
 
 
 def _run_sp(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
     optimization_params: Optional[Dict[str, Any]],
-    csp_factory: CSPFactory, set_covering_factory: SetCoveringFactory,
+    csp_factory: CSPFactory,
+    set_covering_factory: SetCoveringFactory,
 ) -> OptimizationResult:
     vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
     ilp = set_covering_factory(cct_params, vsp_params)
@@ -97,9 +128,15 @@ def _run_sp(
 
 
 def _run_mcnf(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     mcnf = MCNFVSP(vsp_params=vsp_params)
@@ -109,8 +146,13 @@ def _run_mcnf(
 
 
 def _run_joint(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: Optional[float],
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
     optimization_params: Optional[Dict[str, Any]],
 ) -> OptimizationResult:
     budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
@@ -120,8 +162,13 @@ def _run_joint(
 
 
 def _run_joint_bp(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: Optional[float],
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
     optimization_params: Optional[Dict[str, Any]],
 ) -> OptimizationResult:
     budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
@@ -131,8 +178,13 @@ def _run_joint_bp(
 
 
 def _run_hybrid(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: Optional[float], cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: Optional[float],
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
     optimization_params: Optional[Dict[str, Any]],
 ) -> OptimizationResult:
     budget = time_budget_s or vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
@@ -146,8 +198,13 @@ def _run_hybrid(
 
 
 def _run_vcsp_pulp(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
     optimization_params: Optional[Dict[str, Any]],
 ) -> OptimizationResult:
     return VCSPJointSolver(
@@ -158,9 +215,15 @@ def _run_vcsp_pulp(
 
 
 def _run_assignment_vsp(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     vsp = AssignmentVSP(vsp_params=vsp_params)
@@ -170,9 +233,15 @@ def _run_assignment_vsp(
 
 
 def _run_branch_and_price(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     bp = BranchAndPrice(vsp_params=vsp_params)
@@ -182,9 +251,15 @@ def _run_branch_and_price(
 
 
 def _run_regional(
-    *, trips: List[Trip], vehicle_types: List[VehicleType], depot_id: Optional[int],
-    time_budget_s: float, cct_params: Dict[str, Any], vsp_params: Dict[str, Any],
-    optimization_params: Optional[Dict[str, Any]], csp_factory: CSPFactory,
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
     sub_algo = (optimization_params or {}).get("regional_sub_algorithm", "tabu")
@@ -275,9 +350,12 @@ def dispatch_algorithm(
         )
 
     common_kwargs = dict(
-        trips=trips, vehicle_types=vehicle_types, depot_id=depot_id,
+        trips=trips,
+        vehicle_types=vehicle_types,
+        depot_id=depot_id,
         time_budget_s=effective_time_budget_s,
-        cct_params=cct_params, vsp_params=vsp_params,
+        cct_params=cct_params,
+        vsp_params=vsp_params,
         optimization_params=optimization_params,
     )
 

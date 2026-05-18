@@ -62,12 +62,13 @@ CONDIÇÕES COMPOSTAS (AND lógico — todas devem ser verdadeiras):
 
 ────────────────────────────────────────────────────────────────────────────────
 """
+
 from __future__ import annotations
 
 import logging
 import operator
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -83,25 +84,27 @@ _SAFE_OPERATORS: Dict[str, Callable[[Any, Any], bool]] = {
 
 # ── Campos de custo que podem ser modificados pelas regras dinâmicas ──────────
 # Qualquer target fora desta lista é rejeitado na compilação.
-_MODIFIABLE_COST_FIELDS = frozenset({
-    "work_cost",
-    "guaranteed_cost",
-    "waiting_cost",
-    "overtime_cost",
-    "long_unpaid_break_penalty",
-    "nocturnal_extra",
-    "holiday_extra",
-    "cct_penalties",
-})
+_MODIFIABLE_COST_FIELDS = frozenset(
+    {
+        "work_cost",
+        "guaranteed_cost",
+        "waiting_cost",
+        "overtime_cost",
+        "long_unpaid_break_penalty",
+        "nocturnal_extra",
+        "holiday_extra",
+        "cct_penalties",
+    }
+)
 
 # ── Tipos de ação suportados ──────────────────────────────────────────────────
 _VALID_ACTION_TYPES = frozenset({"multiply", "add", "subtract", "set"})
 
 # ── Limites de segurança contra explosão numérica ────────────────────────────
 _MAX_RULES = 50
-_MULTIPLY_MIN = Decimal('0.0')
-_MULTIPLY_MAX = Decimal('10.0')
-_ABSOLUTE_VALUE_LIMIT = Decimal('100000.0')
+_MULTIPLY_MIN = Decimal("0.0")
+_MULTIPLY_MAX = Decimal("10.0")
+_ABSOLUTE_VALUE_LIMIT = Decimal("100000.0")
 
 
 class _CompiledCondition:
@@ -262,9 +265,7 @@ class DynamicRuleEngine:
 
     # ── Compilação privada ────────────────────────────────────────────────────
 
-    def _compile_rule(
-        self, raw: Dict[str, Any], index: int
-    ) -> Optional[_CompiledRule]:
+    def _compile_rule(self, raw: Dict[str, Any], index: int) -> Optional[_CompiledRule]:
         """Compila uma regra JSON em _CompiledRule. Retorna None se inválida."""
         if not isinstance(raw, dict):
             self._warn(index, "regra não é um dicionário")
@@ -282,9 +283,7 @@ class DynamicRuleEngine:
 
         return _CompiledRule(conditions=conditions, action=action, source_index=index)
 
-    def _compile_conditions(
-        self, raw: Dict[str, Any], index: int
-    ) -> Optional[List[_CompiledCondition]]:
+    def _compile_conditions(self, raw: Dict[str, Any], index: int) -> Optional[List[_CompiledCondition]]:
         """Compila condição única ou lista de condições (AND lógico)."""
         # Formato 1: "condition": {...}
         single = raw.get("condition")
@@ -311,9 +310,7 @@ class DynamicRuleEngine:
 
         return compiled
 
-    def _compile_single_condition(
-        self, cond: Dict[str, Any], index: int
-    ) -> Optional[_CompiledCondition]:
+    def _compile_single_condition(self, cond: Dict[str, Any], index: int) -> Optional[_CompiledCondition]:
         """Compila uma única condição."""
         field = cond.get("field")
         op_str = cond.get("op")
@@ -338,9 +335,7 @@ class DynamicRuleEngine:
             value=value,
         )
 
-    def _compile_action(
-        self, action_raw: Any, index: int
-    ) -> Optional[_CompiledAction]:
+    def _compile_action(self, action_raw: Any, index: int) -> Optional[_CompiledAction]:
         """Compila uma ação com validação de segurança rigorosa."""
         if not isinstance(action_raw, dict):
             self._warn(index, "campo 'action' ausente ou não é dicionário")

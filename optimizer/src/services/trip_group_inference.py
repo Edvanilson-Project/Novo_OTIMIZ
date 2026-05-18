@@ -8,6 +8,7 @@ Responsabilidades:
 
 Funções puras — operam sobre listas de trips e dicts de params.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,7 +66,7 @@ def infer_round_trip_pairs(trips: List[Trip], vsp_params: Dict[str, Any]) -> Lis
 
             best: Optional[Trip] = None
             best_gap = 10**9
-            for nxt in ordered[index + 1:]:
+            for nxt in ordered[index + 1 :]:
                 if nxt.id in used:
                     continue
                 gap = int(nxt.start_time - trip.end_time)
@@ -161,11 +162,7 @@ def inject_trip_group_constraints(
             group_key = (int(trip.line_id), int(trip.trip_group_id))
         grouped.setdefault(group_key, []).append(int(trip.id))
 
-    explicit_groups: List[List[int]] = [
-        sorted(set(ids))
-        for ids in grouped.values()
-        if len(set(ids)) >= 2
-    ]
+    explicit_groups: List[List[int]] = [sorted(set(ids)) for ids in grouped.values() if len(set(ids)) >= 2]
 
     if not explicit_groups and hard_pairing:
         inferred = infer_round_trip_pairs(trips, vsp_params)
@@ -202,7 +199,9 @@ def build_group_inference_report(
     backend_stats_raw = metadata.get("backend_trip_group_stats") or {}
     backend_stats = {
         "group_count": int(backend_stats_raw.get("group_count", optimizer_input_stats["group_count"]) or 0),
-        "grouped_trip_count": int(backend_stats_raw.get("grouped_trip_count", optimizer_input_stats["grouped_trip_count"]) or 0),
+        "grouped_trip_count": int(
+            backend_stats_raw.get("grouped_trip_count", optimizer_input_stats["grouped_trip_count"]) or 0
+        ),
         "max_group_size": int(backend_stats_raw.get("max_group_size", optimizer_input_stats["max_group_size"]) or 0),
     }
 

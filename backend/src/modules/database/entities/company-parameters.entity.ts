@@ -3,7 +3,6 @@ import { TenantBaseEntity } from '../../../common/entities/base.entity';
 
 @Entity('company_parameters')
 export class CompanyParameters extends TenantBaseEntity {
-
   // ── Custos Operacionais ──
   @Column('float', { default: 0.5 })
   driver_cost_per_minute: number;

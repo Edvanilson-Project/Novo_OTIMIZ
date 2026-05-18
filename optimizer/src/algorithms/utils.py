@@ -3,10 +3,11 @@ Utilitários compartilhados pelos algoritmos de busca (SA, TS, GA).
 
 Funções:
   - sort_block_trips(blocks)    — re-ordena viagens por start_time em cada bloco
-  - block_is_feasible(block)    — verifica sobreposição básica (gap >= 0) 
+  - block_is_feasible(block)    — verifica sobreposição básica (gap >= 0)
   - blocks_are_feasible(blocks) — verifica todos os blocos
   - quick_cost_sorted(blocks)   — custo rápido com trips já ordenadas
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, Optional
@@ -68,18 +69,20 @@ def is_connection_feasible(
     min_layover = int(min_layover)
     min_break = int(min_break)
     connection_tolerance = int(connection_tolerance)
-    
+
     """Centraliza a lógica de viabilidade de conexão VSP com cache de aresta."""
     # PERF: Cache de aresta nível 1 (O(1) após primeiro hit)
-    params_key = frozenset({
-        ("ml", min_layover),
-        ("mb", min_break),
-        ("emi", enforce_min_interval),
-        ("ct", connection_tolerance),
-        ("szgv", strict_zero_gap_validation),
-        ("som", strict_operational_mode),
-        ("shc", strict_hard_constraints)
-    })
+    params_key = frozenset(
+        {
+            ("ml", min_layover),
+            ("mb", min_break),
+            ("emi", enforce_min_interval),
+            ("ct", connection_tolerance),
+            ("szgv", strict_zero_gap_validation),
+            ("som", strict_operational_mode),
+            ("shc", strict_hard_constraints),
+        }
+    )
     deadhead = int(current.deadhead_times.get(nxt.origin_id, 0))
     # Chave robusta contra alterações dinâmicas no frontend (What-If)
     cache_key = (
@@ -99,20 +102,22 @@ def is_connection_feasible(
         return _EDGE_FEASIBILITY_CACHE[cache_key]
 
     res = _is_connection_feasible_logic(
-        current, nxt,
+        current,
+        nxt,
         min_layover=min_layover,
         min_break=min_break,
         enforce_min_interval=enforce_min_interval,
         connection_tolerance=connection_tolerance,
         strict_zero_gap_validation=strict_zero_gap_validation,
         strict_operational_mode=strict_operational_mode,
-        strict_hard_constraints=strict_hard_constraints
+        strict_hard_constraints=strict_hard_constraints,
     )
 
     if len(_EDGE_FEASIBILITY_CACHE) >= 20000:
         _EDGE_FEASIBILITY_CACHE.popitem(last=False)
     _EDGE_FEASIBILITY_CACHE[cache_key] = res
     return res
+
 
 def _is_connection_feasible_logic(
     current: Trip,
@@ -127,7 +132,7 @@ def _is_connection_feasible_logic(
     strict_hard_constraints: bool = False,
 ) -> bool:
     """Centraliza a lógica de viabilidade de conexão VSP.
-    
+
     Regras:
     1. gap < 0: Inviável (sobreposição).
     2. gap == 0: Só viável se for mesmo trip_group_id ou continuação de segmento.
@@ -152,12 +157,12 @@ def _is_connection_feasible_logic(
     if gap == 0:
         if not (is_contiguous_pair or is_same_trip_segment):
             return False
-        
+
         # Upgrade de qualidade: validação geográfica em gap zero
         if strict_zero_gap_validation:
             if getattr(current, "destination_id", None) != getattr(nxt, "origin_id", None):
                 return False
-        
+
         return True
 
     # A regra central deve ser verificada antes de qualquer tolerância
@@ -170,7 +175,7 @@ def _is_connection_feasible_logic(
     # 4. Strict Hard Constraints: Rejeita tolerâncias (Segurança operacional total)
     if strict_operational_mode or strict_hard_constraints:
         return gap >= required
-    
+
     # 5. Fallback com tolerância
     return (gap + connection_tolerance) >= required
 
@@ -194,14 +199,12 @@ def compute_idle_cost(gap: int, vsp_params: Dict[str, Any]) -> float:
     """Calcula custo de ociosidade (idle) padronizado."""
     return gap * float(vsp_params.get("idle_cost_per_minute", 0.25))
 
+
 def sort_block_trips(blocks: List[Block]) -> None:
     """Ordena in-place a lista interna de cada bloco de forma segura."""
     for b in blocks:
         if b.trips:
             b.trips = sorted(b.trips, key=lambda t: t.start_time)
-
-
-
 
 
 def quick_cost_sorted(
@@ -213,12 +216,9 @@ def quick_cost_sorted(
 ) -> float:
     """Estimativa de custo rápida (compatibilidade com Block)."""
     return quick_cost_from_trips(
-        [b.trips for b in blocks],
-        fixed_vehicle_cost,
-        idle_cost_per_minute,
-        max_work_minutes,
-        crew_cost_weight
+        [b.trips for b in blocks], fixed_vehicle_cost, idle_cost_per_minute, max_work_minutes, crew_cost_weight
     )
+
 
 def quick_cost_from_trips(
     sequences: List[List[Trip]],
@@ -231,15 +231,16 @@ def quick_cost_from_trips(
     Estimativa de custo ultra-rápida usando float puro para metaheurísticas.
     """
     import math
+
     total = 0.0
     for trips in sequences:
         if not trips:
             continue
         total += fixed_vehicle_cost
-        
+
         # Uso de gerador para evitar alocação de lista extra no sum()
         block_work = sum(t.duration for t in trips)
-        
+
         if max_work_minutes > 0:
             block_spread = trips[-1].end_time - trips[0].start_time
             # math.ceil é significativamente mais rápido que Decimal operations
@@ -266,12 +267,9 @@ def preferred_pair_penalty(
 ) -> float:
     """Pontua preservação de pares preferenciais (compatibilidade com Block)."""
     return preferred_pair_penalty_from_trips(
-        [b.trips for b in blocks],
-        preferred_pairs,
-        pair_break_penalty,
-        paired_trip_bonus,
-        hard_pairing_penalty
+        [b.trips for b in blocks], preferred_pairs, pair_break_penalty, paired_trip_bonus, hard_pairing_penalty
     )
+
 
 def preferred_pair_penalty_from_trips(
     sequences: List[List[Trip]],
@@ -288,20 +286,20 @@ def preferred_pair_penalty_from_trips(
 
     trip_to_block_idx: Dict[int, int] = {}
     consecutive_pairs: set[Tuple[int, int]] = set()
-    
+
     for idx, trips in enumerate(sequences):
         for trip in trips:
             trip_to_block_idx[trip.id] = idx
         for i in range(len(trips) - 1):
             curr = trips[i]
-            nxt = trips[i+1]
+            nxt = trips[i + 1]
             if preferred_pairs.get(curr.id) == nxt.id:
                 # Usa tupla ordenada como chave de par
                 consecutive_pairs.add(tuple(sorted((curr.id, nxt.id))))
 
     total = 0.0
     seen_pairs: set[Tuple[int, int]] = set()
-    
+
     for trip_id, pair_id in preferred_pairs.items():
         signature = tuple(sorted((trip_id, pair_id)))
         if signature in seen_pairs:
@@ -310,7 +308,7 @@ def preferred_pair_penalty_from_trips(
 
         b_idx_a = trip_to_block_idx.get(trip_id)
         b_idx_b = trip_to_block_idx.get(pair_id)
-        
+
         if signature in consecutive_pairs:
             total -= paired_trip_bonus
         elif b_idx_a is None or b_idx_b is None or b_idx_a != b_idx_b:
@@ -331,7 +329,7 @@ def is_block_feasible(
     strict_cache: bool = False,
 ) -> bool:
     """Verifica se uma sequência de viagens é viável como um bloco único com cache LRU.
-    
+
     Args:
         strict_cache: Se True, inclui timestamps e IDs geográficos na chave do cache
                       para evitar falsos positivos em cenários de what-if/simulação.
@@ -339,10 +337,10 @@ def is_block_feasible(
     """
     if len(trips) <= 1:
         return True
-    
+
     p = extract_connection_params(vsp_params)
     params_key = frozenset(p.items())
-    
+
     if strict_cache:
         # Versão completa: segura para what-if onde a trip pode mudar atributos relevantes.
         trips_key = tuple(
@@ -368,13 +366,13 @@ def is_block_feasible(
             )
             for i, t in enumerate(trips)
         )
-    
+
     cache_key = (trips_key, params_key)
-    
+
     if cache_key in _FEASIBILITY_CACHE:
         _FEASIBILITY_CACHE.move_to_end(cache_key)  # LRU
         return _FEASIBILITY_CACHE[cache_key]
-    
+
     # 1. Verificar max shift (verificação barata → short-circuit)
     if p["max_vehicle_shift"] > 0 and (trips[-1].end_time - trips[0].start_time) > p["max_vehicle_shift"]:
         res = False
@@ -385,27 +383,28 @@ def is_block_feasible(
             res = len(lines) <= 1
         else:
             res = True
-            
+
         if res:
             # 3. Verificar conexões par a par
             for i in range(len(trips) - 1):
                 if not is_connection_feasible(
-                    trips[i], trips[i + 1],
+                    trips[i],
+                    trips[i + 1],
                     min_layover=p["min_layover"],
                     min_break=p["min_break"],
                     enforce_min_interval=p["enforce_min_interval"],
                     connection_tolerance=p["connection_tolerance"],
                     strict_zero_gap_validation=p["strict_zero_gap_validation"],
                     strict_operational_mode=p["strict_operational_mode"],
-                    strict_hard_constraints=p["strict_hard_constraints"]
+                    strict_hard_constraints=p["strict_hard_constraints"],
                 ):
                     res = False
                     break
-    
+
     # Ejeção LRU: remove o menos recentemente usado quando o cache está cheio
     if len(_FEASIBILITY_CACHE) >= 10000:
         _FEASIBILITY_CACHE.popitem(last=False)
-        
+
     _FEASIBILITY_CACHE[cache_key] = res
     return res
 
@@ -414,7 +413,7 @@ def compute_block_gap_stats(trips: List[Trip]) -> Dict[str, Any]:
     """Calcula estatísticas de gap para fins de benchmark e auditoria."""
     if len(trips) < 2:
         return {"min_gap": 0, "max_gap": 0, "avg_gap": 0, "gap_count": 0, "negative_gaps": 0}
-    
+
     gaps = [trips[i + 1].start_time - trips[i].end_time for i in range(len(trips) - 1)]
     negative = sum(1 for g in gaps if g < 0)
     return {
@@ -428,7 +427,7 @@ def compute_block_gap_stats(trips: List[Trip]) -> Dict[str, Any]:
 
 class ConstraintEngine:
     """Centraliza a lógica de restrições e viabilidade do solver (ConstraintEngine)."""
-    
+
     def __init__(self, vsp_params: Dict[str, Any]):
         self.vsp_params = vsp_params
         self.p = extract_connection_params(vsp_params)
@@ -436,14 +435,15 @@ class ConstraintEngine:
     def is_connection_feasible(self, current: Trip, nxt: Trip) -> bool:
         """Verifica se a conexão entre duas viagens é viável."""
         return is_connection_feasible(
-            current, nxt,
+            current,
+            nxt,
             min_layover=self.p["min_layover"],
             min_break=self.p["min_break"],
             enforce_min_interval=self.p["enforce_min_interval"],
             connection_tolerance=self.p["connection_tolerance"],
             strict_zero_gap_validation=self.p["strict_zero_gap_validation"],
             strict_operational_mode=self.p["strict_operational_mode"],
-            strict_hard_constraints=self.p["strict_hard_constraints"]
+            strict_hard_constraints=self.p["strict_hard_constraints"],
         )
 
     def is_block_feasible(self, trips: List[Trip]) -> bool:

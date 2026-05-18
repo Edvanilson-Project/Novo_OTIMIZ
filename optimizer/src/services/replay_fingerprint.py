@@ -221,9 +221,9 @@ def build_reproducibility_snapshot(
             "Replicável se os mesmos dados e parâmetros forem reutilizados."
             if deterministic_replay_possible
             else (
-                "Seed explícita reduz a variabilidade, mas o solver usa budget por tempo; execuções equivalentes podem divergir no número de iterações e no resultado final."
+                "Seed explícita reduz a variabilidade, mas o solver usa budget por tempo; execuções equivalentes podem divergir no número de iterações e no resultado final."  # noqa: E501
                 if random_seed is not None
-                else "Algoritmo estocástico sem seed explícita: execuções equivalentes podem divergir mesmo com o mesmo input."
+                else "Algoritmo estocástico sem seed explícita: execuções equivalentes podem divergir mesmo com o mesmo input."  # noqa: E501
             )
         ),
     }

@@ -5,7 +5,6 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   ConnectedSocket,
-  MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
@@ -16,16 +15,21 @@ import { Logger } from '@nestjs/common';
   },
   namespace: 'operations',
 })
-export class OptimizationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class OptimizationGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
   private logger: Logger = new Logger('OptimizationGateway');
 
   handleConnection(client: Socket) {
-    const companyId = client.handshake.query.companyId;
+    const rawCompanyId = client.handshake.query.companyId;
+    const companyId = Array.isArray(rawCompanyId)
+      ? rawCompanyId[0]
+      : rawCompanyId;
     if (companyId) {
-      client.join(`company_${companyId}`);
+      void client.join(`company_${companyId}`);
       this.logger.log(`Client ${client.id} joined room company_${companyId}`);
     }
   }
@@ -35,15 +39,30 @@ export class OptimizationGateway implements OnGatewayConnection, OnGatewayDiscon
   }
 
   @SubscribeMessage('ping')
-  handlePing(@ConnectedSocket() client: Socket): string {
+  handlePing(@ConnectedSocket() _client: Socket): string {
     return 'pong';
   }
 
-  notifyOptimizationProgress(companyId: number, payload: { scheduleId: number; taskId: string; progressPct?: number | null; phase?: string | null; phaseLabel?: string | null; }) {
-    this.server.to(`company_${companyId}`).emit('optimization_progress', payload);
+  notifyOptimizationProgress(
+    companyId: number,
+    payload: {
+      scheduleId: number;
+      taskId: string;
+      progressPct?: number | null;
+      phase?: string | null;
+      phaseLabel?: string | null;
+    },
+  ) {
+    this.server
+      .to(`company_${companyId}`)
+      .emit('optimization_progress', payload);
   }
 
-  notifyOptimizationFinished(companyId: number, scheduleId: number, result: any) {
+  notifyOptimizationFinished(
+    companyId: number,
+    scheduleId: number,
+    result: any,
+  ) {
     this.server.to(`company_${companyId}`).emit('optimization_finished', {
       scheduleId,
       result,
@@ -56,11 +75,17 @@ export class OptimizationGateway implements OnGatewayConnection, OnGatewayDiscon
     });
   }
 
-  notifyOptimizationQueued(companyId: number, payload: { scheduleId: number; taskId: string }) {
+  notifyOptimizationQueued(
+    companyId: number,
+    payload: { scheduleId: number; taskId: string },
+  ) {
     this.server.to(`company_${companyId}`).emit('optimization_queued', payload);
   }
 
-  notifyOptimizationStale(companyId: number, payload: { scheduleId: number; taskId: string }) {
+  notifyOptimizationStale(
+    companyId: number,
+    payload: { scheduleId: number; taskId: string },
+  ) {
     this.server.to(`company_${companyId}`).emit('optimization_stale', payload);
   }
 }

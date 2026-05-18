@@ -12,6 +12,7 @@ Métodos NÃO extraídos (ainda têm acoplamento com self.evaluator/self.validat
   `_build_operational_quality_candidate`, `_build_plus_one_duty_candidate`,
   `_select_operational_quality_scenario`, `_ensure_operational_quality_decision`
 """
+
 from __future__ import annotations
 
 import copy
@@ -57,7 +58,9 @@ def classify_duty_severity(duty: Duty) -> Dict[str, Any]:
     utilization = float(semantic_metrics.get("utilization", metrics.get("utilization", 0.0)) or 0.0)
     spread_time = int(semantic_metrics.get("spread_time", duty.spread_time) or duty.spread_time or 0)
     total_idle = int(
-        semantic_metrics.get("total_idle_time", metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time)))
+        semantic_metrics.get(
+            "total_idle_time", metrics.get("total_idle_time", max(0, duty.spread_time - duty.work_time))
+        )
         or 0
     )
     severity = "acceptable"
@@ -122,17 +125,10 @@ def clone_duty_slice(source: Duty, tasks: List[Block], duty_id: int) -> Duty:
 
     cloned.meta["source_block_ids"] = [int(task.id) for task in cloned.tasks]
     cloned.meta["covered_original_trip_ids"] = [
-        int(getattr(trip, "public_id", trip.id))
-        for task in cloned.tasks
-        for trip in task.trips
+        int(getattr(trip, "public_id", trip.id)) for task in cloned.tasks for trip in task.trips
     ]
     cloned.meta["covered_trip_group_ids"] = sorted(
-        {
-            int(trip.trip_group_id)
-            for task in cloned.tasks
-            for trip in task.trips
-            if trip.trip_group_id is not None
-        }
+        {int(trip.trip_group_id) for task in cloned.tasks for trip in task.trips if trip.trip_group_id is not None}
     )
     cloned.meta["operator_id"] = None
     cloned.meta["operator_name"] = None
@@ -190,7 +186,10 @@ def scenario_rejection_reason(
     chosen_summary = chosen["summary"]
     rejected_summary = rejected["summary"]
     blocking_reasons = list(comparison.get("blocking_reasons") or [])
-    if "coverage_regressed_unassigned_trips" in blocking_reasons or "coverage_regressed_uncovered_blocks" in blocking_reasons:
+    if (
+        "coverage_regressed_unassigned_trips" in blocking_reasons
+        or "coverage_regressed_uncovered_blocks" in blocking_reasons
+    ):
         return "Piora cobertura do plano."
     if "hard_violations_increased" in blocking_reasons:
         return "Aumenta hard violations."
@@ -222,7 +221,7 @@ def scenario_justification(
     lines = [
         f"Modo operacional selecionado: {mode}.",
         (
-            f"Cenario escolhido: {chosen['title']} ({chosen['scenario_id']}) com custo {chosen_summary['total_cost']:.2f}, "
+            f"Cenario escolhido: {chosen['title']} ({chosen['scenario_id']}) com custo {chosen_summary['total_cost']:.2f}, "  # noqa: E501
             f"{chosen_summary['duties_below_25_pct']} duties abaixo de 25%, "
             f"{chosen_summary['mandatory_rest_missing']} mandatory_rest_missing e "
             f"{chosen_summary['critical_count']} excecao(oes) critica(s)."
@@ -230,30 +229,34 @@ def scenario_justification(
     ]
     if comparison and chosen["scenario_id"] != current_plan["scenario_id"]:
         lines.append(
-            f"Comparado ao current_plan, o cenario escolhido melhorou {int(comparison.get('improved_count', 0))} KPI(s): "
+            f"Comparado ao current_plan, o cenario escolhido melhorou {int(comparison.get('improved_count', 0))} KPI(s): "  # noqa: E501
             + ", ".join(comparison.get("improvements") or ["sem melhoria listada"])
             + "."
         )
         if comparison.get("cost_increased"):
             lines.append(
-                f"O custo aumentou {abs(float(comparison.get('cost_delta', 0.0) or 0.0)):.2f}, mas a melhora operacional foi considerada relevante."
+                f"O custo aumentou {abs(float(comparison.get('cost_delta', 0.0) or 0.0)):.2f}, mas a melhora operacional foi considerada relevante."  # noqa: E501
             )
     elif chosen["scenario_id"] == current_plan["scenario_id"]:
         lines.append(
-            "O current_plan foi mantido porque nenhum candidato melhorou pelo menos 2 KPIs operacionais sem piorar cobertura ou hard violations."
+            "O current_plan foi mantido porque nenhum candidato melhorou pelo menos 2 KPIs operacionais sem piorar cobertura ou hard violations."  # noqa: E501
         )
     if mode == "strict" and chosen["scenario_id"] != strict["scenario_id"]:
-        lines.append("Nao houve cenario com zero duties abaixo de 25%; foi selecionado o fallback mais proximo sem aumentar hard violations.")
+        lines.append(
+            "Nao houve cenario com zero duties abaixo de 25%; foi selecionado o fallback mais proximo sem aumentar hard violations."  # noqa: E501
+        )
     if mode == "balanced" and chosen["scenario_id"] == balanced["scenario_id"]:
-        lines.append("O criterio balanced priorizou reduzir a cauda operacional antes de custo marginal ou do numero de duties.")
+        lines.append(
+            "O criterio balanced priorizou reduzir a cauda operacional antes de custo marginal ou do numero de duties."
+        )
     if mode == "optimized" and chosen["scenario_id"] == cheapest["scenario_id"]:
         lines.append("O criterio optimized escolheu o menor custo total entre os cenarios viaveis.")
     if chosen["scenario_id"] != current_plan["scenario_id"]:
         lines.append(
-            f"Current_plan: duties<25%={current_summary['duties_below_25_pct']}, duties>12h={current_summary['duties_above_12h']}, idle medio={current_summary['avg_idle_minutes']}, mandatory_rest_missing={current_summary['mandatory_rest_missing']}, overtime={current_summary['overtime_minutes']}."
+            f"Current_plan: duties<25%={current_summary['duties_below_25_pct']}, duties>12h={current_summary['duties_above_12h']}, idle medio={current_summary['avg_idle_minutes']}, mandatory_rest_missing={current_summary['mandatory_rest_missing']}, overtime={current_summary['overtime_minutes']}."  # noqa: E501
         )
         lines.append(
-            f"Escolhido: duties<25%={chosen_summary['duties_below_25_pct']}, duties>12h={chosen_summary['duties_above_12h']}, idle medio={chosen_summary['avg_idle_minutes']}, mandatory_rest_missing={chosen_summary['mandatory_rest_missing']}, overtime={chosen_summary['overtime_minutes']}."
+            f"Escolhido: duties<25%={chosen_summary['duties_below_25_pct']}, duties>12h={chosen_summary['duties_above_12h']}, idle medio={chosen_summary['avg_idle_minutes']}, mandatory_rest_missing={chosen_summary['mandatory_rest_missing']}, overtime={chosen_summary['overtime_minutes']}."  # noqa: E501
         )
     return lines
 

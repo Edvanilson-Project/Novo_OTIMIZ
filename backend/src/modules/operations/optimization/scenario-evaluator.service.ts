@@ -118,7 +118,8 @@ export class ScenarioEvaluatorService {
       where: { id: scheduleId, companyId },
       relations: ['blocks'],
     });
-    if (!baseline) throw new NotFoundException(`Schedule ${scheduleId} não encontrado.`);
+    if (!baseline)
+      throw new NotFoundException(`Schedule ${scheduleId} não encontrado.`);
 
     const out: ScenarioOption[] = [this.materializeCurrent(baseline)];
 
@@ -150,14 +151,25 @@ export class ScenarioEvaluatorService {
     const c1 = s1.totalCost ?? 0;
     const c2 = s2.totalCost ?? 0;
     const savings = c1 - c2;
-    const savingsPercent = c1 > 0 ? Math.round(((c1 - c2) / c1) * 1000) / 10 : null;
+    const savingsPercent =
+      c1 > 0 ? Math.round(((c1 - c2) / c1) * 1000) / 10 : null;
     const differences: string[] = [];
 
-    if (s1.status !== 'baseline' && s1.status !== OptimizationRunStatus.COMPLETED) {
-      differences.push(`Cenário ${s1.id} ainda em ${s1.status} — comparação parcial.`);
+    if (
+      s1.status !== 'baseline' &&
+      s1.status !== OptimizationRunStatus.COMPLETED
+    ) {
+      differences.push(
+        `Cenário ${s1.id} ainda em ${s1.status} — comparação parcial.`,
+      );
     }
-    if (s2.status !== 'baseline' && s2.status !== OptimizationRunStatus.COMPLETED) {
-      differences.push(`Cenário ${s2.id} ainda em ${s2.status} — comparação parcial.`);
+    if (
+      s2.status !== 'baseline' &&
+      s2.status !== OptimizationRunStatus.COMPLETED
+    ) {
+      differences.push(
+        `Cenário ${s2.id} ainda em ${s2.status} — comparação parcial.`,
+      );
     }
 
     if ((s1.vehiclesUsed ?? 0) !== (s2.vehiclesUsed ?? 0)) {
@@ -182,7 +194,13 @@ export class ScenarioEvaluatorService {
       );
     }
 
-    return { scenario1: s1, scenario2: s2, savings, savingsPercent, differences };
+    return {
+      scenario1: s1,
+      scenario2: s2,
+      savings,
+      savingsPercent,
+      differences,
+    };
   }
 
   /** Retorna a run mais recente de um cenário para um schedule baseline (para polling). */
@@ -216,9 +234,13 @@ export class ScenarioEvaluatorService {
     const completed = await this.optimizationRunRepo
       .createQueryBuilder('run')
       .where('run.companyId = :companyId', { companyId })
-      .andWhere('run.baselineScheduleId = :baselineId', { baselineId: baseline.id })
+      .andWhere('run.baselineScheduleId = :baselineId', {
+        baselineId: baseline.id,
+      })
       .andWhere('run.scenarioId = :scenarioId', { scenarioId: cfg.id })
-      .andWhere('run.status = :status', { status: OptimizationRunStatus.COMPLETED })
+      .andWhere('run.status = :status', {
+        status: OptimizationRunStatus.COMPLETED,
+      })
       .andWhere('run.completedAt > :cutoff', { cutoff })
       .orderBy('run.completedAt', 'DESC')
       .getOne();
@@ -232,8 +254,18 @@ export class ScenarioEvaluatorService {
     // 2) Run em andamento (RUNNING ou PENDING) — não reenfileira
     const inFlight = await this.optimizationRunRepo.findOne({
       where: [
-        { companyId, baselineScheduleId: baseline.id, scenarioId: cfg.id, status: OptimizationRunStatus.RUNNING },
-        { companyId, baselineScheduleId: baseline.id, scenarioId: cfg.id, status: OptimizationRunStatus.PENDING },
+        {
+          companyId,
+          baselineScheduleId: baseline.id,
+          scenarioId: cfg.id,
+          status: OptimizationRunStatus.RUNNING,
+        },
+        {
+          companyId,
+          baselineScheduleId: baseline.id,
+          scenarioId: cfg.id,
+          status: OptimizationRunStatus.PENDING,
+        },
       ],
       order: { createdAt: 'DESC' },
     });
@@ -261,7 +293,10 @@ export class ScenarioEvaluatorService {
         where: { id: (submission as any).optimizationRunId },
       });
       if (!run) {
-        return this.placeholderScenario(cfg, 'Run criada mas não localizada no repositório.');
+        return this.placeholderScenario(
+          cfg,
+          'Run criada mas não localizada no repositório.',
+        );
       }
       this.logger.log(
         `[SCENARIO] nova run ${run.id} cenário=${cfg.id} schedule=${baseline.id} algorithm=${cfg.algorithm}`,
@@ -275,20 +310,35 @@ export class ScenarioEvaluatorService {
     }
   }
 
-  private toScenarioOption(cfg: ScenarioConfig, run: OptimizationRun): ScenarioOption {
+  private toScenarioOption(
+    cfg: ScenarioConfig,
+    run: OptimizationRun,
+  ): ScenarioOption {
     const metrics = run.metrics ?? {};
     return {
       id: cfg.id,
       name: cfg.name,
       description: cfg.description,
       status: run.status,
-      totalCost: run.status === OptimizationRunStatus.COMPLETED ? Number(metrics.totalCost ?? 0) : null,
-      vehiclesUsed: run.status === OptimizationRunStatus.COMPLETED ? Number(metrics.numVehicles ?? 0) : null,
+      totalCost:
+        run.status === OptimizationRunStatus.COMPLETED
+          ? Number(metrics.totalCost ?? 0)
+          : null,
+      vehiclesUsed:
+        run.status === OptimizationRunStatus.COMPLETED
+          ? Number(metrics.numVehicles ?? 0)
+          : null,
       tripsUnassigned:
-        run.status === OptimizationRunStatus.COMPLETED ? Number(metrics.unassignedTrips ?? 0) : null,
+        run.status === OptimizationRunStatus.COMPLETED
+          ? Number(metrics.unassignedTrips ?? 0)
+          : null,
       cctViolations:
-        run.status === OptimizationRunStatus.COMPLETED ? Number(metrics.cctViolations ?? 0) : null,
-      feasible: run.status === OptimizationRunStatus.COMPLETED && Number(metrics.hardIssueCount ?? 0) === 0,
+        run.status === OptimizationRunStatus.COMPLETED
+          ? Number(metrics.cctViolations ?? 0)
+          : null,
+      feasible:
+        run.status === OptimizationRunStatus.COMPLETED &&
+        Number(metrics.hardIssueCount ?? 0) === 0,
       maintenanceWarnings: [],
       optimizationRunId: run.id,
       resultScheduleId: run.resultScheduleId,
@@ -300,7 +350,10 @@ export class ScenarioEvaluatorService {
     };
   }
 
-  private placeholderScenario(cfg: ScenarioConfig, errorMessage: string): ScenarioOption {
+  private placeholderScenario(
+    cfg: ScenarioConfig,
+    errorMessage: string,
+  ): ScenarioOption {
     return {
       id: cfg.id,
       name: cfg.name,

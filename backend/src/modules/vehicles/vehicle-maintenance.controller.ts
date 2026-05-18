@@ -39,7 +39,11 @@ export class VehicleMaintenanceController {
     @Param('maintenanceId', ParseIntPipe) maintenanceId: number,
     @Body('status') status: string,
   ) {
-    return this.service.updateMaintenanceStatus(vehicleId, maintenanceId, status as any);
+    return this.service.updateMaintenanceStatus(
+      vehicleId,
+      maintenanceId,
+      status as any,
+    );
   }
 
   @Delete(':maintenanceId')

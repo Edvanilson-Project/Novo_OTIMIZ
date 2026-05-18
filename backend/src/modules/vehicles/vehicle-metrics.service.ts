@@ -99,7 +99,8 @@ export class VehicleMetricsService {
     } else {
       const lastMaint = maintenanceHistory[0].maintenanceDate;
       const daysSinceLastMaint = Math.floor(
-        (new Date().getTime() - new Date(lastMaint).getTime()) / (1000 * 60 * 60 * 24),
+        (new Date().getTime() - new Date(lastMaint).getTime()) /
+          (1000 * 60 * 60 * 24),
       );
 
       if (daysSinceLastMaint > 180) {
@@ -123,7 +124,9 @@ export class VehicleMetricsService {
     return Math.max(0, Math.min(100, score));
   }
 
-  private getMaintenanceStatus(healthScore: number): 'good' | 'warning' | 'critical' {
+  private getMaintenanceStatus(
+    healthScore: number,
+  ): 'good' | 'warning' | 'critical' {
     if (healthScore >= 80) return 'good';
     if (healthScore >= 60) return 'warning';
     return 'critical';
@@ -147,7 +150,8 @@ export class VehicleMetricsService {
     } else {
       const lastMaint = maintenanceHistory[0].maintenanceDate;
       const daysSinceLastMaint = Math.floor(
-        (new Date().getTime() - new Date(lastMaint).getTime()) / (1000 * 60 * 60 * 24),
+        (new Date().getTime() - new Date(lastMaint).getTime()) /
+          (1000 * 60 * 60 * 24),
       );
 
       if (daysSinceLastMaint > 180) {
@@ -161,16 +165,24 @@ export class VehicleMetricsService {
 
     if (vehicle.odometer) {
       if (vehicle.odometer > 500000) {
-        issues.push(`Quilometragem crítica (${vehicle.odometer.toLocaleString()} km)`);
-        recommendations.push('Considerar aposentadoria ou grande revisão do veículo');
+        issues.push(
+          `Quilometragem crítica (${vehicle.odometer.toLocaleString()} km)`,
+        );
+        recommendations.push(
+          'Considerar aposentadoria ou grande revisão do veículo',
+        );
       } else if (vehicle.odometer > 300000) {
-        issues.push(`Quilometragem elevada (${vehicle.odometer.toLocaleString()} km)`);
+        issues.push(
+          `Quilometragem elevada (${vehicle.odometer.toLocaleString()} km)`,
+        );
         recommendations.push('Aumentar frequência de manutenções preventivas');
       }
     }
 
     if (healthScore < 60) {
-      recommendations.push('Revisar plano de operações - veículo pode não estar confiável');
+      recommendations.push(
+        'Revisar plano de operações - veículo pode não estar confiável',
+      );
     }
 
     return { issues, recommendations };

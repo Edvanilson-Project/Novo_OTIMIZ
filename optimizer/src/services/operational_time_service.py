@@ -42,8 +42,14 @@ def build_duty_operational_time_report(
     mandatory_break_after = max(0, int(mandatory_break_after_minutes))
     start_buffer = max(0, int(duty.meta.get("start_buffer_minutes", 0) or 0))
     end_buffer = max(0, int(duty.meta.get("end_buffer_minutes", 0) or 0))
-    duty_start = int(duty.meta.get("duty_start_minutes", tasks[0].start_time - (start_buffer if pullout_counts_in_driver_shift else 0)))
-    duty_end = int(duty.meta.get("duty_end_minutes", tasks[-1].end_time + (end_buffer if pullback_counts_in_driver_shift else 0)))
+    duty_start = int(
+        duty.meta.get(
+            "duty_start_minutes", tasks[0].start_time - (start_buffer if pullout_counts_in_driver_shift else 0)
+        )
+    )
+    duty_end = int(
+        duty.meta.get("duty_end_minutes", tasks[-1].end_time + (end_buffer if pullback_counts_in_driver_shift else 0))
+    )
 
     total_drive = 0
     cumulative_work_before_gap = 0
@@ -130,7 +136,11 @@ def build_duty_operational_time_report(
                 "trip_group_ids": trip_group_ids,
                 "trip_directions": trip_directions,
                 **({"bundle_event_type": "commercial_trip_bundle"} if trip_count > 1 else {}),
-                **({"explanation": f"Segmento operacional agrupado com {trip_count} viagens reais."} if trip_count > 1 else {}),
+                **(
+                    {"explanation": f"Segmento operacional agrupado com {trip_count} viagens reais."}
+                    if trip_count > 1
+                    else {}
+                ),
             }
         )
         cumulative_work_before_gap += int(task_work[index])
@@ -239,7 +249,7 @@ def build_duty_operational_time_report(
 
     has_valid_mandatory_rest = mandatory_rest_time > 0
     invalid_rest_position = bool(required_rest > 0 and (start_buffer >= required_rest or end_buffer >= required_rest))
-    productive_minutes = int(duty.work_time or total_drive)
+    int(duty.work_time or total_drive)
     max_continuous_drive = int(duty.meta.get("max_continuous_drive_minutes", 0) or 0)
     # CCT BR transporte urbano (CLT art. 235-D): pausa obrigatória de 30min é exigida
     # quando há CONDUÇÃO CONTÍNUA acima do limite (mandatory_break_after, ex: 4h).
@@ -249,11 +259,7 @@ def build_duty_operational_time_report(
     # A condição antiga `productive_minutes > mandatory_break_after` produzia falso-positivo
     # em duties como D27/D32/D43 (work 316min com max_continuous 110min).
     mandatory_rest_required = bool(
-        required_rest > 0
-        and (
-            has_valid_mandatory_rest
-            or max_continuous_drive > mandatory_break_after
-        )
+        required_rest > 0 and (has_valid_mandatory_rest or max_continuous_drive > mandatory_break_after)
     )
 
     violations: List[str] = []
@@ -273,18 +279,18 @@ def build_duty_operational_time_report(
     elif invalid_rest_position:
         user_explanation = (
             f"Esta jornada possui {window_total} minutos de janela total, {productive} minutos de trabalho produtivo e "
-            f"{non_productive} minutos sem producao. Uma pausa longa no inicio/fim da jornada nao foi aceita como descanso obrigatorio."
+            f"{non_productive} minutos sem producao. Uma pausa longa no inicio/fim da jornada nao foi aceita como descanso obrigatorio."  # noqa: E501
         )
     else:
         user_explanation = (
-            f"Esta jornada possui {window_total} minutos de janela total, mas apenas {productive} minutos de trabalho produtivo. "
-            f"Os {non_productive} minutos restantes ficaram classificados como espera operacional, pausa normal ou buffers de soltura/recolhimento."
+            f"Esta jornada possui {window_total} minutos de janela total, mas apenas {productive} minutos de trabalho produtivo. "  # noqa: E501
+            f"Os {non_productive} minutos restantes ficaram classificados como espera operacional, pausa normal ou buffers de soltura/recolhimento."  # noqa: E501
         )
 
     if mandatory_rest_required and not has_valid_mandatory_rest:
         suggestion = "Adicionar uma duty, revisar o pairing ou ajustar a regra configuravel de mandatory_rest da CCT."
     elif idle_time > productive:
-        suggestion = "Aceitar com warning apenas se a ociosidade longa fizer sentido operacional; caso contrario, revisar o pairing."
+        suggestion = "Aceitar com warning apenas se a ociosidade longa fizer sentido operacional; caso contrario, revisar o pairing."  # noqa: E501
     else:
         suggestion = "Aceitar com warning se os tempos estiverem aderentes a operacao real."
 
@@ -312,12 +318,18 @@ def build_duty_operational_time_report(
 
 
 def summarize_operational_time_reports(duties: Sequence[Duty]) -> Dict[str, Any]:
-    reports = [dict(duty.meta.get("operational_time_report") or {}) for duty in duties if duty.meta.get("operational_time_report")]
+    reports = [
+        dict(duty.meta.get("operational_time_report") or {})
+        for duty in duties
+        if duty.meta.get("operational_time_report")
+    ]
     return {
         "duties": reports,
         "summary": {
             "duties_with_valid_mandatory_rest": sum(1 for report in reports if report.get("has_valid_mandatory_rest")),
-            "duties_missing_mandatory_rest": sum(1 for report in reports if "MANDATORY_REST_MISSING" in (report.get("violations") or [])),
+            "duties_missing_mandatory_rest": sum(
+                1 for report in reports if "MANDATORY_REST_MISSING" in (report.get("violations") or [])
+            ),
             "duties_with_invalid_rest_position": sum(1 for report in reports if report.get("invalid_rest_position")),
             "total_idle_time": sum(int(report.get("idle_time", 0) or 0) for report in reports),
             "total_normal_break_time": sum(int(report.get("normal_break_time", 0) or 0) for report in reports),

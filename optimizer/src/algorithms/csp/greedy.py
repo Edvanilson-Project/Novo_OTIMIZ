@@ -9,6 +9,7 @@ Fluxo:
 O objetivo operacional continua sendo cobrir todas as tarefas geradas, reduzindo
 custos, horas extras, spread excessivo e transferências passivas.
 """
+
 from __future__ import annotations
 
 import copy
@@ -80,40 +81,42 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.waiting_time_pay_pct = float(params.get("waiting_time_pay_pct", 0.30))
         self.long_unpaid_break_limit = int(params.get("long_unpaid_break_limit_minutes", 180))
         self.long_unpaid_break_penalty_weight = float(params.get("long_unpaid_break_penalty_weight", 4.0))
-        
+
         # Parâmetros Noturnos
         self.nocturnal_start_hour = int(params.get("nocturnal_start_hour", 22))
         self.nocturnal_end_hour = int(params.get("nocturnal_end_hour", 5))
         self.nocturnal_extra_pct = float(params.get("nocturnal_extra_pct", 0.20))
         self.nocturnal_factor = float(params.get("nocturnal_factor", 1.0))
         self.holiday_extra_pct = float(params.get("holiday_extra_pct", 1.0))
-        
+
         # Regras de Operação
         self.allow_relief_points = bool(params.get("allow_relief_points", False))
         self.enforce_same_depot = bool(params.get("enforce_same_depot_start_end", False))
         self.operator_change_terminals_only = bool(params.get("operator_change_terminals_only", True))
         self.enforce_single_line_duty = bool(params.get("enforce_single_line_duty", False))
         self.operator_single_vehicle_only = bool(params.get("operator_single_vehicle_only", False))
-        
+
         # Limites Adicionais
         self.daily_driving_limit = int(params.get("daily_driving_limit_minutes", 540))
         self.extended_daily_driving_limit = int(params.get("extended_daily_driving_limit_minutes", 600))
         self.max_extended_days = int(params.get("max_extended_driving_days_per_week", 2))
         self.max_unpaid_break = params.get("max_unpaid_break_minutes")
-        if self.max_unpaid_break is not None: self.max_unpaid_break = int(self.max_unpaid_break)
+        if self.max_unpaid_break is not None:
+            self.max_unpaid_break = int(self.max_unpaid_break)
         self.max_total_unpaid_break = params.get("max_total_unpaid_break_minutes")
-        if self.max_total_unpaid_break is not None: self.max_total_unpaid_break = int(self.max_total_unpaid_break)
+        if self.max_total_unpaid_break is not None:
+            self.max_total_unpaid_break = int(self.max_total_unpaid_break)
         self.weekly_driving_limit = int(params.get("weekly_driving_limit_minutes", 3360))
         self.fortnight_driving_limit = int(params.get("fortnight_driving_limit_minutes", 5400))
         self.weekly_rest = int(params.get("weekly_rest_minutes", 2700))
         self.reduced_weekly_rest = int(params.get("reduced_weekly_rest_minutes", 1440))
         self.allow_reduced_weekly_rest = bool(params.get("allow_reduced_weekly_rest", False))
-        
+
         # Minutos de Layover/Pull
         self.min_layover = int(params.get("min_layover_minutes", self.vsp_params.get("min_layover_minutes", 8)))
         self.pullout = int(params.get("pullout_minutes", 10))
         self.pullback = int(params.get("pullback_minutes", 10))
-        
+
         # Fairness
         self.goal_weights = dict(params.get("goal_weights") or self.vsp_params.get("goal_weights") or {})
         self.fairness_weight = float(params.get("fairness_weight", 0.0))
@@ -123,7 +126,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.spread_weight = float(self.goal_weights.get("spread", 0.0) or 0.0)
         self.passive_transfer_weight = float(self.goal_weights.get("passive_transfer", 1.0) or 1.0)
         self.operational_quality_weight = float(self.goal_weights.get("operational_quality", 1.0) or 1.0)
-        self.utilization_weight = float(self.goal_weights.get("utilization", params.get("utilization_weight", 8.0)) or 8.0)
+        self.utilization_weight = float(
+            self.goal_weights.get("utilization", params.get("utilization_weight", 8.0)) or 8.0
+        )
         self.idle_weight = float(self.goal_weights.get("idle", params.get("idle_weight", 1.25)) or 1.25)
         self.fragmentation_weight = float(
             self.goal_weights.get("fragmentation", params.get("fragmentation_weight", 45.0)) or 45.0
@@ -135,9 +140,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             self.goal_weights.get("min_work_soft", params.get("min_work_soft_weight", 1.5)) or 1.5
         )
         self.utilization_target = float(params.get("duty_utilization_target", 0.30) or 0.30)
-        self.semantic_utilization_target = float(
-            params.get("operational_semantic_utilization_target", 0.50) or 0.50
-        )
+        self.semantic_utilization_target = float(params.get("operational_semantic_utilization_target", 0.50) or 0.50)
         self.semantic_spread_threshold = int(
             params.get("operational_semantic_spread_threshold_minutes", 12 * 60) or 12 * 60
         )
@@ -180,9 +183,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         )
         self.short_connection_threshold = int(params.get("short_connection_threshold_minutes", 15) or 15)
         self.fragmentation_soft_limit = int(params.get("duty_fragmentation_soft_limit", 2) or 2)
-        self.extreme_utilization_threshold = float(
-            params.get("extreme_duty_utilization_threshold", 0.25) or 0.25
-        )
+        self.extreme_utilization_threshold = float(params.get("extreme_duty_utilization_threshold", 0.25) or 0.25)
         self.extreme_spread_threshold = int(
             params.get(
                 "extreme_duty_spread_threshold_minutes",
@@ -197,7 +198,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             )
             or max(self.max_idle_soft * 2, 360)
         )
-        
+
         self.trip_group_keep_bonus = float(params.get("trip_group_keep_bonus", 240.0))
         self.trip_group_split_penalty = float(params.get("trip_group_split_penalty", 1000.0))
         self.operator_profiles = params.get("operator_profiles", [])
@@ -205,20 +206,16 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.split_break_second = int(params.get("split_break_second_minutes", 30))
         self.strict_union_rules = bool(params.get("strict_union_rules", False))
         self.terminal_location_ids = {
-            int(item)
-            for item in (params.get("terminal_location_ids") or [])
-            if item is not None
+            int(item) for item in (params.get("terminal_location_ids") or []) if item is not None
         }
-        
+
         self.apply_cct = bool(params.get("apply_cct", True))
-        self.enforce_min_interval = bool(
-            params.get("enforce_min_interval", params.get("strict_min_interval", False))
-        )
+        self.enforce_min_interval = bool(params.get("enforce_min_interval", params.get("strict_min_interval", False)))
         if self.apply_cct and self.enforce_min_interval:
             # Um intervalo positivo entre viagens/tarefas do motorista não pode
             # ser menor que o intervalo mínimo parametrizado.
             self.min_layover = max(self.min_layover, self.min_break)
-        
+
         # Inicializar Evaluador para scoring preciso se desejado
         self.evaluator = params.get("evaluator") or CostEvaluator()
         self.evaluator.set_costs(params)
@@ -230,7 +227,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             _log.warning(
                 "[CONFIG] min_break_minutes=%d < 30 — pausa de 30min é padrão CCT após "
                 "%dmin de condução contínua. Verifique se é intencional.",
-                self.min_break, self.mandatory_break_after,
+                self.min_break,
+                self.mandatory_break_after,
             )
         if self.max_shift > 0 and self.max_spread_soft > self.max_shift:
             key = (self.max_spread_soft, self.max_shift)
@@ -239,7 +237,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 _log.warning(
                     "[CONFIG] max_spread_soft (%d) > max_shift hard (%d) — penalty soft "
                     "inerte (hard rejeita antes do soft penalizar).",
-                    self.max_spread_soft, self.max_shift,
+                    self.max_spread_soft,
+                    self.max_shift,
                 )
 
         self._extension_diagnostics = self._empty_extension_diagnostics()
@@ -251,7 +250,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         real_drive = self._block_drive(block)
         if self.nocturnal_factor <= 1.0:
             return real_drive
-        
+
         noct_min = sum(
             _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
             for t in block.trips
@@ -274,18 +273,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         tier1 = min(excess, 30.0)
         tier2 = min(max(0.0, excess - 30.0), 60.0)
         tier3 = max(0.0, excess - 90.0)
-        return self.long_unpaid_break_penalty_weight * (
-            tier1 * 1.0 + tier2 * 3.0 + tier3 * 10.0
-        )
+        return self.long_unpaid_break_penalty_weight * (tier1 * 1.0 + tier2 * 3.0 + tier3 * 10.0)
 
     def _transfer_needed(self, a: Block, b: Block) -> int:
         last = a.trips[-1]
         first = b.trips[0]
         if first.is_continuation_of(last):
             return 0
-        deadhead_needed = int(
-            last.deadhead_times.get(first.origin_id, 0)
-        )
+        deadhead_needed = int(last.deadhead_times.get(first.origin_id, 0))
         return max(self.min_layover, deadhead_needed)
 
     def _effective_gap(self, gap: int) -> int:
@@ -434,7 +429,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if self.allow_relief_points:
             if current.is_relief_point or nxt.is_relief_point:
                 return True
-            if current.relief_point_id is not None and current.relief_point_id in {current.destination_id, nxt.origin_id}:
+            if current.relief_point_id is not None and current.relief_point_id in {
+                current.destination_id,
+                nxt.origin_id,
+            }:
                 return True
             if nxt.relief_point_id is not None and nxt.relief_point_id in {current.destination_id, nxt.origin_id}:
                 return True
@@ -448,7 +446,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if self.allow_relief_points:
             if current.is_relief_point or nxt.is_relief_point:
                 return True
-            if current.relief_point_id is not None and current.relief_point_id in {current.destination_id, nxt.origin_id}:
+            if current.relief_point_id is not None and current.relief_point_id in {
+                current.destination_id,
+                nxt.origin_id,
+            }:
                 return True
             if nxt.relief_point_id is not None and nxt.relief_point_id in {current.destination_id, nxt.origin_id}:
                 return True
@@ -489,11 +490,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         cached = task.meta.get("covered_trip_group_ids")
         if cached:
             return {int(item) for item in cached}
-        return {
-            int(trip.trip_group_id)
-            for trip in task.trips
-            if getattr(trip, "trip_group_id", None) is not None
-        }
+        return {int(trip.trip_group_id) for trip in task.trips if getattr(trip, "trip_group_id", None) is not None}
 
     def _duty_has_meal_break(self, duty: Duty) -> bool:
         if "meal_break_found" in duty.meta:
@@ -628,7 +625,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         projected_spread: Optional[int] = None,
     ) -> Dict[str, Any]:
         ordered = sorted((task for task in tasks if task.trips), key=lambda item: (item.start_time, item.id))
-        work_time = int(projected_work if projected_work is not None else sum(self._block_regulatory_work(task) for task in ordered))
+        work_time = int(
+            projected_work if projected_work is not None else sum(self._block_regulatory_work(task) for task in ordered)
+        )
         spread_time = int(projected_spread if projected_spread is not None else self._duty_spread_minutes(ordered))
         gaps = self._duty_gap_minutes(ordered)
         total_idle = max(0, spread_time - work_time)
@@ -673,7 +672,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             }
 
         start_buffer, end_buffer, duty_start, duty_end = self._duty_span_bounds(ordered)
-        work_time = int(projected_work if projected_work is not None else sum(self._block_regulatory_work(task) for task in ordered))
+        work_time = int(
+            projected_work if projected_work is not None else sum(self._block_regulatory_work(task) for task in ordered)
+        )
         spread_time = int(projected_spread if projected_spread is not None else max(0, duty_end - duty_start))
         synthetic = Duty(id=duty_id or -1, tasks=list(ordered), work_time=work_time, spread_time=spread_time)
         synthetic.meta["start_buffer_minutes"] = start_buffer
@@ -692,11 +693,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             for segment in (report.get("duty_time_segments") or [])
             if segment.get("type") in {"idle", "normal_break", "mandatory_rest"}
         ]
-        non_rest_segments = [
-            segment
-            for segment in break_segments
-            if segment.get("type") in {"idle", "normal_break"}
-        ]
+        non_rest_segments = [segment for segment in break_segments if segment.get("type") in {"idle", "normal_break"}]
         total_idle_time = sum(int(segment.get("duration", 0) or 0) for segment in non_rest_segments)
         max_idle_time = max((int(segment.get("duration", 0) or 0) for segment in non_rest_segments), default=0)
         return {
@@ -772,15 +769,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         is_source_block_start = bool(trips) and int(trips[0].id) == first_trip_id
         is_source_block_end = bool(trips) and int(trips[-1].id) == last_trip_id
         internal_gaps = [
-            max(0, int(trips[index + 1].start_time) - int(trips[index].end_time))
-            for index in range(len(trips) - 1)
+            max(0, int(trips[index + 1].start_time) - int(trips[index].end_time)) for index in range(len(trips) - 1)
         ]
         task_group_ids = list(
-            dict.fromkeys(
-                int(trip.trip_group_id)
-                for trip in trips
-                if getattr(trip, "trip_group_id", None) is not None
-            )
+            dict.fromkeys(int(trip.trip_group_id) for trip in trips if getattr(trip, "trip_group_id", None) is not None)
         )
         task = Block(id=task_id, trips=list(trips), vehicle_type_id=source_block.vehicle_type_id)
         task.meta.update(
@@ -822,7 +814,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         mid_trip_relief_segments = 0
         if self.apply_cct:
             max_chunk_drive = max(60, min(self.max_work, self.mandatory_break_after, self.daily_driving_limit))
-            meal_trigger = max(240, self.mandatory_break_after - max(0, self.meal_break_minutes)) if self.meal_break_minutes > 0 else self.mandatory_break_after
+            meal_trigger = (
+                max(240, self.mandatory_break_after - max(0, self.meal_break_minutes))
+                if self.meal_break_minutes > 0
+                else self.mandatory_break_after
+            )
         else:
             max_chunk_drive = 10**9
             meal_trigger = 10**9
@@ -846,9 +842,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
                 gap = nxt.start_time - trip.end_time
                 boundary = self._is_relief_boundary(trip, nxt)
-                explicit_mid_trip_relief_boundary = (
-                    trip.ends_at_mid_trip_relief and nxt.starts_at_mid_trip_relief
-                )
+                explicit_mid_trip_relief_boundary = trip.ends_at_mid_trip_relief and nxt.starts_at_mid_trip_relief
                 next_duration = nxt.duration
                 pair_guard = (
                     trip.trip_group_id is not None
@@ -874,11 +868,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     current_drive = current[-1].duration
 
                 should_cut = False
-                short_positive_interval = (
-                    self.apply_cct
-                    and self.enforce_min_interval
-                    and 0 < gap < self.min_break
-                )
+                short_positive_interval = self.apply_cct and self.enforce_min_interval and 0 < gap < self.min_break
 
                 if short_positive_interval:
                     should_cut = True
@@ -904,12 +894,21 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     task = self._make_task(block, current, self._next_block_id())
                     task.meta["relief_cut"] = True
                     task.meta["split_reason"] = (
-                        "explicit_mid_trip_relief" if explicit_mid_trip_relief_boundary else
-                        "short_interval" if short_positive_interval else
-                        "natural_break" if gap >= self.min_break else
-                        "mandatory_break" if current_drive >= max_chunk_drive else
-                        "meal_break" if current_drive >= meal_trigger else
-                        "work_limit"
+                        "explicit_mid_trip_relief"
+                        if explicit_mid_trip_relief_boundary
+                        else (
+                            "short_interval"
+                            if short_positive_interval
+                            else (
+                                "natural_break"
+                                if gap >= self.min_break
+                                else (
+                                    "mandatory_break"
+                                    if current_drive >= max_chunk_drive
+                                    else "meal_break" if current_drive >= meal_trigger else "work_limit"
+                                )
+                            )
+                        )
                     )
                     tasks.append(task)
                     relief_cuts += 1
@@ -941,11 +940,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         effective_gap = self._effective_gap(gap)
         if gap < 0:
             return False, "overlap", {}
-        if (
-            self.apply_cct
-            and self.enforce_min_interval
-            and 0 < gap < self.min_break
-        ):
+        if self.apply_cct and self.enforce_min_interval and 0 < gap < self.min_break:
             return False, "min_interval_violation", {"gap": gap, "min_break": self.min_break}
 
         last_trip = last.trips[-1]
@@ -960,15 +955,23 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         last_service_day = self._service_day(last)
         block_service_day = self._service_day(block)
         if block_service_day < last_service_day:
-            return False, "service_day_regression", {
-                "last_service_day": last_service_day,
-                "next_service_day": block_service_day,
-            }
+            return (
+                False,
+                "service_day_regression",
+                {
+                    "last_service_day": last_service_day,
+                    "next_service_day": block_service_day,
+                },
+            )
         if block_service_day > last_service_day + 1:
-            return False, "different_service_day", {
-                "last_service_day": last_service_day,
-                "next_service_day": block_service_day,
-            }
+            return (
+                False,
+                "different_service_day",
+                {
+                    "last_service_day": last_service_day,
+                    "next_service_day": block_service_day,
+                },
+            )
 
         if self.apply_cct and self.max_unpaid_break is not None and gap > self.max_unpaid_break:
             return False, "max_unpaid_break_exceeded", {"gap": gap, "max_unpaid_break": self.max_unpaid_break}
@@ -978,9 +981,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             return False, "transfer_insufficient", {"gap": gap, "transfer_needed": transfer_needed}
 
         passive_transfer = max(0, transfer_needed - self.min_layover)
-        if self.operator_change_terminals_only and not self._valid_operator_change_boundary(last.trips[-1], block.trips[0]):
+        if self.operator_change_terminals_only and not self._valid_operator_change_boundary(
+            last.trips[-1], block.trips[0]
+        ):
             return False, "operator_change_non_terminal", {}
-        if not self.allow_relief_points and last.trips[-1].destination_id != block.trips[0].origin_id and passive_transfer > 0:
+        if (
+            not self.allow_relief_points
+            and last.trips[-1].destination_id != block.trips[0].origin_id
+            and passive_transfer > 0
+        ):
             return False, "relief_point_required", {}
 
         if self.enforce_single_line_duty:
@@ -991,11 +1000,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         if self.operator_single_vehicle_only:
             source_block_id = int(block.meta.get("source_block_id", block.id))
-            covered_sources = {
-                int(item)
-                for item in duty.meta.get("source_block_ids", [])
-                if item is not None
-            }
+            covered_sources = {int(item) for item in duty.meta.get("source_block_ids", []) if item is not None}
             if covered_sources and source_block_id not in covered_sources:
                 return False, "operator_single_vehicle_only", {}
 
@@ -1011,17 +1016,27 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         new_cont = block_drive if had_break else current_cont + block_drive
         daily_drive = int(duty.meta.get("daily_driving", 0)) + block_regulatory
         extended_days_used = int(duty.meta.get("extended_days_used", 0))
-        work_since_break = block_regulatory if had_break else int(duty.meta.get("work_since_break", 0)) + block_regulatory
+        work_since_break = (
+            block_regulatory if had_break else int(duty.meta.get("work_since_break", 0)) + block_regulatory
+        )
 
         if self.apply_cct:
             if new_spread > self.max_shift:
                 return False, "spread_exceeded", {"new_spread": new_spread, "limit": self.max_shift}
 
             if overtime_minutes > self.overtime_limit:
-                return False, "overtime_hard", {"new_work": projected_work, "limit": self.max_work + self.overtime_limit}
+                return (
+                    False,
+                    "overtime_hard",
+                    {"new_work": projected_work, "limit": self.max_work + self.overtime_limit},
+                )
 
             if new_cont > self.max_driving or work_since_break > self.mandatory_break_after:
-                return False, "mandatory_break_required", {"work_since": work_since_break, "limit": self.mandatory_break_after}
+                return (
+                    False,
+                    "mandatory_break_required",
+                    {"work_since": work_since_break, "limit": self.mandatory_break_after},
+                )
 
             if daily_drive > self.extended_daily_driving_limit:
                 return False, "daily_driving_exceeded", {"daily_drive": daily_drive}
@@ -1030,32 +1045,41 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
-        if self.enforce_same_depot and start_depot is not None and candidate_end_depot is not None and candidate_end_depot != start_depot:
+        if (
+            self.enforce_same_depot
+            and start_depot is not None
+            and candidate_end_depot is not None
+            and candidate_end_depot != start_depot
+        ):
             return False, "same_depot_required", {}
 
         transfer_adjustment = self._adjustment_needed(gap, transfer_needed)
         connection_adjustment = max(transfer_adjustment, break_adjustment)
 
-        return True, "", {
-            "gap": gap,
-            "effective_gap": effective_gap,
-            "transfer_needed": transfer_needed,
-            "last_service_day": last_service_day,
-            "next_service_day": block_service_day,
-            "service_day_transition": block_service_day != last_service_day,
-            "had_break": had_break,
-            "new_spread": new_spread,
-            "new_work": projected_work,
-            "new_cont": new_cont,
-            "work_since_break": work_since_break,
-            "daily_drive": daily_drive,
-            "extended_days_used": extended_days_used + (1 if daily_drive > self.daily_driving_limit else 0),
-            "passive_transfer": passive_transfer,
-            "break_state": break_state,
-            "connection_adjustment_minutes": connection_adjustment,
-            "previous_task_id": int(last.id),
-            "next_task_id": int(block.id),
-        }
+        return (
+            True,
+            "",
+            {
+                "gap": gap,
+                "effective_gap": effective_gap,
+                "transfer_needed": transfer_needed,
+                "last_service_day": last_service_day,
+                "next_service_day": block_service_day,
+                "service_day_transition": block_service_day != last_service_day,
+                "had_break": had_break,
+                "new_spread": new_spread,
+                "new_work": projected_work,
+                "new_cont": new_cont,
+                "work_since_break": work_since_break,
+                "daily_drive": daily_drive,
+                "extended_days_used": extended_days_used + (1 if daily_drive > self.daily_driving_limit else 0),
+                "passive_transfer": passive_transfer,
+                "break_state": break_state,
+                "connection_adjustment_minutes": connection_adjustment,
+                "previous_task_id": int(last.id),
+                "next_task_id": int(block.id),
+            },
+        )
 
     def _apply_block(self, duty: Duty, block: Block, data: Dict[str, Any]) -> None:
         previous_last_service_day = int(
@@ -1070,13 +1094,19 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         duty.meta["work_since_break"] = int(data.get("work_since_break", self._block_regulatory_work(block)))
         duty.meta["daily_driving"] = int(data.get("daily_drive", self._block_regulatory_work(block)))
         duty.meta["extended_days_used"] = int(data.get("extended_days_used", 0))
-        duty.meta["break_state"] = dict(data.get("break_state", duty.meta.get("break_state", {"credit": 0, "has_long": False})))
+        duty.meta["break_state"] = dict(
+            data.get("break_state", duty.meta.get("break_state", {"credit": 0, "has_long": False}))
+        )
         duty.meta["duty_start_minutes"] = duty_start
         duty.meta["duty_end_minutes"] = duty_end
         duty.meta["start_buffer_minutes"] = start_buffer
         duty.meta["end_buffer_minutes"] = end_buffer
-        duty.meta["waiting_minutes"] = int(duty.meta.get("waiting_minutes", 0)) + max(0, gap - int(data.get("transfer_needed", 0)))
-        duty.meta["passive_transfer_minutes"] = int(duty.meta.get("passive_transfer_minutes", 0)) + int(data.get("passive_transfer", 0))
+        duty.meta["waiting_minutes"] = int(duty.meta.get("waiting_minutes", 0)) + max(
+            0, gap - int(data.get("transfer_needed", 0))
+        )
+        duty.meta["passive_transfer_minutes"] = int(duty.meta.get("passive_transfer_minutes", 0)) + int(
+            data.get("passive_transfer", 0)
+        )
         duty.meta["connection_tolerance_minutes"] = self.connection_tolerance
         meal_break_found = bool(duty.meta.get("meal_break_found", False))
         if len(duty.tasks) > 1 and self.meal_break_minutes > 0 and self._effective_gap(gap) >= self.meal_break_minutes:
@@ -1102,16 +1132,20 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         duty.meta["end_depot_id"] = block.trips[-1].depot_id
         adjustment_used = int(data.get("connection_adjustment_minutes", 0))
         if adjustment_used > 0:
-            duty.meta["connection_tolerance_used_minutes"] = int(duty.meta.get("connection_tolerance_used_minutes", 0)) + adjustment_used
+            duty.meta["connection_tolerance_used_minutes"] = (
+                int(duty.meta.get("connection_tolerance_used_minutes", 0)) + adjustment_used
+            )
             duty.meta["connection_tolerance_uses"] = int(duty.meta.get("connection_tolerance_uses", 0)) + 1
-            duty.meta.setdefault("adjusted_connections", []).append({
-                "from_task_id": int(data.get("previous_task_id", 0)),
-                "to_task_id": int(data.get("next_task_id", block.id)),
-                "gap": gap,
-                "effective_gap": int(data.get("effective_gap", gap)),
-                "transfer_needed": int(data.get("transfer_needed", 0)),
-                "adjustment_minutes": adjustment_used,
-            })
+            duty.meta.setdefault("adjusted_connections", []).append(
+                {
+                    "from_task_id": int(data.get("previous_task_id", 0)),
+                    "to_task_id": int(data.get("next_task_id", block.id)),
+                    "gap": gap,
+                    "effective_gap": int(data.get("effective_gap", gap)),
+                    "transfer_needed": int(data.get("transfer_needed", 0)),
+                    "adjustment_minutes": adjustment_used,
+                }
+            )
         duty.meta.setdefault("line_ids", [])
         for line_id in [t.line_id for t in block.trips]:
             if line_id not in duty.meta["line_ids"]:
@@ -1186,14 +1220,20 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "duty_id": int(duty.id),
                 "task_id": int(block.id),
                 "reason": reason,
-                "gap": int(data.get("gap", next_trip.start_time - last_trip.end_time if last_trip and next_trip else 0)),
-                "last_service_day": int(data.get("last_service_day", self._service_day(duty.tasks[-1]) if duty.tasks else 0)),
+                "gap": int(
+                    data.get("gap", next_trip.start_time - last_trip.end_time if last_trip and next_trip else 0)
+                ),
+                "last_service_day": int(
+                    data.get("last_service_day", self._service_day(duty.tasks[-1]) if duty.tasks else 0)
+                ),
                 "next_service_day": int(data.get("next_service_day", self._service_day(block))),
                 "last_trip_id": int(last_trip.id) if last_trip is not None else None,
                 "next_trip_id": int(next_trip.id) if next_trip is not None else None,
                 "last_destination_id": int(last_trip.destination_id) if last_trip is not None else None,
                 "next_origin_id": int(next_trip.origin_id) if next_trip is not None else None,
-                "duty_source_block_ids": [int(item) for item in duty.meta.get("source_block_ids", []) if item is not None],
+                "duty_source_block_ids": [
+                    int(item) for item in duty.meta.get("source_block_ids", []) if item is not None
+                ],
                 "candidate_source_block_id": int(block.meta.get("source_block_id", block.id)),
             }
         )
@@ -1230,15 +1270,24 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "short_connection_total": 0,
             }
 
-        metrics = [self._build_duty_quality_metrics(duty.tasks, projected_work=duty.work_time, projected_spread=duty.spread_time) for duty in duties]
+        metrics = [
+            self._build_duty_quality_metrics(
+                duty.tasks, projected_work=duty.work_time, projected_spread=duty.spread_time
+            )
+            for duty in duties
+        ]
         return {
             "duties": len(metrics),
             "avg_utilization": round(sum(float(item["utilization"]) for item in metrics) / len(metrics), 4),
             "avg_total_idle_time": round(sum(int(item["total_idle_time"]) for item in metrics) / len(metrics), 2),
             "max_idle_time": max(int(item["max_idle_time"]) for item in metrics),
-            "low_utilization_duties": sum(1 for item in metrics if float(item["utilization"]) < self.utilization_target),
+            "low_utilization_duties": sum(
+                1 for item in metrics if float(item["utilization"]) < self.utilization_target
+            ),
             "high_spread_duties": sum(1 for item in metrics if int(item["spread_time"]) > self.max_spread_soft),
-            "low_work_duties": sum(1 for item in metrics if self.min_work_soft > 0 and int(item["work_time"]) < self.min_work_soft),
+            "low_work_duties": sum(
+                1 for item in metrics if self.min_work_soft > 0 and int(item["work_time"]) < self.min_work_soft
+            ),
             "fragmented_duties": sum(1 for item in metrics if int(item["break_count"]) > self.fragmentation_soft_limit),
             "short_connection_total": sum(int(item["short_connection_count"]) for item in metrics),
         }
@@ -1253,7 +1302,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if not all_trips:
             return 0, False
         all_trips.sort(key=lambda t: t.start_time)
-        
+
         previous_end = None
         for trip in all_trips:
             if previous_end is None:
@@ -1269,7 +1318,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     continuous += trip.duration
             max_continuous = max(max_continuous, continuous)
             previous_end = trip.end_time
-            
+
         return max_continuous, meal_break_found
 
     def _would_have_meal_break(self, duty: Duty, candidate_task: Block) -> bool:
@@ -1337,7 +1386,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 mandatory_ok = (not mandatory_shift_types or shift_type in mandatory_shift_types) and (
                     not mandatory_line_ids or set(line_ids).issubset(mandatory_line_ids)
                 )
-                preferred_score = int(shift_type in preferred_shift_types) + int(bool(preferred_line_ids) and bool(set(line_ids) & preferred_line_ids))
+                preferred_score = int(shift_type in preferred_shift_types) + int(
+                    bool(preferred_line_ids) and bool(set(line_ids) & preferred_line_ids)
+                )
                 ranking = (preferred_score, duty_count, self._profile_priority(profile))
                 if mandatory_ok:
                     viable.append((ranking, profile))
@@ -1352,13 +1403,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
             if chosen is None:
                 violations.append(f"UNASSIGNED_OPERATOR_PROFILE R{roster['id']} shift={shift_type} lines={line_ids}")
-                assignments.append({
-                    "roster_id": roster["id"],
-                    "operator_id": None,
-                    "operator_name": None,
-                    "shift_type": shift_type,
-                    "line_ids": line_ids,
-                })
+                assignments.append(
+                    {
+                        "roster_id": roster["id"],
+                        "operator_id": None,
+                        "operator_name": None,
+                        "shift_type": shift_type,
+                        "line_ids": line_ids,
+                    }
+                )
                 continue
 
             available = [profile for profile in available if int(profile.get("id", 0)) != int(chosen.get("id", -1))]
@@ -1391,21 +1444,24 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "rosters": assignments,
         }
 
-    def finalize_selected_duties(self, duties: List[Duty], original_blocks: Optional[List[Block]] = None) -> CSPSolution:
+    def finalize_selected_duties(
+        self, duties: List[Duty], original_blocks: Optional[List[Block]] = None
+    ) -> CSPSolution:
         warnings: List[str] = []
         violations = 0
 
         covered_source_blocks = {
-            int(source_id)
-            for duty in duties
-            for source_id in duty.meta.get("source_block_ids", [])
+            int(source_id) for duty in duties for source_id in duty.meta.get("source_block_ids", [])
         }
-        uncovered_source_blocks = [block for block in (original_blocks or []) if int(block.id) not in covered_source_blocks]
+        uncovered_source_blocks = [
+            block for block in (original_blocks or []) if int(block.id) not in covered_source_blocks
+        ]
 
         for duty in duties:
             duty.nocturnal_minutes = sum(
                 _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
-                for block in duty.tasks for t in block.trips
+                for block in duty.tasks
+                for t in block.trips
             )
             duty.overtime_minutes = self._regular_overtime_minutes(duty.work_time)
             waiting_minutes = int(duty.meta.get("waiting_minutes", max(0, duty.spread_time - duty.work_time)))
@@ -1483,9 +1539,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             )
             duty.meta["duty_time_segments"] = list(operational_time_report.get("duty_time_segments") or [])
             duty.meta["operational_time_report"] = {
-                key: value
-                for key, value in operational_time_report.items()
-                if key != "duty_time_segments"
+                key: value for key, value in operational_time_report.items() if key != "duty_time_segments"
             }
             duty.meta["meal_break_found"] = bool(operational_time_report.get("has_valid_mandatory_rest", False))
 
@@ -1503,10 +1557,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     duty.warnings.append(f"Condução contínua excedida: {max_continuous_drive}min")
                     violations += 1
                 if operational_time_report.get("invalid_rest_position"):
-                    duty.warnings.append(
-                        "Pausa longa em soltura/recolhimento nao conta como descanso obrigatorio."
-                    )
-                if operational_time_report.get("mandatory_rest_required") and not operational_time_report.get("has_valid_mandatory_rest"):
+                    duty.warnings.append("Pausa longa em soltura/recolhimento nao conta como descanso obrigatorio.")
+                if operational_time_report.get("mandatory_rest_required") and not operational_time_report.get(
+                    "has_valid_mandatory_rest"
+                ):
                     duty.rest_violations += 1
                     duty.warnings.append(
                         f"Descanso obrigatorio ausente: 0min < {max(self.min_break, self.meal_break_minutes)}min"
@@ -1514,7 +1568,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     violations += 1
                 if duty.overtime_minutes > self.overtime_limit:
                     duty.shift_violations += 1
-                    duty.warnings.append(f"Horas extras excedidas: {duty.overtime_minutes}min > {self.overtime_limit}min")
+                    duty.warnings.append(
+                        f"Horas extras excedidas: {duty.overtime_minutes}min > {self.overtime_limit}min"
+                    )
                     violations += 1
                 if self.max_total_unpaid_break is not None and unpaid_total > self.max_total_unpaid_break:
                     duty.shift_violations += 1
@@ -1534,13 +1590,18 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 )
             if any(t.is_holiday for b in duty.tasks for t in b.trips):
                 duty.meta["holiday_extra_pct"] = self.holiday_extra_pct
-            if self.enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None and duty.meta["start_depot_id"] != duty.meta["end_depot_id"]:
+            if (
+                self.enforce_same_depot
+                and duty.meta.get("start_depot_id") is not None
+                and duty.meta.get("end_depot_id") is not None
+                and duty.meta["start_depot_id"] != duty.meta["end_depot_id"]
+            ):
                 duty.shift_violations += 1
                 duty.warnings.append("Jornada não encerra no mesmo depósito")
                 violations += 1
             if quality_metrics["utilization"] < self.utilization_target:
                 duty.warnings.append(
-                    f"Baixa utilização operacional: {quality_metrics['utilization'] * 100:.1f}% < {self.utilization_target * 100:.0f}%"
+                    f"Baixa utilização operacional: {quality_metrics['utilization'] * 100:.1f}% < {self.utilization_target * 100:.0f}%"  # noqa: E501
                 )
             if self.max_spread_soft > 0 and duty.spread_time > self.max_spread_soft:
                 duty.warnings.append(f"Spread operacional alto: {duty.spread_time}min > {self.max_spread_soft}min")
@@ -1556,7 +1617,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             duty_end = int(duty.meta.get("duty_end_minutes", duty.tasks[-1].end_time if duty.tasks else 0))
             daily_drive = int(duty.meta.get("daily_driving", duty.work_time))
             duty_groups = [int(item) for item in duty.meta.get("covered_trip_group_ids", [])]
-            preferred_roster = next((group_to_roster[group_id] for group_id in duty_groups if group_id in group_to_roster), None)
+            preferred_roster = next(
+                (group_to_roster[group_id] for group_id in duty_groups if group_id in group_to_roster), None
+            )
             assigned_roster: Optional[Dict[str, Any]] = None
             sorted_rosters = sorted(roster_state, key=lambda item: item["last_end"], reverse=True)
 
@@ -1568,12 +1631,16 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 fortnight = duty_start // (14 * 1440)
                 last_week = int(roster.get("last_week", week))
                 if self.apply_cct and week > last_week:
-                    required_weekly_rest = self.reduced_weekly_rest if self.allow_reduced_weekly_rest else self.weekly_rest
+                    required_weekly_rest = (
+                        self.reduced_weekly_rest if self.allow_reduced_weekly_rest else self.weekly_rest
+                    )
                     if gap_since_last < required_weekly_rest:
                         return False
                 week_drive = roster["week_drive"].get(week, 0) + daily_drive
                 fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
-                if self.apply_cct and (week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit):
+                if self.apply_cct and (
+                    week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit
+                ):
                     return False
                 return True
 
@@ -1680,10 +1747,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         covered_trip_ids: set[int] = set()
         duplicate_task_skips = 0
         for task in sorted(tasks, key=lambda item: (item.start_time, item.id)):
-            task_trip_ids = {
-                int(trip.id)
-                for trip in task.trips
-            }
+            task_trip_ids = {int(trip.id) for trip in task.trips}
             duplicated_trip_ids = sorted(task_trip_ids & covered_trip_ids)
             if duplicated_trip_ids:
                 duplicate_task_skips += 1
@@ -1695,19 +1759,19 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 continue
             source_block_id = int(task.meta.get("source_block_id", task.id))
             task_group_ids = {
-                int(trip.trip_group_id)
-                for trip in task.trips
-                if getattr(trip, "trip_group_id", None) is not None
+                int(trip.trip_group_id) for trip in task.trips if getattr(trip, "trip_group_id", None) is not None
             }
             assigned = False
             feasible_candidates: List[Tuple[float, float, int, int, Duty, Dict[str, Any]]] = []
             ordered_duties = sorted(
                 duties,
                 key=lambda duty: (
-                    0
-                    if task_group_ids
-                    and any(int(item) in task_group_ids for item in duty.meta.get("covered_trip_group_ids", []))
-                    else 1,
+                    (
+                        0
+                        if task_group_ids
+                        and any(int(item) in task_group_ids for item in duty.meta.get("covered_trip_group_ids", []))
+                        else 1
+                    ),
                     0 if source_block_id in [int(item) for item in duty.meta.get("source_block_ids", [])] else 1,
                     -duty.work_time,
                     duty.id,
@@ -1841,9 +1905,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     i += 1
                     continue
                 combined_spread = self._duty_spread_minutes([*a.tasks, *b.tasks])
-                combined_work = a.work_time + sum(
-                    self._block_regulatory_work(t) for t in b.tasks
-                )
+                combined_work = a.work_time + sum(self._block_regulatory_work(t) for t in b.tasks)
                 if combined_spread > self.max_shift:
                     i += 1
                     continue
@@ -1871,7 +1933,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     merged_ids.add(b.id)
                     _log.info(
                         "[CSP-MERGE] Merged duty %d into %d (vehicle %d)",
-                        b.id, a.id, _vid,
+                        b.id,
+                        a.id,
+                        _vid,
                     )
                     # Don't increment — try merging next duty into updated a
                 else:
@@ -2008,12 +2072,18 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 merged_ids.add(sd.id)
                 _log.info(
                     "[CSP-CROSS-MERGE] Merged short duty %d (%dmin) into duty %d via %s (now %dmin work)",
-                    sd.id, sd.work_time, best_target.id, best_mode, best_target.work_time,
+                    sd.id,
+                    sd.work_time,
+                    best_target.id,
+                    best_mode,
+                    best_target.work_time,
                 )
             else:
                 _log.info(
                     "[CSP-CROSS-MERGE] Could not merge duty %d (%dmin): rejects=%s",
-                    sd.id, sd.work_time, reject_reasons,
+                    sd.id,
+                    sd.work_time,
+                    reject_reasons,
                 )
 
         if merged_ids:
@@ -2037,9 +2107,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "trip_ids": [int(getattr(trip, "public_id", trip.id)) for trip in task.trips],
             "task_trip_ids": [int(trip.id) for trip in task.trips],
             "trip_group_ids": sorted(self._task_group_ids(task)),
-            "mid_trip_original_trip_ids": [
-                int(item) for item in (task.meta.get("mid_trip_original_trip_ids") or [])
-            ],
+            "mid_trip_original_trip_ids": [int(item) for item in (task.meta.get("mid_trip_original_trip_ids") or [])],
             "start_time": int(task.start_time),
             "end_time": int(task.end_time),
             "relief_start_id": task.meta.get("relief_start_id"),
@@ -2060,21 +2128,18 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         duty: Duty,
         quality_metrics: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        metrics = quality_metrics or duty.meta.get("quality_metrics") or self._build_duty_quality_metrics(
-            duty.tasks,
-            projected_work=int(duty.work_time),
-            projected_spread=int(duty.spread_time),
+        metrics = (
+            quality_metrics
+            or duty.meta.get("quality_metrics")
+            or self._build_duty_quality_metrics(
+                duty.tasks,
+                projected_work=int(duty.work_time),
+                projected_spread=int(duty.spread_time),
+            )
         )
         utilization = float(metrics.get("utilization", 1.0) or 1.0)
         spread_time = int(metrics.get("spread_time", duty.spread_time) or duty.spread_time)
-        total_idle_time = int(
-            metrics.get("total_idle_time", max(0, spread_time - int(metrics.get("work_time", duty.work_time) or duty.work_time)))
-            or 0
-        )
-        return (
-            utilization < self.extreme_utilization_threshold
-            and spread_time > self.semantic_spread_threshold
-        )
+        return utilization < self.extreme_utilization_threshold and spread_time > self.semantic_spread_threshold
 
     def _seed_duty_with_task(self, duty_id: int, task: Block) -> Duty:
         duty = Duty(id=duty_id)
@@ -2179,7 +2244,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 mandatory_rest_missing += 1
 
             roster_id = duty.meta.get("roster_id")
-            for group_id in (duty.meta.get("covered_trip_group_ids") or []):
+            for group_id in duty.meta.get("covered_trip_group_ids") or []:
                 parsed_group_id = int(group_id)
                 duty_group_map[parsed_group_id].add(int(duty.id))
                 if roster_id is not None:
@@ -2309,10 +2374,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "extreme_duties",
             "crew",
         )
-        if any(
-            int(candidate_metrics.get(key, 0)) > int(current_metrics.get(key, 0))
-            for key in guard_keys
-        ):
+        if any(int(candidate_metrics.get(key, 0)) > int(current_metrics.get(key, 0)) for key in guard_keys):
             return False
 
         if int(candidate_metrics.get("duties", 0)) > int(current_metrics.get("duties", 0)) + 1:
@@ -2394,10 +2456,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         audit["baseline_metrics"] = current_metrics
         audit["final_metrics"] = current_metrics
         audit["relief_task_candidates"] = sum(
-            1
-            for duty in current_duties
-            for task in duty.tasks
-            if self._task_is_relief_reassignment_candidate(task)
+            1 for duty in current_duties for task in duty.tasks if self._task_is_relief_reassignment_candidate(task)
         )
 
         if audit["relief_task_candidates"] == 0:
@@ -2422,7 +2481,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     if not self._task_is_relief_reassignment_candidate(task):
                         continue
 
-                    source_remaining = [candidate_task for idx, candidate_task in enumerate(source_duty.tasks) if idx != task_index]
+                    source_remaining = [
+                        candidate_task for idx, candidate_task in enumerate(source_duty.tasks) if idx != task_index
+                    ]
                     source_rebuilt: Optional[Duty] = None
                     if source_remaining:
                         source_rebuilt, source_reason = self._rebuild_duty_from_tasks(source_remaining, source_duty.id)
@@ -2439,11 +2500,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                             )
                             continue
 
-                    candidate_targets = [
-                        duty
-                        for duty in current_duties
-                        if duty.id != source_duty.id and duty.tasks
-                    ]
+                    candidate_targets = [duty for duty in current_duties if duty.id != source_duty.id and duty.tasks]
                     candidate_targets.sort(
                         key=lambda duty: (
                             min(
@@ -2583,13 +2640,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
     def _split_group_ids(self, duties: Sequence[Duty]) -> set[int]:
         group_to_duties: Dict[int, set[int]] = defaultdict(set)
         for duty in duties:
-            for group_id in (duty.meta.get("covered_trip_group_ids") or []):
+            for group_id in duty.meta.get("covered_trip_group_ids") or []:
                 group_to_duties[int(group_id)].add(int(duty.id))
-        return {
-            group_id
-            for group_id, assigned_duties in group_to_duties.items()
-            if len(assigned_duties) > 1
-        }
+        return {group_id for group_id, assigned_duties in group_to_duties.items() if len(assigned_duties) > 1}
 
     def _soft_issue_candidate_sources(self, duties: Sequence[Duty]) -> List[Dict[str, Any]]:
         split_group_ids = self._split_group_ids(duties)
@@ -2610,7 +2663,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             )
             extreme_duty = self._is_extreme_duty(duty, quality_metrics)
             bad_utilization = float(quality_metrics.get("utilization", 1.0) or 1.0) < self.utilization_target
-            bad_spread = self.max_spread_soft > 0 and int(quality_metrics.get("spread_time", duty.spread_time) or duty.spread_time) > self.max_spread_soft
+            bad_spread = (
+                self.max_spread_soft > 0
+                and int(quality_metrics.get("spread_time", duty.spread_time) or duty.spread_time) > self.max_spread_soft
+            )
             bad_fragmentation = int(quality_metrics.get("break_count", 0) or 0) > self.fragmentation_soft_limit
             for task_index, task in enumerate(duty.tasks):
                 reasons: List[str] = []
@@ -2678,9 +2734,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         repairable: set[int] = set()
         for task_index in range(1, len(duty.tasks) - 1):
             source_remaining = [
-                candidate_task
-                for index, candidate_task in enumerate(duty.tasks)
-                if index != task_index
+                candidate_task for index, candidate_task in enumerate(duty.tasks) if index != task_index
             ]
             source_rebuilt, _ = self._rebuild_duty_from_tasks(source_remaining, int(duty.id))
             if source_rebuilt is None:
@@ -2718,11 +2772,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         task: Block,
         task_group_ids: set[int],
     ) -> List[Duty]:
-        candidate_targets = [
-            duty
-            for duty in current_duties
-            if duty.id != source_duty.id and duty.tasks
-        ]
+        candidate_targets = [duty for duty in current_duties if duty.id != source_duty.id and duty.tasks]
         candidate_targets.sort(
             key=lambda duty: (
                 0 if task_group_ids & {int(item) for item in duty.meta.get("covered_trip_group_ids", [])} else 1,
@@ -2802,8 +2852,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         first_indices = set(first_component)
         last_indices = set(last_component)
         middle_indices = [
-            index for index in range(len(ordered_tasks))
-            if index not in first_indices and index not in last_indices
+            index for index in range(len(ordered_tasks)) if index not in first_indices and index not in last_indices
         ]
 
         bundles: List[List[Block]] = []
@@ -2837,7 +2886,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         next_id = next_duty_id
 
         for bundle in bundles:
-            ordered_bundle = sorted((task for task in bundle if task.trips), key=lambda item: (item.start_time, item.id))
+            ordered_bundle = sorted(
+                (task for task in bundle if task.trips), key=lambda item: (item.start_time, item.id)
+            )
             if not ordered_bundle:
                 continue
 
@@ -2897,9 +2948,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         "target_duty_id": int(chosen_duty.id),
                         "task_ids": [int(task.meta.get("task_id", task.id)) for task in ordered_bundle],
                         "trip_ids": [
-                            int(getattr(trip, "public_id", trip.id))
-                            for task in ordered_bundle
-                            for trip in task.trips
+                            int(getattr(trip, "public_id", trip.id)) for task in ordered_bundle for trip in task.trips
                         ],
                     }
                 )
@@ -2912,9 +2961,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     "target_duty_id": int(chosen_duty.id),
                     "task_ids": [int(task.meta.get("task_id", task.id)) for task in ordered_bundle],
                     "trip_ids": [
-                        int(getattr(trip, "public_id", trip.id))
-                        for task in ordered_bundle
-                        for trip in task.trips
+                        int(getattr(trip, "public_id", trip.id)) for task in ordered_bundle for trip in task.trips
                     ],
                 }
             )
@@ -2934,13 +2981,17 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         deferred_bundles: List[List[Block]] = []
 
         for bundle in bundles:
-            ordered_bundle = sorted((task for task in bundle if task.trips), key=lambda item: (item.start_time, item.id))
+            ordered_bundle = sorted(
+                (task for task in bundle if task.trips), key=lambda item: (item.start_time, item.id)
+            )
             if not ordered_bundle:
                 continue
             bundle_group_ids = self._tasks_group_ids(ordered_bundle)
             target_seed = ordered_bundle[0]
             candidates: List[Tuple[float, int, int, int, str, Duty]] = []
-            for target_duty in self._soft_issue_target_duties(candidate_duties, source_duty, target_seed, bundle_group_ids):
+            for target_duty in self._soft_issue_target_duties(
+                candidate_duties, source_duty, target_seed, bundle_group_ids
+            ):
                 for mode in ("append", "prepend"):
                     rebuilt, reason = self._soft_issue_rebuild_bundle_into_duty(target_duty, ordered_bundle, mode)
                     if rebuilt is None:
@@ -2982,9 +3033,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     "target_duty_id": int(chosen_target_id),
                     "task_ids": [int(task.meta.get("task_id", task.id)) for task in ordered_bundle],
                     "trip_ids": [
-                        int(getattr(trip, "public_id", trip.id))
-                        for task in ordered_bundle
-                        for trip in task.trips
+                        int(getattr(trip, "public_id", trip.id)) for task in ordered_bundle for trip in task.trips
                     ],
                 }
             )
@@ -3043,10 +3092,12 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     else:
                         seeded_duties.append(copy.deepcopy(duty))
 
-                allocated_duties, bundle_allocations, deferred_bundles = self._soft_issue_allocate_reconstruction_bundles(
-                    bundles=removed_bundles,
-                    working_duties=seeded_duties,
-                    source_duty=source_duty,
+                allocated_duties, bundle_allocations, deferred_bundles = (
+                    self._soft_issue_allocate_reconstruction_bundles(
+                        bundles=removed_bundles,
+                        working_duties=seeded_duties,
+                        source_duty=source_duty,
+                    )
                 )
 
                 next_duty_id = max((int(duty.id) for duty in current_duties), default=0) + 1
@@ -3080,8 +3131,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         "allocated_to_existing": bundle_allocations,
                         "allocated_to_dedicated": dedicated_allocations,
                         "source_after_trip_ids": [
-                            int(getattr(trip, "public_id", trip.id))
-                            for trip in source_rebuilt.all_trips
+                            int(getattr(trip, "public_id", trip.id)) for trip in source_rebuilt.all_trips
                         ],
                     },
                 }
@@ -3176,10 +3226,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "fragmented_duties",
             "short_connection_total",
         )
-        if any(
-            int(candidate_metrics.get(key, 0)) < int(current_metrics.get(key, 0))
-            for key in improvement_keys
-        ):
+        if any(int(candidate_metrics.get(key, 0)) < int(current_metrics.get(key, 0)) for key in improvement_keys):
             return True
         return float(candidate_metrics.get("operational_semantic_score", 0.0) or 0.0) < float(
             current_metrics.get("operational_semantic_score", 0.0) or 0.0
@@ -3251,9 +3298,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 reasons = list(source["reasons"])
 
                 source_remaining = [
-                    candidate_task
-                    for idx, candidate_task in enumerate(source_duty.tasks)
-                    if idx != task_index
+                    candidate_task for idx, candidate_task in enumerate(source_duty.tasks) if idx != task_index
                 ]
                 source_rebuilt: Optional[Duty] = None
                 source_remaining_group_ids = self._tasks_group_ids(source_remaining)
@@ -3394,40 +3439,48 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
                         record_rejection(
                             "not_better",
-                        {
-                            **evaluated_sample,
-                            "reason": "not_better",
-                        },
-                    )
+                            {
+                                **evaluated_sample,
+                                "reason": "not_better",
+                            },
+                        )
 
                 if "extreme_low_utilization_spread" in reasons and int(source_duty.id) not in reconstructed_source_ids:
                     reconstructed_source_ids.add(int(source_duty.id))
                     audit["considered"] = int(audit.get("considered", 0)) + 1
                     audit["evaluated"] = int(audit.get("evaluated", 0)) + 1
-                    reconstruction_candidate, candidate_metrics, candidate_rank = self._soft_issue_extreme_reconstruction_candidate(
-                        current_duties=current_duties,
-                        source_duty=source_duty,
-                        current_metrics=current_metrics,
-                        current_rank=current_rank,
-                        original_blocks=original_blocks,
+                    reconstruction_candidate, candidate_metrics, candidate_rank = (
+                        self._soft_issue_extreme_reconstruction_candidate(
+                            current_duties=current_duties,
+                            source_duty=source_duty,
+                            current_metrics=current_metrics,
+                            current_rank=current_rank,
+                            original_blocks=original_blocks,
+                        )
                     )
                     if reconstruction_candidate is not None:
                         audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
-                        if best_candidate is None or (candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)):
+                        if best_candidate is None or (
+                            candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)
+                        ):
                             best_candidate = reconstruction_candidate
                             best_rank = candidate_rank
                         continue
 
-                    trimmed_candidate, trimmed_metrics, trimmed_rank = self._soft_issue_trimmed_reconstruction_candidate(
-                        current_duties=current_duties,
-                        source_duty=source_duty,
-                        current_metrics=current_metrics,
-                        current_rank=current_rank,
-                        original_blocks=original_blocks,
+                    trimmed_candidate, trimmed_metrics, trimmed_rank = (
+                        self._soft_issue_trimmed_reconstruction_candidate(
+                            current_duties=current_duties,
+                            source_duty=source_duty,
+                            current_metrics=current_metrics,
+                            current_rank=current_rank,
+                            original_blocks=original_blocks,
+                        )
                     )
                     if trimmed_candidate is not None:
                         audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
-                        if best_candidate is None or (trimmed_rank is not None and trimmed_rank < (best_rank or trimmed_rank)):
+                        if best_candidate is None or (
+                            trimmed_rank is not None and trimmed_rank < (best_rank or trimmed_rank)
+                        ):
                             best_candidate = trimmed_candidate
                             best_rank = trimmed_rank
                         continue
@@ -3447,8 +3500,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     )
 
                 if (
-                    "extreme_low_utilization_spread" not in reasons
-                    and "mandatory_rest_missing_repair" not in reasons
+                    "extreme_low_utilization_spread" not in reasons and "mandatory_rest_missing_repair" not in reasons
                 ) or source_rebuilt is None:
                     continue
 
@@ -3482,7 +3534,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 dedicated_candidate, candidate_metrics, candidate_rank = dedicated_ranked
 
                 if dedicated_candidate is not None:
-                    if best_candidate is None or (candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)):
+                    if best_candidate is None or (
+                        candidate_rank is not None and candidate_rank < (best_rank or candidate_rank)
+                    ):
                         best_candidate = dedicated_candidate
                         best_rank = candidate_rank
                     continue

@@ -11,6 +11,7 @@ Estimativa de frota:  greedy earliest-deadline — um veículo de apoio
 pode cobrir várias rendições consecutivas se terminar cada uma a
 tempo de chegar na próxima (usando travel_minutes como deslocamento).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,8 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from ...domain.models import CSPSolution, Duty
 
-
-_DEFAULT_TRAVEL_MINUTES = 15   # deslocamento assumido entre rendições (sem geodados)
+_DEFAULT_TRAVEL_MINUTES = 15  # deslocamento assumido entre rendições (sem geodados)
 _DEFAULT_RELIEF_COST_PER_EVENT = 50.0  # custo fixo por rendição (veículo de apoio)
 
 
@@ -28,17 +28,17 @@ class ReliefEvent:
     block_id: int
     from_duty_id: int
     to_duty_id: int
-    handoff_time: int       # minutos desde meia-noite
-    location_id: int        # origin_id do 1º trip do segmento substituto
-    from_duty_end: int      # fim do segmento cedente
-    to_duty_start: int      # início do segmento substituto (≈ handoff_time)
+    handoff_time: int  # minutos desde meia-noite
+    location_id: int  # origin_id do 1º trip do segmento substituto
+    from_duty_end: int  # fim do segmento cedente
+    to_duty_start: int  # início do segmento substituto (≈ handoff_time)
 
 
 @dataclass
 class ReliefVehicleEstimate:
     total_events: int
     min_vehicles: int
-    peak_hour: Optional[int]      # hora do pico de rendições (0-23)
+    peak_hour: Optional[int]  # hora do pico de rendições (0-23)
     total_cost: float
     events: List[ReliefEvent] = field(default_factory=list)
 
@@ -79,9 +79,7 @@ class ReliefVehicleEstimator:
 
     def estimate(self, csp: CSPSolution) -> ReliefVehicleEstimate:
         if not csp or not csp.duties:
-            return ReliefVehicleEstimate(
-                total_events=0, min_vehicles=0, peak_hour=None, total_cost=0.0
-            )
+            return ReliefVehicleEstimate(total_events=0, min_vehicles=0, peak_hour=None, total_cost=0.0)
 
         events = self._find_relief_events(csp.duties)
         min_vehicles = self._min_fleet(events)
@@ -106,8 +104,7 @@ class ReliefVehicleEstimator:
                 if not seg.trips:
                     continue
                 block_segments.setdefault(seg.block_id, []).append(
-                    (seg.start_time, seg.end_time, duty.id,
-                     seg.trips[0].origin_id if seg.trips else 0)
+                    (seg.start_time, seg.end_time, duty.id, seg.trips[0].origin_id if seg.trips else 0)
                 )
 
         events: List[ReliefEvent] = []
@@ -120,15 +117,17 @@ class ReliefVehicleEstimator:
                 if prev_duty == next_duty:
                     # mesmo motorista — não é rendição
                     continue
-                events.append(ReliefEvent(
-                    block_id=block_id,
-                    from_duty_id=prev_duty,
-                    to_duty_id=next_duty,
-                    handoff_time=next_start,
-                    location_id=loc_id,
-                    from_duty_end=prev_end,
-                    to_duty_start=next_start,
-                ))
+                events.append(
+                    ReliefEvent(
+                        block_id=block_id,
+                        from_duty_id=prev_duty,
+                        to_duty_id=next_duty,
+                        handoff_time=next_start,
+                        location_id=loc_id,
+                        from_duty_end=prev_end,
+                        to_duty_start=next_start,
+                    )
+                )
 
         events.sort(key=lambda e: e.handoff_time)
         return events

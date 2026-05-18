@@ -15,11 +15,25 @@ import { TenantContext } from '../../common/context/tenant-context';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Vehicle, VehicleType, VehicleMaintenance, VehicleAvailabilityWindow]),
+    TypeOrmModule.forFeature([
+      Vehicle,
+      VehicleType,
+      VehicleMaintenance,
+      VehicleAvailabilityWindow,
+    ]),
     JwtModule.register({}),
   ],
-  controllers: [VehiclesController, VehicleMaintenanceController, VehicleMetricsController],
-  providers: [VehiclesService, VehicleMaintenanceService, VehicleMetricsService, TenantContext],
+  controllers: [
+    VehiclesController,
+    VehicleMaintenanceController,
+    VehicleMetricsController,
+  ],
+  providers: [
+    VehiclesService,
+    VehicleMaintenanceService,
+    VehicleMetricsService,
+    TenantContext,
+  ],
   exports: [VehiclesService, VehicleMaintenanceService, VehicleMetricsService],
 })
 export class VehiclesModule {}

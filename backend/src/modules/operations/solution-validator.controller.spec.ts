@@ -1,7 +1,14 @@
 import { ForbiddenException } from '@nestjs/common';
 import { SolutionValidatorController } from './solution-validator.controller';
 
-const MOCK_RESULT = { valid: true, errorCount: 0, warningCount: 0, errors: [], warnings: [], stats: {} };
+const MOCK_RESULT = {
+  valid: true,
+  errorCount: 0,
+  warningCount: 0,
+  errors: [],
+  warnings: [],
+  stats: {},
+};
 
 function makeController(companyId: number | null) {
   const service = {
@@ -9,16 +16,29 @@ function makeController(companyId: number | null) {
     validateScheduleById: jest.fn().mockResolvedValue(MOCK_RESULT),
   };
   const tenantCtx = { getCompanyId: jest.fn().mockReturnValue(companyId) };
-  const ctrl = new SolutionValidatorController(service as any, tenantCtx as any);
+  const ctrl = new SolutionValidatorController(
+    service as any,
+    tenantCtx as any,
+  );
   return { ctrl, service, tenantCtx };
 }
 
 describe('SolutionValidatorController', () => {
   it('validate calls service and returns result', () => {
     const { ctrl, service } = makeController(7);
-    const body = { blocks: [{ blockId: 1 }], duties: [], trips: [{ id: 1 }], params: {} };
+    const body = {
+      blocks: [{ blockId: 1 }],
+      duties: [],
+      trips: [{ id: 1 }],
+      params: {},
+    };
     const result = ctrl.validate(body);
-    expect(service.validate).toHaveBeenCalledWith(body.blocks, body.duties, body.trips, body.params);
+    expect(service.validate).toHaveBeenCalledWith(
+      body.blocks,
+      body.duties,
+      body.trips,
+      body.params,
+    );
     expect(result).toMatchObject({ valid: true, errorCount: 0 });
   });
 
@@ -37,6 +57,8 @@ describe('SolutionValidatorController', () => {
 
   it('validateSchedule throws ForbiddenException when no companyId in context', async () => {
     const { ctrl } = makeController(null);
-    await expect(ctrl.validateSchedule(1)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(ctrl.validateSchedule(1)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 });

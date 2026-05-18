@@ -1,0 +1,12 @@
+[flake8]
+# Match Black's line length
+max-line-length = 120
+# E203: whitespace before ':' — Black generates this in slice notation
+# W503: line break before binary operator — Black's style
+extend-ignore = E203, W503
+# E402: module-level import not at top — some files use try/except imports
+per-file-ignores =
+    src/algorithms/*.py: E402
+    src/services/*.py: E402
+    src/routes/*.py: E402
+    src/core/*.py: E402

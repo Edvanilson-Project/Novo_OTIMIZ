@@ -1,4 +1,5 @@
 """Estado em memória do worker estratégico (polling/reconciliação/cleanup)."""
+
 from __future__ import annotations
 
 import threading

@@ -9,9 +9,13 @@ describe('VehicleMaintenanceController', () => {
 
   beforeEach(async () => {
     service = {
-      scheduleMaintenance: jest.fn().mockResolvedValue({ id: 1, vehicleId: 10 }),
+      scheduleMaintenance: jest
+        .fn()
+        .mockResolvedValue({ id: 1, vehicleId: 10 }),
       getMaintenanceHistory: jest.fn().mockResolvedValue([{ id: 1 }]),
-      updateMaintenanceStatus: jest.fn().mockResolvedValue({ id: 1, status: 'completed' }),
+      updateMaintenanceStatus: jest
+        .fn()
+        .mockResolvedValue({ id: 1, status: 'completed' }),
       cancelMaintenance: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -19,7 +23,8 @@ describe('VehicleMaintenanceController', () => {
       controllers: [VehicleMaintenanceController],
       providers: [{ provide: VehicleMaintenanceService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(VehicleMaintenanceController);
@@ -40,7 +45,11 @@ describe('VehicleMaintenanceController', () => {
 
   it('updateMaintenanceStatus calls service', async () => {
     const result = await controller.updateMaintenanceStatus(10, 1, 'completed');
-    expect(service.updateMaintenanceStatus).toHaveBeenCalledWith(10, 1, 'completed');
+    expect(service.updateMaintenanceStatus).toHaveBeenCalledWith(
+      10,
+      1,
+      'completed',
+    );
     expect(result).toMatchObject({ status: 'completed' });
   });
 

@@ -1,4 +1,7 @@
-import { DriverConstraintValidator, DutySegment } from './driver-constraint.validator';
+import {
+  DriverConstraintValidator,
+  DutySegment,
+} from './driver-constraint.validator';
 
 describe('DriverConstraintValidator', () => {
   let validator: DriverConstraintValidator;
@@ -44,7 +47,9 @@ describe('DriverConstraintValidator', () => {
 
       expect(result.isValid).toBe(false);
       expect(result.violations.length).toBeGreaterThan(0);
-      expect(result.violations[0].violationType).toBe('consecutive_driving_exceeded');
+      expect(result.violations[0].violationType).toBe(
+        'consecutive_driving_exceeded',
+      );
     });
 
     it('should detect daily driving limit violation', () => {
@@ -60,9 +65,11 @@ describe('DriverConstraintValidator', () => {
       const result = validator.validate(segments);
 
       expect(result.isValid).toBe(false);
-      expect(result.violations.some((v) => v.violationType === 'daily_driving_exceeded')).toBe(
-        true,
-      );
+      expect(
+        result.violations.some(
+          (v) => v.violationType === 'daily_driving_exceeded',
+        ),
+      ).toBe(true);
     });
   });
 
@@ -142,7 +149,9 @@ describe('DriverConstraintValidator', () => {
       const result = validator.validate(segments);
 
       expect(result.isValid).toBe(false);
-      expect(result.violations.some((v) => v.violationType === 'meal_break_overdue')).toBe(true);
+      expect(
+        result.violations.some((v) => v.violationType === 'meal_break_overdue'),
+      ).toBe(true);
     });
 
     it('should accept meal break within time limit', () => {
@@ -191,7 +200,11 @@ describe('DriverConstraintValidator', () => {
       const result = validator.validate(segments);
 
       expect(result.isValid).toBe(false);
-      expect(result.violations.some((v) => v.violationType === 'meal_break_too_short')).toBe(true);
+      expect(
+        result.violations.some(
+          (v) => v.violationType === 'meal_break_too_short',
+        ),
+      ).toBe(true);
     });
   });
 

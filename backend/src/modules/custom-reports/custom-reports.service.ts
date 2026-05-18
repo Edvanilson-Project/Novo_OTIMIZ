@@ -1,8 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
 import PDFDocument from 'pdfkit';
-import { CustomReport, CustomReportFormat } from '../database/entities/custom-report.entity';
+import {
+  CustomReport,
+  CustomReportFormat,
+} from '../database/entities/custom-report.entity';
 import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
 import { Line } from '../database/entities/line.entity';
@@ -40,7 +47,8 @@ export class CustomReportsService {
 
   private companyId(): number {
     const id = this.tenantContext.getCompanyId();
-    if (!id) throw new BadRequestException('Empresa não identificada no contexto.');
+    if (!id)
+      throw new BadRequestException('Empresa não identificada no contexto.');
     return id;
   }
 
@@ -52,7 +60,9 @@ export class CustomReportsService {
   }
 
   async findOne(id: number): Promise<CustomReport> {
-    const report = await this.reportRepo.findOne({ where: { id, companyId: this.companyId() } });
+    const report = await this.reportRepo.findOne({
+      where: { id, companyId: this.companyId() },
+    });
     if (!report) throw new NotFoundException(`Relatório ${id} não encontrado`);
     return report;
   }
@@ -94,14 +104,19 @@ export class CustomReportsService {
     return this.execute(report.metrics as SupportedMetric[], report.filters);
   }
 
-  async preview(metrics: string[], filters: Record<string, any>): Promise<Record<string, any>> {
+  async preview(
+    metrics: string[],
+    filters: Record<string, any>,
+  ): Promise<Record<string, any>> {
     this.validateMetrics(metrics);
     return this.execute(metrics as SupportedMetric[], filters ?? {});
   }
 
   private validateMetrics(metrics: unknown): void {
     if (!Array.isArray(metrics) || metrics.length === 0) {
-      throw new BadRequestException('Campo `metrics` deve ser uma lista não-vazia.');
+      throw new BadRequestException(
+        'Campo `metrics` deve ser uma lista não-vazia.',
+      );
     }
     for (const m of metrics) {
       if (!SUPPORTED_METRICS.includes(m as SupportedMetric)) {
@@ -125,21 +140,37 @@ export class CustomReportsService {
     const sinceMain = new Date();
     sinceMain.setDate(sinceMain.getDate() - dateRangeDays);
 
-    if (wants.has('totalRuns') || wants.has('completedRuns') || wants.has('failedRuns') || wants.has('successRate')) {
+    if (
+      wants.has('totalRuns') ||
+      wants.has('completedRuns') ||
+      wants.has('failedRuns') ||
+      wants.has('successRate')
+    ) {
       const [total, completed, failed] = await Promise.all([
-        this.scheduleRepo.count({ where: { companyId, createdAt: MoreThanOrEqual(sinceMain) } }),
         this.scheduleRepo.count({
-          where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(sinceMain) },
+          where: { companyId, createdAt: MoreThanOrEqual(sinceMain) },
         }),
         this.scheduleRepo.count({
-          where: { companyId, status: ScheduleStatus.FAILED, createdAt: MoreThanOrEqual(sinceMain) },
+          where: {
+            companyId,
+            status: ScheduleStatus.COMPLETED,
+            createdAt: MoreThanOrEqual(sinceMain),
+          },
+        }),
+        this.scheduleRepo.count({
+          where: {
+            companyId,
+            status: ScheduleStatus.FAILED,
+            createdAt: MoreThanOrEqual(sinceMain),
+          },
         }),
       ]);
       if (wants.has('totalRuns')) result.totalRuns = total;
       if (wants.has('completedRuns')) result.completedRuns = completed;
       if (wants.has('failedRuns')) result.failedRuns = failed;
       if (wants.has('successRate')) {
-        result.successRate = total > 0 ? +((completed / total) * 100).toFixed(1) : 0;
+        result.successRate =
+          total > 0 ? +((completed / total) * 100).toFixed(1) : 0;
       }
     }
 
@@ -150,13 +181,24 @@ export class CustomReportsService {
       result.totalLines = await this.lineRepo.count({ where: { companyId } });
     }
 
-    if (wants.has('avgVehicles') || wants.has('avgCrew') || wants.has('avgCost')) {
+    if (
+      wants.has('avgVehicles') ||
+      wants.has('avgCrew') ||
+      wants.has('avgCost')
+    ) {
       const recent = await this.scheduleRepo.find({
-        where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(sinceMain) },
+        where: {
+          companyId,
+          status: ScheduleStatus.COMPLETED,
+          createdAt: MoreThanOrEqual(sinceMain),
+        },
         order: { updatedAt: 'DESC' },
         take: 30,
       });
-      let sumV = 0, sumC = 0, sumCost = 0, n = 0;
+      let sumV = 0,
+        sumC = 0,
+        sumCost = 0,
+        n = 0;
       for (const r of recent) {
         const meta = (r.metadata as Record<string, any>) || {};
         const v = meta.num_vehicles ?? meta.vehicles;
@@ -168,24 +210,38 @@ export class CustomReportsService {
           n++;
         }
       }
-      if (wants.has('avgVehicles')) result.avgVehicles = n > 0 ? +(sumV / n).toFixed(1) : null;
-      if (wants.has('avgCrew')) result.avgCrew = n > 0 ? +(sumC / n).toFixed(1) : null;
-      if (wants.has('avgCost')) result.avgCost = n > 0 ? +(sumCost / n).toFixed(2) : null;
+      if (wants.has('avgVehicles'))
+        result.avgVehicles = n > 0 ? +(sumV / n).toFixed(1) : null;
+      if (wants.has('avgCrew'))
+        result.avgCrew = n > 0 ? +(sumC / n).toFixed(1) : null;
+      if (wants.has('avgCost'))
+        result.avgCost = n > 0 ? +(sumCost / n).toFixed(2) : null;
     }
 
     if (wants.has('trend7d')) {
-      const d7 = new Date(); d7.setDate(d7.getDate() - 7);
-      const d14 = new Date(); d14.setDate(d14.getDate() - 14);
+      const d7 = new Date();
+      d7.setDate(d7.getDate() - 7);
+      const d14 = new Date();
+      d14.setDate(d14.getDate() - 14);
       const [last7, prev14] = await Promise.all([
         this.scheduleRepo.count({
-          where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(d7) },
+          where: {
+            companyId,
+            status: ScheduleStatus.COMPLETED,
+            createdAt: MoreThanOrEqual(d7),
+          },
         }),
         this.scheduleRepo.count({
-          where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(d14) },
+          where: {
+            companyId,
+            status: ScheduleStatus.COMPLETED,
+            createdAt: MoreThanOrEqual(d14),
+          },
         }),
       ]);
       const prev7 = prev14 - last7;
-      result.trend7d = prev7 > 0 ? +(((last7 - prev7) / prev7) * 100).toFixed(1) : null;
+      result.trend7d =
+        prev7 > 0 ? +(((last7 - prev7) / prev7) * 100).toFixed(1) : null;
     }
 
     if (wants.has('recentRuns')) {
@@ -217,7 +273,8 @@ export class CustomReportsService {
     for (const [k, v] of Object.entries(payload)) {
       if (k === 'recentRuns' && Array.isArray(v)) continue;
       if (k === 'filters' && typeof v === 'object') {
-        for (const [fk, fv] of Object.entries(v)) flat.push([`filter.${fk}`, String(fv)]);
+        for (const [fk, fv] of Object.entries(v))
+          flat.push([`filter.${fk}`, String(fv)]);
       } else {
         flat.push([k, v == null ? '' : String(v)]);
       }
@@ -242,7 +299,10 @@ export class CustomReportsService {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }
 
-  async toPdf(report: CustomReport, payload: Record<string, any>): Promise<Buffer> {
+  async toPdf(
+    report: CustomReport,
+    payload: Record<string, any>,
+  ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 48, size: 'A4' });
       const chunks: Buffer[] = [];
@@ -252,10 +312,19 @@ export class CustomReportsService {
 
       doc.fontSize(18).text(report.name, { align: 'left' });
       if (report.description) {
-        doc.moveDown(0.3).fontSize(10).fillColor('#666').text(report.description);
+        doc
+          .moveDown(0.3)
+          .fontSize(10)
+          .fillColor('#666')
+          .text(report.description);
       }
-      doc.moveDown(0.5).fontSize(9).fillColor('#888')
-        .text(`Gerado em: ${new Date(payload.generatedAt ?? new Date()).toLocaleString('pt-BR')}`)
+      doc
+        .moveDown(0.5)
+        .fontSize(9)
+        .fillColor('#888')
+        .text(
+          `Gerado em: ${new Date(payload.generatedAt ?? new Date()).toLocaleString('pt-BR')}`,
+        )
         .text(`Janela: últimos ${payload.filters?.dateRangeDays ?? 30} dia(s)`);
       doc.moveDown(0.8);
 
@@ -263,16 +332,22 @@ export class CustomReportsService {
       doc.moveDown(0.3).fontSize(10);
 
       for (const [k, v] of Object.entries(payload)) {
-        if (k === 'generatedAt' || k === 'filters' || k === 'recentRuns') continue;
+        if (k === 'generatedAt' || k === 'filters' || k === 'recentRuns')
+          continue;
         if (v == null) continue;
         doc.text(`${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
       }
 
       if (Array.isArray(payload.recentRuns) && payload.recentRuns.length > 0) {
-        doc.moveDown(0.8).fontSize(12).text('Execuções recentes', { underline: true });
+        doc
+          .moveDown(0.8)
+          .fontSize(12)
+          .text('Execuções recentes', { underline: true });
         doc.moveDown(0.3).fontSize(9);
         for (const r of payload.recentRuns) {
-          const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString('pt-BR') : '—';
+          const date = r.createdAt
+            ? new Date(r.createdAt).toLocaleDateString('pt-BR')
+            : '—';
           doc.text(
             `#${r.id} · ${date} · ${r.status} · ${r.vehicles ?? '—'} veíc · ${r.crew ?? '—'} crew · R$ ${r.totalCost ?? '—'} · ${r.algorithm ?? '—'}`,
           );

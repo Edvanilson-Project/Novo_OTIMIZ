@@ -82,12 +82,19 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
   const [data, setData] = useState<DutyStatsReport | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    operationReportingApi
-      .getDutyStats(scheduleId)
-      .then((d: DutyStatsReport) => setData(d))
-      .catch((err: any) => setError(err?.response?.data?.message ?? err?.message ?? 'Erro ao carregar jornadas'))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const d = await operationReportingApi.getDutyStats(scheduleId);
+        if (!cancelled) { setData(d); setError(null); }
+      } catch (err: any) {
+        if (!cancelled) setError(err?.response?.data?.message ?? err?.message ?? 'Erro ao carregar jornadas');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [scheduleId]);
 
   if (loading) {

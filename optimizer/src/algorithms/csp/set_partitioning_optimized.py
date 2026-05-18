@@ -21,10 +21,10 @@ AUTOR: Especialista em Pesquisa Operacional Sênior
 DATA: 2026-04-08
 VERSÃO: Optibus Performance Edition
 """
+
 from __future__ import annotations
 
 import logging
-import math
 import random
 import time
 import numpy as np
@@ -35,7 +35,6 @@ from ...core.config import get_settings
 from ...domain.interfaces import ICSPAlgorithm
 from ...domain.models import Block, CSPSolution, Duty, Trip
 from ..base import BaseAlgorithm
-from ..evaluator import _DEFAULT_CREW_COST_PER_HOUR
 from .greedy import GreedyCSP
 
 _log = logging.getLogger(__name__)
@@ -43,33 +42,49 @@ settings = get_settings()
 
 try:
     import pulp  # type: ignore
+
     _PULP_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _PULP_AVAILABLE = False
 
 try:
     import numba
+
     _NUMBA_AVAILABLE = True
 except ImportError:
     _NUMBA_AVAILABLE = False
-    
+
+
 # Fallback Python puro — sempre disponível, independente de numba.
 # Quando numba está presente, a função é JIT-compilada abaixo (nopython=True).
 def _jit_fast_feasibility(
-    task_end: int, task_day: int, task_last_dest: int, task_last_depot: int,
-    nxt_start: int, nxt_day: int, nxt_first_orig: int, nxt_first_depot: int,
-    max_shift: int, transfer_needed: int, check_terminals: bool
+    task_end: int,
+    task_day: int,
+    task_last_dest: int,
+    task_last_depot: int,
+    nxt_start: int,
+    nxt_day: int,
+    nxt_first_orig: int,
+    nxt_first_depot: int,
+    max_shift: int,
+    transfer_needed: int,
+    check_terminals: bool,
 ) -> bool:
-    if nxt_start < task_end: return False
-    if nxt_day < task_day: return False
+    if nxt_start < task_end:
+        return False
+    if nxt_day < task_day:
+        return False
     gap = nxt_start - task_end
-    if gap > max_shift: return False
-    if gap < transfer_needed: return False
+    if gap > max_shift:
+        return False
+    if gap < transfer_needed:
+        return False
     if check_terminals:
         if task_last_dest != nxt_first_orig:
             if task_last_depot == -1 or nxt_first_depot == -1 or task_last_depot != nxt_first_depot:
                 return False
     return True
+
 
 if _NUMBA_AVAILABLE:
     # Sobrescreve a versão Python com a JIT-compilada (10x-50x mais rápida).
@@ -82,7 +97,7 @@ if _NUMBA_AVAILABLE:
         dest_ids: np.ndarray,
         depot_ids: np.ndarray,
         deadhead_matrix: np.ndarray,
-        terminal_only: bool
+        terminal_only: bool,
     ) -> np.ndarray:
         """Matriz de transferência JIT-otimizada."""
         n = len(origin_ids)
@@ -103,11 +118,7 @@ if _NUMBA_AVAILABLE:
         return result
 
     @numba.jit(nopython=True, cache=True)
-    def _jit_meal_break_check(
-        work_times: np.ndarray,
-        break_times: np.ndarray,
-        meal_threshold: int = 360
-    ) -> np.ndarray:
+    def _jit_meal_break_check(work_times: np.ndarray, break_times: np.ndarray, meal_threshold: int = 360) -> np.ndarray:
         """Verificação JIT de janelas de refeição."""
         n = len(work_times)
         needs_break = np.zeros(n, dtype=np.bool_)
@@ -150,7 +161,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         O algoritmo ajusta automaticamente estes parâmetros baseado no número de tarefas.
         """
         # Prioriza ilp_timeout_seconds da API
-        timeout = params.get("ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds))
+        timeout = params.get(
+            "ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds)
+        )
         super().__init__(name="set_partitioning_optimized_csp", time_budget_s=timeout)
         self.params = params
         self.vsp_params = vsp_params or {}
@@ -180,7 +193,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self._max_candidate_successors_base = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self._max_columns_base = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
-        self.max_pricing_iterations = max(0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0)))
+        self.max_pricing_iterations = max(
+            0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0))
+        )
         self.max_pricing_additions = max(1, int(self.vsp_params.get("max_pricing_additions", 512)))
         self.enable_exploration_noise = bool(self.vsp_params.get("enable_exploration_noise", True))
 
@@ -202,7 +217,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         self.max_candidate_successors = self._max_candidate_successors_base
         self.max_columns = self._max_columns_base
 
-        _log.info(f"SetPartitioningOptimizedCSP inicializado com poda agressiva (Nível Optibus)")
+        _log.info("SetPartitioningOptimizedCSP inicializado com poda agressiva (Nível Optibus)")
 
     def _adaptive_parameters(self, n_tasks: int) -> None:
         """
@@ -224,24 +239,30 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             self.max_candidate_successors = max(2, self._max_candidate_successors_base // 2)
             self.max_trips_per_piece = max(2, self.max_trips_per_piece - 2)
             self.max_columns = max(2000, self._max_columns_base // 2)
-            _log.debug(f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
-                      f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo agressivo)")
+            _log.debug(
+                f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
+                f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo agressivo)"
+            )
 
         elif n_tasks > 50:
             # REDUÇÃO MODERADA: Instâncias grandes
             self.max_candidate_successors = max(3, self._max_candidate_successors_base - 1)
             self.max_trips_per_piece = max(3, self.max_trips_per_piece - 1)
             self.max_columns = max(3000, int(self._max_columns_base * 0.6))
-            _log.debug(f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
-                      f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo moderado)")
+            _log.debug(
+                f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
+                f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo moderado)"
+            )
 
         elif n_tasks > 20:
             # REDUÇÃO LEVE: Instâncias médias
             self.max_candidate_successors = max(3, self._max_candidate_successors_base)
             self.max_trips_per_piece = max(3, self.max_trips_per_piece)
             self.max_columns = max(4000, int(self._max_columns_base * 0.8))
-            _log.debug(f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
-                      f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo leve)")
+            _log.debug(
+                f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
+                f"max_trips={self.max_trips_per_piece}, max_columns={self.max_columns} (modo leve)"
+            )
 
         else:
             # MODO PADRÃO: Instâncias pequenas
@@ -279,18 +300,26 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         task_day = self._cached_service_day(task)
         nxt_day = self._cached_service_day(nxt)
         transfer_needed = self._cached_transfer_needed(task, nxt)
-        
+
         task_last_dest = int(task.trips[-1].destination_id)
-        task_last_depot = int(getattr(task.trips[-1], 'depot_id', -1) or -1)
+        task_last_depot = int(getattr(task.trips[-1], "depot_id", -1) or -1)
         nxt_first_orig = int(nxt.trips[0].origin_id)
-        nxt_first_depot = int(getattr(nxt.trips[0], 'depot_id', -1) or -1)
-        
+        nxt_first_depot = int(getattr(nxt.trips[0], "depot_id", -1) or -1)
+
         is_feasible = _jit_fast_feasibility(
-            int(task.end_time), int(task_day), task_last_dest, task_last_depot,
-            int(nxt.start_time), int(nxt_day), nxt_first_orig, nxt_first_depot,
-            int(self.max_shift), int(transfer_needed), bool(self.greedy.operator_change_terminals_only)
+            int(task.end_time),
+            int(task_day),
+            task_last_dest,
+            task_last_depot,
+            int(nxt.start_time),
+            int(nxt_day),
+            nxt_first_orig,
+            nxt_first_depot,
+            int(self.max_shift),
+            int(transfer_needed),
+            bool(self.greedy.operator_change_terminals_only),
         )
-        
+
         if not is_feasible:
             self._combinations_pruned += 1
             return False
@@ -327,8 +356,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         têm a mesma última tarefa mas estado diferente (O-M8).
         """
         last_id = duty.tasks[-1].id if duty.tasks else 0
-        key = (last_id, block.id, duty.spread_time, duty.work_time,
-               int(duty.meta.get("continuous_drive", 0)))
+        key = (last_id, block.id, duty.spread_time, duty.work_time, int(duty.meta.get("continuous_drive", 0)))
 
         if key in self._can_extend_cache:
             self._cache_hits += 1
@@ -344,7 +372,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             # Mantém apenas os 5000 registros mais recentes (LRU aproximado)
             items = list(self._can_extend_cache.items())
             self._can_extend_cache = dict(items[-5000:])
-            _log.debug(f"Cache de _can_extend limpo: 10000 → 5000 registros")
+            _log.debug("Cache de _can_extend limpo: 10000 → 5000 registros")
 
         return result
 
@@ -371,7 +399,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
             # DEBUG: Imprimir informações da task atual
             if _log.getEffectiveLevel() <= logging.DEBUG:
-                _log.debug(f"Task {task.id}: {task.start_time//60:02d}:{task.start_time%60:02d}-{task.end_time//60:02d}:{task.end_time%60:02d}")
+                _log.debug(
+                    f"Task {task.id}: {task.start_time // 60:02d}:{task.start_time % 60:02d}-{task.end_time // 60:02d}:{task.end_time % 60:02d}"  # noqa: E501
+                )
 
             # PREPARAÇÃO ÚNICA: Cria duty com task aplicada (reutilizada para todos os nxt)
             # Esta otimização evita O(n²) alocações de Duty e aplicações de _apply_block
@@ -402,8 +432,10 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                     # porque as tarefas estão ordenadas por start_time crescente
                     # DEBUG: Log de corte prematuro
                     if _log.getEffectiveLevel() <= logging.DEBUG:
-                        _log.debug(f"  CORTE PREMATURO: gap {gap}min > max_shift {self.max_shift}min "
-                                  f"entre task {task.id} e task {nxt.id}")
+                        _log.debug(
+                            f"  CORTE PREMATURO: gap {gap}min > max_shift {self.max_shift}min "
+                            f"entre task {task.id} e task {nxt.id}"
+                        )
 
                     # CONTAGEM DE PODA: Este early break elimina todas as combinações restantes
                     # Número de combinações eliminadas = total de tarefas restantes
@@ -440,9 +472,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         elapsed = time.time() - start_time
         self._phase_times["neighborhood"] += elapsed
-        _log.debug(f"Grafo de vizinhança construído: {len(tasks)} tarefas, "
-                  f"{sum(len(v) for v in neighbors.values())} conexões, "
-                  f"{elapsed:.2f}s, {self._combinations_pruned} podas")
+        _log.debug(
+            f"Grafo de vizinhança construído: {len(tasks)} tarefas, "
+            f"{sum(len(v) for v in neighbors.values())} conexões, "
+            f"{elapsed:.2f}s, {self._combinations_pruned} podas"
+        )
 
         return neighbors
 
@@ -531,7 +565,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         }
         return True, limits
 
-    def _dfs_with_bounds(self, tasks: List[Block], neighbors: Dict[int, List[Block]]) -> Generator[List[Block], None, None]:
+    def _dfs_with_bounds(
+        self, tasks: List[Block], neighbors: Dict[int, List[Block]]
+    ) -> Generator[List[Block], None, None]:
         """
         DFS (Depth-First Search) com BOUND FUNCTIONS para poda agressiva.
 
@@ -671,10 +707,12 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         elapsed = time.time() - start_time
         self._phase_times["column_generation"] += elapsed
-        _log.info(f"Colunas geradas: {len(columns)} combinações, "
-                  f"{elapsed:.2f}s, {self._fast_checks} verificações rápidas, "
-                  f"{self._full_checks} verificações completas, "
-                  f"{self._cache_hits} cache hits, {self._combinations_pruned} podas")
+        _log.info(
+            f"Colunas geradas: {len(columns)} combinações, "
+            f"{elapsed:.2f}s, {self._fast_checks} verificações rápidas, "
+            f"{self._full_checks} verificações completas, "
+            f"{self._cache_hits} cache hits, {self._combinations_pruned} podas"
+        )
 
         return columns
 
@@ -683,21 +721,26 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         Calcula custo de uma combinação (jornada) usando o CostEvaluator centralizado.
         """
         from ...domain.models import CSPSolution
+
         duty = Duty(id=0)
         # Re-aplicar para garantir que todos os metadados estejam no duty para o avaliador
         for i, block in enumerate(combo):
             if i == 0:
-                self.greedy._apply_block(duty, block, {
-                    "new_work": self.greedy._block_regulatory_work(block),
-                    "new_spread": block.total_duration + self.greedy.pullout + self.greedy.pullback,
-                    "new_cont": self.greedy._block_drive(block),
-                    "daily_drive": self.greedy._block_regulatory_work(block),
-                })
+                self.greedy._apply_block(
+                    duty,
+                    block,
+                    {
+                        "new_work": self.greedy._block_regulatory_work(block),
+                        "new_spread": block.total_duration + self.greedy.pullout + self.greedy.pullback,
+                        "new_cont": self.greedy._block_drive(block),
+                        "daily_drive": self.greedy._block_regulatory_work(block),
+                    },
+                )
             else:
                 ok, _, data = self.greedy._can_extend(duty, block)
                 if ok:
                     self.greedy._apply_block(duty, block, data)
-        
+
         dummy_sol = CSPSolution(duties=[duty], uncovered_blocks=[])
         return float(self.greedy.evaluator.csp_cost_breakdown(dummy_sol)["total"])
 
@@ -738,20 +781,20 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         Lₐ domina L_b no mesmo nodo sse:
             Lₐ.rc ≤ L_b.rc ∧ Lₐ.w ≤ L_b.w ∧ Lₐ.s ≤ L_b.s ∧ Lₐ.d ≤ L_b.d ∧ Lₐ.ub ≤ L_b.ub
             ∧ pelo menos um estritamente menor.
-        
+
         CORREÇÕES CRÍTICAS IMPLEMENTADAS:
-        1. inclusão de 'ub' (unpaid_break): Proteção contra penalidades não-lineares de 
-           pausa longa que crescem em degraus após 90 min (1x, 3x, 10x). Um rótulo 
-           com ub=85 pode ter custo menor agora, mas ao cruzar 90 min receber penalidade 
+        1. inclusão de 'ub' (unpaid_break): Proteção contra penalidades não-lineares de
+           pausa longa que crescem em degraus após 90 min (1x, 3x, 10x). Um rótulo
+           com ub=85 pode ter custo menor agora, mas ao cruzar 90 min receber penalidade
            10x, sendo mais caro no final que ub=20 com custo maior atualmente.
-        
-        2. Relaxamento de dominância em 'w': Como a função de custo inclui fairness 
-           (penalidade baseada em abs(work - target_work)), menos trabalho nem sempre 
-           é melhor. Se target_work é maior, menos trabalho significa maior penalidade 
-           de fairness. Implementamos relaxamento: se w1 < w2 mas ambos estão longe do 
-           target_work, mantemos ambos na fronteira. Alternativamente, exigimos 
+
+        2. Relaxamento de dominância em 'w': Como a função de custo inclui fairness
+           (penalidade baseada em abs(work - target_work)), menos trabalho nem sempre
+           é melhor. Se target_work é maior, menos trabalho significa maior penalidade
+           de fairness. Implementamos relaxamento: se w1 < w2 mas ambos estão longe do
+           target_work, mantemos ambos na fronteira. Alternativamente, exigimos
            igualdade estrita quando a diferença de trabalho impacta a penalidade final.
-           (Escolha arquitetural: exigimos w1 == w2 OU toleramos diferença se ambos 
+           (Escolha arquitetural: exigimos w1 == w2 OU toleramos diferença se ambos
            estão dentro de faixa de tolerância do target_work).
 
         Rótulos dominados são descartados imediatamente (poda Pareto).
@@ -759,27 +802,45 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         # Sincronização de Pesos com o Evaluador Central
         CREW_COST_PER_MIN = float(self.greedy.evaluator.crew_cost_per_hour) / 60.0
         FIXED_DUTY_COST = float(self.greedy.evaluator.cost_duty)
-        GAP_WEIGHT = 0.1 # Peso interno do solver para gaps pequenos
+        GAP_WEIGHT = 0.1  # Peso interno do solver para gaps pequenos
         PASSIVE_WEIGHT = float(self.goal_weights.get("passive_transfer", 0.25))
         BREAK_RESET_MIN = self.greedy.min_break
-        LONG_UNPAID_BREAK_LIMIT = self.greedy.long_unpaid_break_limit
-        LONG_UNPAID_BREAK_PENALTY = self.greedy.long_unpaid_break_penalty_weight
+        self.greedy.long_unpaid_break_limit
+        self.greedy.long_unpaid_break_penalty_weight
 
         target_work = max(
             self.greedy.min_work,
-            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85)))
+            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))),
         )
         fairness_tolerance = int(self.goal_weights.get("fairness_tolerance_minutes", 30))
 
         class _Label:
-            __slots__ = ('rc', 'c', 'w', 's', 'd', 'ub', 'task', 'first_start', 'prev',
-                         'meal_break_used', 'rest_since_last_duty', 'cost_with_penalties')
+            __slots__ = (
+                "rc",
+                "c",
+                "w",
+                "s",
+                "d",
+                "ub",
+                "task",
+                "first_start",
+                "prev",
+                "meal_break_used",
+                "rest_since_last_duty",
+                "cost_with_penalties",
+            )
 
             def __init__(
                 self_l,
-                rc: float, c: float, w: int, s: int, d: int, ub: int,
-                task: Block, first_start: int,
-                prev: Optional['_Label'] = None,
+                rc: float,
+                c: float,
+                w: int,
+                s: int,
+                d: int,
+                ub: int,
+                task: Block,
+                first_start: int,
+                prev: Optional["_Label"] = None,
             ) -> None:
                 self_l.rc = rc
                 self_l.c = c
@@ -791,9 +852,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 self_l.first_start = first_start
                 self_l.prev = prev
 
-            def dominates(self_l, other: '_Label') -> bool:
+            def dominates(self_l, other: "_Label") -> bool:
                 """True se self_l domina other em todos os recursos (Pareto).
-                
+
                 CORREÇÃO NON-LINEAR: Inclui ub (unpaid_break) e trata w com cuidado
                 devido à penalidade de fairness baseada em target_work.
                 """
@@ -803,7 +864,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 w_dominates = False
                 w1_fairness = abs(self_l.w - target_work)
                 w2_fairness = abs(other.w - target_work)
-                
+
                 if self_l.w == other.w:
                     w_dominates = True
                 elif self_l.w < other.w:
@@ -839,7 +900,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             def get_path(self_l) -> List[Block]:
                 """Reconstrói o path seguindo ponteiros prev."""
                 nodes: List[Block] = []
-                curr: Optional['_Label'] = self_l
+                curr: Optional["_Label"] = self_l
                 while curr is not None:
                     nodes.append(curr.task)
                     curr = curr.prev
@@ -855,7 +916,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         # Rótulos não-dominados por nodo (índice = posição em `ordered`)
         node_labels: List[List[_Label]] = [[] for _ in range(n)]
 
-        def _add_label(node_idx: int, new_lbl: '_Label') -> bool:
+        def _add_label(node_idx: int, new_lbl: "_Label") -> bool:
             """Insere new_lbl se não dominado; remove labels que new_lbl domina."""
             bucket = node_labels[node_idx]
             for existing in bucket:
@@ -875,10 +936,19 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             c0 = FIXED_DUTY_COST + drive * CREW_COST_PER_MIN
             rc0 = c0 - duals.get(task.id, 0.0)
 
-            _add_label(i, _Label(
-                rc=rc0, c=c0, w=drive, s=s0, d=drive, ub=0,
-                task=task, first_start=task.start_time,
-            ))
+            _add_label(
+                i,
+                _Label(
+                    rc=rc0,
+                    c=c0,
+                    w=drive,
+                    s=s0,
+                    d=drive,
+                    ub=0,
+                    task=task,
+                    first_start=task.start_time,
+                ),
+            )
 
         # ── 3. Extensão em ordem topológica ───────────────────────────────────
         for i, task_i in enumerate(ordered):
@@ -902,11 +972,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                     0,
                     self.greedy._transfer_needed(task_i, task_j) - self.greedy.min_layover,
                 )
-                edge_c = (
-                    drive_j * CREW_COST_PER_MIN
-                    + gap * GAP_WEIGHT
-                    + passive * PASSIVE_WEIGHT
-                )
+                edge_c = drive_j * CREW_COST_PER_MIN + gap * GAP_WEIGHT + passive * PASSIVE_WEIGHT
                 edge_rc = edge_c - duals.get(task_j.id, 0.0)
 
                 for lbl in node_labels[i]:
@@ -928,17 +994,20 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                     # O gap é parte não remunerada entre tarefas
                     new_ub = lbl.ub + gap
 
-                    _add_label(j, _Label(
-                        rc=lbl.rc + edge_rc,
-                        c=lbl.c + edge_c,
-                        w=new_w,
-                        s=new_s,
-                        d=new_d,
-                        ub=new_ub,
-                        task=task_j,
-                        first_start=lbl.first_start,
-                        prev=lbl,
-                    ))
+                    _add_label(
+                        j,
+                        _Label(
+                            rc=lbl.rc + edge_rc,
+                            c=lbl.c + edge_c,
+                            w=new_w,
+                            s=new_s,
+                            d=new_d,
+                            ub=new_ub,
+                            task=task_j,
+                            first_start=lbl.first_start,
+                            prev=lbl,
+                        ),
+                    )
 
         # ── 4. Coleta: rótulos com rc < 0 → novas Colunas para o RMP ─────────
         results: List[Tuple[List[Block], float]] = []
@@ -958,18 +1027,19 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 results.append((path, lbl.c))
 
         # Ordena pelo custo reduzido mais negativo (colunas mais promissoras)
-        results.sort(
-            key=lambda item: item[1] - sum(duals.get(b.id, 0.0) for b in item[0])
-        )
+        results.sort(key=lambda item: item[1] - sum(duals.get(b.id, 0.0) for b in item[0]))
 
         _log.debug(
             "SPPRC pricing: %d colunas rc<0 encontradas (%d nodos, %d labels totais)",
-            len(results), n,
+            len(results),
+            n,
             sum(len(lbls) for lbls in node_labels),
         )
         return results
 
-    def _pricing(self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]) -> List[Tuple[List[Block], float]]:
+    def _pricing(
+        self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]
+    ) -> List[Tuple[List[Block], float]]:
         """
         Subproblema de Pricing com SPPRC Label-Setting Algorithm.
 
@@ -1014,14 +1084,14 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             for j in range(i + 1, len(tasks)):
                 combo1 = [tasks[i]]
                 combo2 = [tasks[i], tasks[j]]
-                
+
                 cost1 = self._piece_cost(combo1)
                 cost2 = self._piece_cost(combo2)
-                
+
                 # Custo deve ser não-decrescente (subadditivo)
                 if cost2 < cost1 - 1e-6:  # Tolerância numérica
                     _log.warning(f"Violacao de subadditividade: {cost2} < {cost1}")
-        
+
         # 2. Verificar triangularidade de deadhead times
         for i in range(len(tasks)):
             for j in range(len(tasks)):
@@ -1030,21 +1100,20 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                         t1 = tasks[i].trips[-1]
                         t2 = tasks[j].trips[0]
                         t3 = tasks[k].trips[0]
-                        
-                        d_ij = t1.deadhead_times.get(t2.origin_id, float('inf'))
-                        d_jk = t2.deadhead_times.get(t3.origin_id, float('inf'))
-                        d_ik = t1.deadhead_times.get(t3.origin_id, float('inf'))
-                        
+
+                        d_ij = t1.deadhead_times.get(t2.origin_id, float("inf"))
+                        d_jk = t2.deadhead_times.get(t3.origin_id, float("inf"))
+                        d_ik = t1.deadhead_times.get(t3.origin_id, float("inf"))
+
                         if d_ij + d_jk < d_ik - 1e-6:
-                            _log.warning(f"Violacao de desigualdade triangular: "
-                                       f"{d_ij} + {d_jk} < {d_ik}")
-        
+                            _log.warning(f"Violacao de desigualdade triangular: " f"{d_ij} + {d_jk} < {d_ik}")
+
         # 3. Verificar consistência de tempos
         for task in tasks:
             for trip in task.trips:
                 if trip.start_time >= trip.end_time:
                     raise ValueError(f"Trip {trip.id}: start_time >= end_time")
-                
+
                 if trip.start_time < 0 or trip.end_time > 1440:
                     _log.warning(f"Trip {trip.id}: tempo fora do range [0, 1440]")
 
@@ -1108,12 +1177,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         # FASE 3: Restricted Master Problem (RMP) / Delayed Column Generation
         pricing_rounds = self.max_pricing_iterations if self.pricing_enabled else 0
         total_time_limit_s = max(1, int(max(1.0, float(self.time_budget_s))))
-        
+
         # Alocação inteligente de tempo por fase
-        pricing_time_limit_s = max(1, min(
-            total_time_limit_s,
-            int(max(1.0, float(self.time_budget_s) * 0.3))  # 30% para pricing
-        ))
+        pricing_time_limit_s = max(
+            1, min(total_time_limit_s, int(max(1.0, float(self.time_budget_s) * 0.3)))  # 30% para pricing
+        )
 
         # Big-M dinâmico: tightened para evitar drift de ponto flutuante no LP.
         # Suficientemente alto para dominar qualquer solução viável, mas não
@@ -1134,7 +1202,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             # Define Restricted Master Problem
             lp = pulp.LpProblem("CSP_Pricing", pulp.LpMinimize)
             y = [pulp.LpVariable(f"y_{index}", lowBound=0) for index in range(len(columns))]
-            
+
             # Variáveis Elásticas (Slack Variables)
             s = {t_id: pulp.LpVariable(f"s_{t_id}", lowBound=0) for t_id in task_ids}
 
@@ -1149,7 +1217,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 constraint_terms.append((s[task_id], 1.0))
                 lp += pulp.LpAffineExpression(constraint_terms) >= 1.0, f"cover_{task_id}"
 
-            lp.solve(pulp.PULP_CBC_CMD(timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False, threads=settings.ilp_threads))
+            lp.solve(
+                pulp.PULP_CBC_CMD(
+                    timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False, threads=settings.ilp_threads
+                )
+            )
 
             # Extrai Valores Duais (\pi_i) das restrições para o SPPRC (Shortest Path Subproblem)
             duals = {
@@ -1174,7 +1246,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         # FASE 4: Resolução MILP c/ Elastic Constraints, Cuts e Warm Start
         start_ilp = time.time()
-        
+
         # Atualiza a Matriz Esparsa
         task_to_columns = {t: [] for t in task_ids}
         for col_idx, (combo, _) in enumerate(columns):
@@ -1206,20 +1278,22 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             prob += pulp.LpAffineExpression(constraint_terms) >= 1.0, f"cover_int_{task_id}"
 
         # Resolve Submetendo Cortes, Heurística e Gap Tolerado para convergência rápida em instâncias massivas
-        prob.solve(pulp.PULP_CBC_CMD(
-            timeLimit=total_time_limit_s, 
-            msg=0, 
-            keepFiles=False,
-            # Parâmetros de Robustez para Fechar o Gap Optibus-Like
-            gapRel=0.001,        # Fecha ao atingir 0.1% de distância do limiar ótimo
-            cuts=True,           # Libera Gomory / MIR Cuts
-            presolve=True,       # Consolida matriz antes de iniciar Solver Nodes
-            warmStart=True,
-            strong=5,
-            threads=settings.ilp_threads,
-            options=["-heuristicsOnOff", "on"],
-        ))
-        
+        prob.solve(
+            pulp.PULP_CBC_CMD(
+                timeLimit=total_time_limit_s,
+                msg=0,
+                keepFiles=False,
+                # Parâmetros de Robustez para Fechar o Gap Optibus-Like
+                gapRel=0.001,  # Fecha ao atingir 0.1% de distância do limiar ótimo
+                cuts=True,  # Libera Gomory / MIR Cuts
+                presolve=True,  # Consolida matriz antes de iniciar Solver Nodes
+                warmStart=True,
+                strong=5,
+                threads=settings.ilp_threads,
+                options=["-heuristicsOnOff", "on"],
+            )
+        )
+
         self._phase_times["ilp_solve"] = time.time() - start_ilp
 
         # FASE 5: Fallback Estrutural
@@ -1228,8 +1302,10 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             if prob.status != pulp.constants.LpStatusOptimal:
                 _log.warning(f"ILP solver status: {pulp.LpStatus[prob.status]} — falling back to greedy CSP")
             else:
-                _log.warning("Solução contornada usando Variáveis Elásticas (Slack). Retornando a Greedy completo dado que viabilidade estrita não foi coberta.")
-            
+                _log.warning(
+                    "Solução contornada usando Variáveis Elásticas (Slack). Retornando a Greedy completo dado que viabilidade estrita não foi coberta."  # noqa: E501
+                )
+
             fallback = self.greedy.solve(blocks, trips)
             fallback.meta["workpieces_generated"] = len(columns)
             fallback.meta["column_generation"] = {
@@ -1265,7 +1341,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                             "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
                             "new_cont": self.greedy._block_drive(task),
                             "daily_drive": self.greedy._block_drive(task),
-                            "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
+                            "extended_days_used": (
+                                1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                            ),
                         },
                     )
                 else:
@@ -1285,7 +1363,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                                 "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
                                 "new_cont": self.greedy._block_drive(task),
                                 "daily_drive": self.greedy._block_drive(task),
-                                "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
+                                "extended_days_used": (
+                                    1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                                ),
                             },
                         )
                     else:
@@ -1327,43 +1407,47 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
 
         # FASE 9: Métricas de performance detalhadas
         total_time = time.time() - self._start_time
-        sol.meta.update({
-            "workpieces_generated": len(columns),
-            "pricing_enabled": self.pricing_enabled,
-            "objective": "min sum(c_j * x_j)",
-            "task_count": len(tasks),
-            "performance_metrics": {
-                "total_time_s": total_time,
-                "fast_checks": self._fast_checks,
-                "full_checks": self._full_checks,
-                "cache_hits": self._cache_hits,
-                "combinations_pruned": self._combinations_pruned,
-                "cache_hit_ratio": self._cache_hits / max(1, self._full_checks + self._cache_hits),
-                "pruning_ratio": self._combinations_pruned / max(1, self._fast_checks),
-                "pruning_reduction_pct": (self._combinations_pruned / max(1, self._fast_checks)) * 100,
-            },
-            "column_generation": {
-                "max_generated_columns": self.max_columns,
-                "max_candidate_successors_per_task": self.max_candidate_successors,
-                "max_trips_per_piece": self.max_trips_per_piece,
-                "max_pricing_iterations": self.max_pricing_iterations,
-                "max_pricing_additions": self.max_pricing_additions,
-                "truncated": len(columns) >= self.max_columns,
-                "adaptive_parameters_applied": True,
-            },
-            "goal_programming": {
-                "deviations": ["overtime", "underwork", "spread", "fairness", "passive_transfer"],
-                "weights": self.goal_weights,
-            },
-            "duty_merge_diagnostics": self.greedy._extension_diagnostics_snapshot(),
-            "relief_reassignment_audit": relief_reassignment_audit,
-            "soft_issue_reassignment_audit": soft_issue_reassignment_audit,
-            "phase_times": dict(self._phase_times),
-            **run_cut_meta,
-        })
+        sol.meta.update(
+            {
+                "workpieces_generated": len(columns),
+                "pricing_enabled": self.pricing_enabled,
+                "objective": "min sum(c_j * x_j)",
+                "task_count": len(tasks),
+                "performance_metrics": {
+                    "total_time_s": total_time,
+                    "fast_checks": self._fast_checks,
+                    "full_checks": self._full_checks,
+                    "cache_hits": self._cache_hits,
+                    "combinations_pruned": self._combinations_pruned,
+                    "cache_hit_ratio": self._cache_hits / max(1, self._full_checks + self._cache_hits),
+                    "pruning_ratio": self._combinations_pruned / max(1, self._fast_checks),
+                    "pruning_reduction_pct": (self._combinations_pruned / max(1, self._fast_checks)) * 100,
+                },
+                "column_generation": {
+                    "max_generated_columns": self.max_columns,
+                    "max_candidate_successors_per_task": self.max_candidate_successors,
+                    "max_trips_per_piece": self.max_trips_per_piece,
+                    "max_pricing_iterations": self.max_pricing_iterations,
+                    "max_pricing_additions": self.max_pricing_additions,
+                    "truncated": len(columns) >= self.max_columns,
+                    "adaptive_parameters_applied": True,
+                },
+                "goal_programming": {
+                    "deviations": ["overtime", "underwork", "spread", "fairness", "passive_transfer"],
+                    "weights": self.goal_weights,
+                },
+                "duty_merge_diagnostics": self.greedy._extension_diagnostics_snapshot(),
+                "relief_reassignment_audit": relief_reassignment_audit,
+                "soft_issue_reassignment_audit": soft_issue_reassignment_audit,
+                "phase_times": dict(self._phase_times),
+                **run_cut_meta,
+            }
+        )
 
-        _log.info(f"SetPartitioningOptimizedCSP finalizado: {len(duties)} duties, "
-                  f"{total_time:.2f}s total, {self._fast_checks} fast checks, "
-                  f"{self._combinations_pruned} combinações podadas")
+        _log.info(
+            f"SetPartitioningOptimizedCSP finalizado: {len(duties)} duties, "
+            f"{total_time:.2f}s total, {self._fast_checks} fast checks, "
+            f"{self._combinations_pruned} combinações podadas"
+        )
 
         return sol

@@ -1,6 +1,15 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, ParseIntPipe, UseGuards, HttpCode, HttpStatus,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { CompaniesService } from './companies.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -26,7 +35,10 @@ export class CompaniesController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, any>,
+  ) {
     return this.service.update(id, body);
   }
 

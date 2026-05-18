@@ -1,6 +1,7 @@
 # ── Web framework ────────────────────────────────────────────────────────────
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
+starlette>=0.41.0,<1.0.0
 pydantic==2.10.3
 pydantic-settings==2.7.0
 
@@ -15,8 +16,9 @@ pulp>=2.9.0             # Linear Programming solver
 highspy>=1.7.0          # HiGHS solver — fallback se CBC indisponível
 ortools>=9.10.0         # OR-Tools CP-SAT — solver de scheduling classe Gurobi
 
-# ── HTTP client (chamar o backend NestJS) ────────────────────────────────────
+# ── HTTP client (chamar o backend NestJS e OSRM/routing) ─────────────────────
 httpx>=0.27.0
+requests>=2.31.0
 
 # ── Database ─────────────────────────────────────────────────────────────────
 asyncpg>=0.29.0

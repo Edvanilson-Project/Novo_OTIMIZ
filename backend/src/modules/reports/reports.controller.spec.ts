@@ -12,9 +12,15 @@ describe('ReportsController', () => {
 
   beforeEach(async () => {
     service = {
-      getKpisByCompany: jest.fn().mockResolvedValue({ totalTrips: 100, efficiency: 0.9 }),
-      getOptimizationHistory: jest.fn().mockResolvedValue({ data: [{ id: 1 }], total: 1 }),
-      compareOptimizations: jest.fn().mockResolvedValue({ delta: { cost: -500 } }),
+      getKpisByCompany: jest
+        .fn()
+        .mockResolvedValue({ totalTrips: 100, efficiency: 0.9 }),
+      getOptimizationHistory: jest
+        .fn()
+        .mockResolvedValue({ data: [{ id: 1 }], total: 1 }),
+      compareOptimizations: jest
+        .fn()
+        .mockResolvedValue({ delta: { cost: -500 } }),
     };
     tenantCtx = { getCompanyId: jest.fn().mockReturnValue(5) };
 
@@ -25,7 +31,8 @@ describe('ReportsController', () => {
         { provide: TenantContext, useValue: tenantCtx },
       ],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(ReportsController);

@@ -1,9 +1,4 @@
-import {
-  Entity,
-  Column,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Vehicle } from './vehicle.entity';
 import { TenantBaseEntity } from '../../../common/entities/base.entity';
 
@@ -25,7 +20,9 @@ export class VehicleMaintenance extends TenantBaseEntity {
   @Column()
   vehicleId: number;
 
-  @ManyToOne(() => Vehicle, (vehicle) => vehicle.maintenance, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Vehicle, (vehicle) => vehicle.maintenance, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'vehicleId' })
   vehicle: Vehicle;
 

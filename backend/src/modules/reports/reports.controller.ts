@@ -1,5 +1,18 @@
-import { Controller, Get, Query, ParseIntPipe, UseGuards, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantContext } from '../../common/context/tenant-context';
@@ -15,18 +28,32 @@ export class ReportsController {
   ) {}
 
   @Get('kpis')
-  @ApiOperation({ summary: 'KPIs globais da empresa', description: 'Retorna totais, taxas e tendências de 7 dias das otimizações.' })
-  @ApiResponse({ status: 200, description: 'KPIs: totalRuns, completedRuns, trend7d, averages, lastOptimization.' })
+  @ApiOperation({
+    summary: 'KPIs globais da empresa',
+    description:
+      'Retorna totais, taxas e tendências de 7 dias das otimizações.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'KPIs: totalRuns, completedRuns, trend7d, averages, lastOptimization.',
+  })
   getKpis() {
     return this.reportsService.getKpisByCompany(this._requireCompany());
   }
 
   @Get('history')
-  @ApiOperation({ summary: 'Histórico de otimizações', description: 'Paginado, últimos N dias.' })
+  @ApiOperation({
+    summary: 'Histórico de otimizações',
+    description: 'Paginado, últimos N dias.',
+  })
   @ApiQuery({ name: 'days', required: false, example: 30 })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'limit', required: false, example: 50 })
-  @ApiResponse({ status: 200, description: 'Página de schedules com metadados.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Página de schedules com metadados.',
+  })
   getHistory(
     @Query('days') days?: string,
     @Query('page') page?: string,
@@ -41,21 +68,33 @@ export class ReportsController {
   }
 
   @Get('compare')
-  @ApiOperation({ summary: 'Comparar duas otimizações', description: 'Retorna delta de veículos, crew, custo e violações entre dois schedules do mesmo tenant.' })
+  @ApiOperation({
+    summary: 'Comparar duas otimizações',
+    description:
+      'Retorna delta de veículos, crew, custo e violações entre dois schedules do mesmo tenant.',
+  })
   @ApiQuery({ name: 'run1', type: Number, example: 10 })
   @ApiQuery({ name: 'run2', type: Number, example: 12 })
   @ApiResponse({ status: 200, description: 'run1, run2 e delta de métricas.' })
-  @ApiResponse({ status: 404, description: 'Schedule não encontrado no tenant.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Schedule não encontrado no tenant.',
+  })
   compare(
     @Query('run1', ParseIntPipe) run1: number,
     @Query('run2', ParseIntPipe) run2: number,
   ) {
-    return this.reportsService.compareOptimizations(run1, run2, this._requireCompany());
+    return this.reportsService.compareOptimizations(
+      run1,
+      run2,
+      this._requireCompany(),
+    );
   }
 
   private _requireCompany(): number {
     const id = this.tenantContext.getCompanyId();
-    if (!id) throw new BadRequestException('Empresa não identificada no contexto.');
+    if (!id)
+      throw new BadRequestException('Empresa não identificada no contexto.');
     return id;
   }
 }

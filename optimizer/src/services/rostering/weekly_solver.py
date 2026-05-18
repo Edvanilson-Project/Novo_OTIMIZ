@@ -12,10 +12,10 @@ tempo (intervalo entre turnos, blocos de dias consecutivos).
 
 Fallback automático para greedy guloso se CP-SAT não estiver disponível.
 """
+
 from __future__ import annotations
 
 import logging
-import math
 import time
 from typing import Any, Dict, List, Optional
 
@@ -30,9 +30,9 @@ from ...domain.models import (
 logger = logging.getLogger(__name__)
 
 # Constantes CLT/CCT
-_CLT_WEEKLY_LIMIT_MINUTES = 2640          # 44h × 60 = 2640 min
-_CCT_MIN_INTER_SHIFT_REST_MINUTES = 660   # 11h entre jornadas de dias consecutivos
-_CLT_MIN_DAYS_OFF = 1                     # ao menos 1 folga/semana
+_CLT_WEEKLY_LIMIT_MINUTES = 2640  # 44h × 60 = 2640 min
+_CCT_MIN_INTER_SHIFT_REST_MINUTES = 660  # 11h entre jornadas de dias consecutivos
+_CLT_MIN_DAYS_OFF = 1  # ao menos 1 folga/semana
 
 
 def _gini(values: List[float]) -> float:
@@ -112,40 +112,61 @@ class WeeklyRosteringSolver:
 
         try:
             from ortools.sat.python import cp_model
+
             return self._solve_cpsat(
-                daily_duties, operators, days, weekly_limit, min_days_off, min_rest,
-                time_budget_s=self.time_budget_s, cp_model=cp_model, t0=t0,
+                daily_duties,
+                operators,
+                days,
+                weekly_limit,
+                min_days_off,
+                min_rest,
+                time_budget_s=self.time_budget_s,
+                cp_model=cp_model,
+                t0=t0,
             )
         except ImportError:
             logger.warning("[WeeklyRostering] ortools não instalado — usando greedy")
             return self._solve_greedy(
-                daily_duties, operators, days, weekly_limit, min_days_off, min_rest, t0,
+                daily_duties,
+                operators,
+                days,
+                weekly_limit,
+                min_days_off,
+                min_rest,
+                t0,
             )
 
     # ── CP-SAT ────────────────────────────────────────────────────────────────
 
     def _solve_cpsat(
-        self, daily_duties, operators, days, weekly_limit, min_days_off,
-        min_rest, time_budget_s, cp_model, t0,
+        self,
+        daily_duties,
+        operators,
+        days,
+        weekly_limit,
+        min_days_off,
+        min_rest,
+        time_budget_s,
+        cp_model,
+        t0,
     ) -> WeeklyRosterSolution:
         model = cp_model.CpModel()
-        O = len(operators)
-        op_idx = {op.id: i for i, op in enumerate(operators)}
+        n_operators = len(operators)
 
         # x[o][d][j] = 1 se operador o trabalha jornada j no dia d
         x: Dict[tuple, Any] = {}
         for d in days:
             for j, duty in enumerate(daily_duties[d]):
-                for o in range(O):
+                for o in range(n_operators):
                     x[(o, d, j)] = model.NewBoolVar(f"x_o{o}_d{d}_j{j}")
 
         # ── Restrição 1: cada jornada coberta por exatamente 1 operador ──────
         for d in days:
             for j in range(len(daily_duties[d])):
-                model.AddExactlyOne([x[(o, d, j)] for o in range(O)])
+                model.AddExactlyOne([x[(o, d, j)] for o in range(n_operators)])
 
         # ── Restrição 2: cada operador faz no máximo 1 jornada por dia ───────
-        for o in range(O):
+        for o in range(n_operators):
             for d in days:
                 opts = [x[(o, d, j)] for j in range(len(daily_duties[d]))]
                 if opts:
@@ -153,20 +174,18 @@ class WeeklyRosteringSolver:
 
         # ── Restrição 3: dias de folga mínimos ────────────────────────────────
         max_days_worked = len(days) - min_days_off
-        for o in range(O):
+        for o in range(n_operators):
             worked_flags = []
             for d in days:
                 if daily_duties[d]:
                     day_worked = model.NewBoolVar(f"worked_o{o}_d{d}")
-                    model.AddMaxEquality(
-                        day_worked, [x[(o, d, j)] for j in range(len(daily_duties[d]))]
-                    )
+                    model.AddMaxEquality(day_worked, [x[(o, d, j)] for j in range(len(daily_duties[d]))])
                     worked_flags.append(day_worked)
             if worked_flags:
                 model.Add(sum(worked_flags) <= max_days_worked)
 
         # ── Restrição 4: limite semanal de horas ──────────────────────────────
-        for o in range(O):
+        for o in range(n_operators):
             weekly_terms = []
             for d in days:
                 for j, duty in enumerate(daily_duties[d]):
@@ -188,7 +207,7 @@ class WeeklyRosteringSolver:
                     gap = (1440 - end1) + start2
                     if gap < min_rest:
                         # Conflito: motorista não pode trabalhar esses dois turnos consecutivos
-                        for o in range(O):
+                        for o in range(n_operators):
                             model.AddAtMostOne([x[(o, d, j1)], x[(o, d_next, j2)]])
 
         # ── Objetivo: minimizar custo total ───────────────────────────────────
@@ -196,7 +215,7 @@ class WeeklyRosteringSolver:
         for d in days:
             for j, duty in enumerate(daily_duties[d]):
                 dur = getattr(duty, "duration", 0) or 0
-                for o in range(O):
+                for o in range(n_operators):
                     cost_terms.append(dur * x[(o, d, j)])
         model.Minimize(sum(cost_terms))
 
@@ -213,20 +232,26 @@ class WeeklyRosteringSolver:
                 solver.StatusName(status),
             )
             return self._solve_greedy(
-                daily_duties, operators, days, weekly_limit, min_days_off, min_rest, t0,
+                daily_duties,
+                operators,
+                days,
+                weekly_limit,
+                min_days_off,
+                min_rest,
+                t0,
                 algorithm="weekly_cp_sat_fallback_greedy",
             )
 
         # ── Construir solução ─────────────────────────────────────────────────
         op_schedules: Dict[int, OperatorWeeklySchedule] = {
-            o: OperatorWeeklySchedule(operator_id=operators[o].id) for o in range(O)
+            o: OperatorWeeklySchedule(operator_id=operators[o].id) for o in range(n_operators)
         }
         unassigned_by_day: Dict[int, List[int]] = {}
 
         for d in days:
             for j, duty in enumerate(daily_duties[d]):
                 assigned = False
-                for o in range(O):
+                for o in range(n_operators):
                     if solver.BooleanValue(x[(o, d, j)]):
                         sched = op_schedules[o]
                         dur = getattr(duty, "duration", 0) or 0
@@ -267,7 +292,7 @@ class WeeklyRosteringSolver:
             meta={
                 "cp_sat_status": solver.StatusName(status),
                 "cp_sat_wall_time_s": round(solver.WallTime(), 3),
-                "operators": O,
+                "operators": n_operators,
                 "days": days,
                 "duties_total": sum(len(v) for v in daily_duties.values()),
                 "weekly_limit_minutes": weekly_limit,
@@ -279,8 +304,15 @@ class WeeklyRosteringSolver:
     # ── Greedy fallback ───────────────────────────────────────────────────────
 
     def _solve_greedy(
-        self, daily_duties, operators, days, weekly_limit, min_days_off,
-        min_rest, t0, algorithm: str = "weekly_greedy",
+        self,
+        daily_duties,
+        operators,
+        days,
+        weekly_limit,
+        min_days_off,
+        min_rest,
+        t0,
+        algorithm: str = "weekly_greedy",
     ) -> WeeklyRosterSolution:
         """Heurística gulosa: atribui jornadas em ordem, respeitando limites."""
         max_days_worked = len(days) - min_days_off
@@ -314,8 +346,12 @@ class WeeklyRosteringSolver:
                             continue
                     # Assign
                     wa = WeeklyAssignment(
-                        operator_id=oid, day_index=d, duty_id=duty.id,
-                        duty_minutes=dur, duty_start=start, duty_end=end,
+                        operator_id=oid,
+                        day_index=d,
+                        duty_id=duty.id,
+                        duty_minutes=dur,
+                        duty_start=start,
+                        duty_end=end,
                     )
                     op_schedules[oid].assignments.append(wa)
                     op_minutes[oid] += dur

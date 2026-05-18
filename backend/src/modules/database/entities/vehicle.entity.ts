@@ -18,7 +18,9 @@ export class Vehicle extends TenantBaseEntity {
   @Column()
   typeId: number; // FK para VehicleType
 
-  @ManyToOne(() => VehicleType, (type) => type.vehicles, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => VehicleType, (type) => type.vehicles, {
+    onDelete: 'RESTRICT',
+  })
   @JoinColumn({ name: 'typeId' })
   type: VehicleType;
 
@@ -50,9 +52,6 @@ export class Vehicle extends TenantBaseEntity {
   @OneToMany(() => VehicleMaintenance, (maintenance) => maintenance.vehicle)
   maintenance: VehicleMaintenance[];
 
-  @OneToMany(
-    () => VehicleAvailabilityWindow,
-    (window) => window.vehicle,
-  )
+  @OneToMany(() => VehicleAvailabilityWindow, (window) => window.vehicle)
   availabilityWindows: VehicleAvailabilityWindow[];
 }

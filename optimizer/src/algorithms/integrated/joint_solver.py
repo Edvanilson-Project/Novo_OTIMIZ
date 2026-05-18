@@ -9,6 +9,7 @@ Estratégia de iteração:
      (prefere blocos curtos que facilitem deveres viáveis).
   4. Repete até orçamento de tempo ou 0 violações.
 """
+
 from __future__ import annotations
 
 import logging
@@ -154,15 +155,20 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
                     existing = set(self.vsp_params.get("penalize_trip_ids", []))
                     self.vsp_params["penalize_trip_ids"] = existing | new_violated
                     logger.info(
-                        "joint_solver round=%d: %d CCT violations → max_block %d→%d min, "
-                        "penalize_trip_ids=%d trips",
-                        round_n + 1, csp_sol.cct_violations, current, reduced,
+                        "joint_solver round=%d: %d CCT violations → max_block %d→%d min, " "penalize_trip_ids=%d trips",
+                        round_n + 1,
+                        csp_sol.cct_violations,
+                        current,
+                        reduced,
                         len(self.vsp_params["penalize_trip_ids"]),
                     )
                 else:
                     logger.info(
                         "joint_solver round=%d: %d CCT violations → max_block_duration %d→%d min",
-                        round_n + 1, csp_sol.cct_violations, current, reduced,
+                        round_n + 1,
+                        csp_sol.cct_violations,
+                        current,
+                        reduced,
                     )
 
         if best_result is None:

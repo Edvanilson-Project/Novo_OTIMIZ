@@ -1,13 +1,14 @@
 """
 Serviços estratégicos (Macro LP, What-if e Feedback planejado vs realizado).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 
 from ..algorithms.evaluator import CostEvaluator
-from ..domain.models import Trip, VehicleType
+from ..domain.models import Trip
 from ..core.config import get_settings
 
 settings = get_settings()
@@ -67,18 +68,16 @@ class StrategyService:
 
         # Pesos de custo dinâmicos
         cost_vehicle = 1000.0
-        cost_km = 1.0
         cost_duty = 500.0
         if optimization_params:
             if hasattr(optimization_params, "cost_vehicle"):
                 # Se for objeto (pydantic)
                 cost_vehicle = optimization_params.cost_vehicle
-                cost_km = optimization_params.cost_km
+                optimization_params.cost_km
                 cost_duty = optimization_params.cost_duty
             elif isinstance(optimization_params, dict):
                 # Se for dicionário
                 cost_vehicle = optimization_params.get("cost_vehicle", 1000.0)
-                cost_km = optimization_params.get("cost_km", 1.0)
                 cost_duty = optimization_params.get("cost_duty", 500.0)
 
         if _PULP_AVAILABLE:
@@ -169,10 +168,14 @@ class StrategyService:
 
         if ghost_bus > 0:
             alerts.append(f"GHOST_BUS_DETECTED count={ghost_bus}")
-            recommendations.append("Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.")
+            recommendations.append(
+                "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal."
+            )
         if gps_invalid > 0:
             alerts.append(f"GPS_INVALID count={gps_invalid}")
-            recommendations.append("Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal.")
+            recommendations.append(
+                "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+            )
         if p95_delay > 10:
             alerts.append(f"HIGH_P95_DELAY minutes={p95_delay}")
             recommendations.append("Recalibrar tempos planejados por faixa horária e corredor com histórico de atraso.")

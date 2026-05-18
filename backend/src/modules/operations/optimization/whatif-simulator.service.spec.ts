@@ -50,7 +50,9 @@ describe('WhatIfSimulatorService', () => {
 
       expect(result.costDifference).toBeLessThan(0);
       expect(result.newCost).toBeLessThan(10000);
-      expect(result.recommendations.some((r) => r.includes('economias'))).toBe(true);
+      expect(result.recommendations.some((r) => r.includes('economias'))).toBe(
+        true,
+      );
     });
   });
 
@@ -73,7 +75,9 @@ describe('WhatIfSimulatorService', () => {
     it('should provide recommendations for early shifts', () => {
       const result = service.simulateTimeShift(10000, -60, 5); // -1 hour shift
 
-      expect(result.recommendations.some((r) => r.includes('Antecipação'))).toBe(true);
+      expect(
+        result.recommendations.some((r) => r.includes('Antecipação')),
+      ).toBe(true);
     });
   });
 
@@ -94,7 +98,9 @@ describe('WhatIfSimulatorService', () => {
     it('should show warning about trip removal', () => {
       const result = service.simulateTripRemoval(10000, 500, 800, 1);
 
-      expect(result.warnings.some((w) => w.includes('não é recomendada'))).toBe(true);
+      expect(result.warnings.some((w) => w.includes('não é recomendada'))).toBe(
+        true,
+      );
     });
   });
 
@@ -122,7 +128,9 @@ describe('WhatIfSimulatorService', () => {
 
       expect(result.costDifference).toBe(1100);
       expect(result.newCost).toBe(11100);
-      expect(result.warnings.some((w) => w.includes('novo veículo'))).toBe(true);
+      expect(result.warnings.some((w) => w.includes('novo veículo'))).toBe(
+        true,
+      );
     });
   });
 
@@ -165,7 +173,14 @@ describe('WhatIfSimulatorService', () => {
 
   describe('Result structure', () => {
     it('should return complete what-if result', () => {
-      const result = service.simulateVehicleTypeChange(10000, 1, 2, 800, 1200, 5);
+      const result = service.simulateVehicleTypeChange(
+        10000,
+        1,
+        2,
+        800,
+        1200,
+        5,
+      );
 
       expect(result).toHaveProperty('scenario');
       expect(result).toHaveProperty('originalCost');
@@ -178,7 +193,14 @@ describe('WhatIfSimulatorService', () => {
     });
 
     it('should have correct scenario type', () => {
-      const result = service.simulateVehicleTypeChange(10000, 1, 2, 800, 1200, 5);
+      const result = service.simulateVehicleTypeChange(
+        10000,
+        1,
+        2,
+        800,
+        1200,
+        5,
+      );
 
       expect(result.scenario.type).toBe('vehicle_type_change');
       expect(result.scenario.description).toBeTruthy();
@@ -201,7 +223,9 @@ describe('WhatIfSimulatorService', () => {
     });
 
     it('should return running status with optimizationRunId', async () => {
-      const result = await service.runParameterChangeReal(42, { cost_vehicle: 1200 });
+      const result = await service.runParameterChangeReal(42, {
+        cost_vehicle: 1200,
+      });
 
       expect(result.status).toBe('running');
       expect(result.optimizationRunId).toBe(99);
@@ -209,7 +233,11 @@ describe('WhatIfSimulatorService', () => {
     });
 
     it('should pass paramsOverride to optimizationService', async () => {
-      await service.runParameterChangeReal(42, { cost_vehicle: 1500, time_budget_s: 60 }, 'test-label');
+      await service.runParameterChangeReal(
+        42,
+        { cost_vehicle: 1500, time_budget_s: 60 },
+        'test-label',
+      );
 
       expect(optimizationService.runOptimization).toHaveBeenCalledWith(
         16,
@@ -240,7 +268,12 @@ describe('WhatIfSimulatorService', () => {
         undefined,
         expect.any(Object),
       );
-      const result = await service.runParameterChangeReal(42, {}, undefined, 'greedy');
+      const result = await service.runParameterChangeReal(
+        42,
+        {},
+        undefined,
+        'greedy',
+      );
       expect(result.algorithm).toBe('greedy');
     });
 
@@ -253,13 +286,17 @@ describe('WhatIfSimulatorService', () => {
     it('should throw NotFoundException when schedule not found', async () => {
       scheduleRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.runParameterChangeReal(999, {})).rejects.toThrow(NotFoundException);
+      await expect(service.runParameterChangeReal(999, {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw NotFoundException when companyId is null', async () => {
       tenantContext.getCompanyId.mockReturnValue(null);
 
-      await expect(service.runParameterChangeReal(42, {})).rejects.toThrow(NotFoundException);
+      await expect(service.runParameterChangeReal(42, {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

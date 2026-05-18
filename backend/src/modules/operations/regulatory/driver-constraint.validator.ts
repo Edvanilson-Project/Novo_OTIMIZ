@@ -64,7 +64,9 @@ export class DriverConstraintValidator {
     const dailyViolation = this.checkDailyDriving(segments, rules);
     if (dailyViolation) {
       violations.push(dailyViolation);
-      recommendations.push('Reduzir viagens do dia para cumprir limite de 9h dirigindo');
+      recommendations.push(
+        'Reduzir viagens do dia para cumprir limite de 9h dirigindo',
+      );
     }
 
     // Check meal breaks
@@ -110,7 +112,9 @@ export class DriverConstraintValidator {
         }
       } else if (segment.type === 'break' || segment.type === 'meal') {
         // Check if break is long enough to reset counter
-        const breakDuration = (segment.endTime.getTime() - segment.startTime.getTime()) / (60 * 1000);
+        const breakDuration =
+          (segment.endTime.getTime() - segment.startTime.getTime()) /
+          (60 * 1000);
         if (breakDuration >= 15) {
           // 15 minute break resets counter
           consecutiveMinutes = 0;
@@ -151,7 +155,9 @@ export class DriverConstraintValidator {
     for (const segment of segments) {
       if (segment.type === 'meal') {
         // Check meal break duration
-        const mealDuration = (segment.endTime.getTime() - segment.startTime.getTime()) / (60 * 1000);
+        const mealDuration =
+          (segment.endTime.getTime() - segment.startTime.getTime()) /
+          (60 * 1000);
         if (mealDuration < rules.mealBreakDurationMinutes) {
           return {
             violationType: 'meal_break_too_short',
@@ -171,7 +177,9 @@ export class DriverConstraintValidator {
       // Check if meal break is overdue
       if (timeSinceLastMeal > rules.mealBreakFrequencyMinutes) {
         // Only return violation if no meal break found in subsequent segments
-        const hasMealAfter = segments.slice(segments.indexOf(segment)).some((s) => s.type === 'meal');
+        const hasMealAfter = segments
+          .slice(segments.indexOf(segment))
+          .some((s) => s.type === 'meal');
         if (!hasMealAfter) {
           return {
             violationType: 'meal_break_overdue',
@@ -203,7 +211,7 @@ export class DriverConstraintValidator {
           // Insert break before this segment
           const breakStart = new Date(
             segment.startTime.getTime() -
-              (rules.mandatoryBreakDurationMinutes * 60 * 1000),
+              rules.mandatoryBreakDurationMinutes * 60 * 1000,
           );
           const breakEnd = segment.startTime;
 
@@ -246,9 +254,9 @@ export class DriverConstraintValidator {
         if (timeSinceMeal > rules.mealBreakFrequencyMinutes) {
           const mealStart = new Date(
             segment.endTime.getTime() +
-              (rules.mealBreakDurationMinutes * 60 * 1000),
+              rules.mealBreakDurationMinutes * 60 * 1000,
           );
-          const mealEnd = new Date(mealStart.getTime() + (30 * 60 * 1000)); // 30 min meal
+          const mealEnd = new Date(mealStart.getTime() + 30 * 60 * 1000); // 30 min meal
 
           result.push(segment);
           result.push({

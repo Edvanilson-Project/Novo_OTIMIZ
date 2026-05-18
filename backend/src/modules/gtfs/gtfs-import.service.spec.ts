@@ -46,7 +46,10 @@ describe('GtfsImportService', () => {
     const makeRepo = () => ({
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((data: any) => data),
-      save: jest.fn().mockImplementation(async (entity: any) => ({ id: Math.floor(Math.random() * 1000) + 1, ...entity })),
+      save: jest.fn().mockImplementation((entity: any) => ({
+        id: Math.floor(Math.random() * 1000) + 1,
+        ...entity,
+      })),
     });
 
     terminalRepo = makeRepo();
@@ -82,7 +85,11 @@ describe('GtfsImportService', () => {
   });
 
   it('skips duplicate terminals (already in DB)', async () => {
-    terminalRepo.findOne.mockResolvedValue({ id: 99, terminalId: 'T1', companyId: 1 });
+    terminalRepo.findOne.mockResolvedValue({
+      id: 99,
+      terminalId: 'T1',
+      companyId: 1,
+    });
     const buf = makeZip({
       'stops.txt': STOPS_CSV,
       'routes.txt': ROUTES_CSV,
@@ -95,18 +102,33 @@ describe('GtfsImportService', () => {
   });
 
   it('throws BadRequestException for invalid ZIP buffer', async () => {
-    await expect(service.importFromBuffer(Buffer.from('not a zip'))).rejects.toThrow(BadRequestException);
+    await expect(
+      service.importFromBuffer(Buffer.from('not a zip')),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('throws BadRequestException when stops.txt is missing', async () => {
-    const buf = makeZip({ 'routes.txt': ROUTES_CSV, 'trips.txt': TRIPS_CSV, 'stop_times.txt': STOP_TIMES_CSV });
-    await expect(service.importFromBuffer(buf)).rejects.toThrow(BadRequestException);
+    const buf = makeZip({
+      'routes.txt': ROUTES_CSV,
+      'trips.txt': TRIPS_CSV,
+      'stop_times.txt': STOP_TIMES_CSV,
+    });
+    await expect(service.importFromBuffer(buf)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('throws BadRequestException when no company in context', async () => {
     tenantCtx.getCompanyId.mockReturnValue(null);
-    const buf = makeZip({ 'stops.txt': STOPS_CSV, 'routes.txt': ROUTES_CSV, 'trips.txt': TRIPS_CSV, 'stop_times.txt': STOP_TIMES_CSV });
-    await expect(service.importFromBuffer(buf)).rejects.toThrow(BadRequestException);
+    const buf = makeZip({
+      'stops.txt': STOPS_CSV,
+      'routes.txt': ROUTES_CSV,
+      'trips.txt': TRIPS_CSV,
+      'stop_times.txt': STOP_TIMES_CSV,
+    });
+    await expect(service.importFromBuffer(buf)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('skips trips where origin == destination (terminal loop)', async () => {
@@ -118,7 +140,12 @@ TRIP1,T1,06:30:00,06:30:00,2
     terminalRepo.save
       .mockResolvedValueOnce({ id: 5 })
       .mockResolvedValueOnce({ id: 5 }); // same id both times
-    const buf = makeZip({ 'stops.txt': STOPS_CSV, 'routes.txt': ROUTES_CSV, 'trips.txt': TRIPS_CSV, 'stop_times.txt': loopStopTimes });
+    const buf = makeZip({
+      'stops.txt': STOPS_CSV,
+      'routes.txt': ROUTES_CSV,
+      'trips.txt': TRIPS_CSV,
+      'stop_times.txt': loopStopTimes,
+    });
     const result = await service.importFromBuffer(buf);
     expect(result.imported.trips).toBe(0);
   });
@@ -128,7 +155,12 @@ TRIP1,T1,06:30:00,06:30:00,2
 TRIP1,T1,24:05:00,24:05:00,1
 TRIP1,T2,24:50:00,24:50:00,2
 `;
-    const buf = makeZip({ 'stops.txt': STOPS_CSV, 'routes.txt': ROUTES_CSV, 'trips.txt': TRIPS_CSV, 'stop_times.txt': late });
+    const buf = makeZip({
+      'stops.txt': STOPS_CSV,
+      'routes.txt': ROUTES_CSV,
+      'trips.txt': TRIPS_CSV,
+      'stop_times.txt': late,
+    });
     const result = await service.importFromBuffer(buf);
     // 24*60+5=1445 and 24*60+50=1490, endTime > startTime → trip created
     expect(result.imported.trips).toBe(1);

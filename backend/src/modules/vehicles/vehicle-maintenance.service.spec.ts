@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { VehicleMaintenanceService } from './vehicle-maintenance.service';
-import { VehicleMaintenance, MaintenanceStatus } from '../database/entities/vehicle-maintenance.entity';
+import {
+  VehicleMaintenance,
+  MaintenanceStatus,
+} from '../database/entities/vehicle-maintenance.entity';
 import { VehicleAvailabilityWindow } from '../database/entities/vehicle-availability-window.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 
@@ -93,15 +96,17 @@ describe('VehicleMaintenanceService', () => {
         maintenanceDate: new Date('2020-05-15').toISOString(),
       };
 
-      await expect(service.scheduleMaintenance(vehicleId, data)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.scheduleMaintenance(vehicleId, data),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw error if maintenance already scheduled', async () => {
       const vehicleId = 1;
       const data = {
-        maintenanceDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        maintenanceDate: new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
       };
 
       maintenanceRepo.findOne.mockResolvedValue({
@@ -109,9 +114,9 @@ describe('VehicleMaintenanceService', () => {
         vehicleId,
       });
 
-      await expect(service.scheduleMaintenance(vehicleId, data)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.scheduleMaintenance(vehicleId, data),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -148,7 +153,11 @@ describe('VehicleMaintenanceService', () => {
 
       availabilityRepo.find.mockResolvedValue([]);
 
-      const result = await service.checkVehicleAvailability(vehicleId, startTime, endTime);
+      const result = await service.checkVehicleAvailability(
+        vehicleId,
+        startTime,
+        endTime,
+      );
 
       expect(result.available).toBe(true);
       expect(result.conflicts).toHaveLength(0);
@@ -168,7 +177,11 @@ describe('VehicleMaintenanceService', () => {
 
       availabilityRepo.find.mockResolvedValue([conflict]);
 
-      const result = await service.checkVehicleAvailability(vehicleId, startTime, endTime);
+      const result = await service.checkVehicleAvailability(
+        vehicleId,
+        startTime,
+        endTime,
+      );
 
       expect(result.available).toBe(false);
       expect(result.conflicts).toHaveLength(1);
@@ -242,9 +255,9 @@ describe('VehicleMaintenanceService', () => {
 
       maintenanceRepo.findOne.mockResolvedValue(maintenance);
 
-      await expect(service.cancelMaintenance(vehicleId, maintenanceId)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        service.cancelMaintenance(vehicleId, maintenanceId),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -295,7 +308,9 @@ describe('VehicleMaintenanceService', () => {
     it('should throw error if window not found', async () => {
       availabilityRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.deleteAvailabilityWindow(1, 999)).rejects.toThrow(NotFoundException);
+      await expect(service.deleteAvailabilityWindow(1, 999)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

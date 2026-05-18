@@ -10,7 +10,12 @@ import {
 import { TenantContext } from '../../../common/context/tenant-context';
 import { OptimizationService } from '../optimization.service';
 
-const COMPLETED_RUN = (id: number, scenarioId: string, totalCost: number, vehicles: number): OptimizationRun =>
+const COMPLETED_RUN = (
+  id: number,
+  scenarioId: string,
+  totalCost: number,
+  vehicles: number,
+): OptimizationRun =>
   ({
     id,
     companyId: 16,
@@ -71,7 +76,10 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
         ScenarioEvaluatorService,
         { provide: getRepositoryToken(Schedule), useValue: scheduleRepo },
         { provide: getRepositoryToken(BlockAssignment), useValue: blockRepo },
-        { provide: getRepositoryToken(OptimizationRun), useValue: optimizationRunRepo },
+        {
+          provide: getRepositoryToken(OptimizationRun),
+          useValue: optimizationRunRepo,
+        },
         { provide: TenantContext, useValue: tenantContext },
         { provide: OptimizationService, useValue: optimizationService },
       ],
@@ -82,7 +90,13 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
 
   describe('generateScenarios', () => {
     it('returns 4 scenarios: baseline current + 3 optimizer-backed', async () => {
-      scheduleRepo.findOne.mockResolvedValue({ id: 1, totalCost: 1000, cctViolations: 0, blocks: [{}, {}, {}], createdAt: new Date() });
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 1000,
+        cctViolations: 0,
+        blocks: [{}, {}, {}],
+        createdAt: new Date(),
+      });
       // no completed runs in TTL, no in-flight: each ensure call enqueues a new run
       optimizationRunRepo.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
@@ -93,7 +107,7 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
       optimizationRunRepo.findOne.mockResolvedValue(null);
       let runIdCounter = 100;
       optimizationService.runOptimization.mockImplementation(
-        async (_cid: number, _algo: string, _mode: any, opts: any) => {
+        (_cid: number, _algo: string, _mode: any, opts: any) => {
           const id = ++runIdCounter;
           optimizationRunRepo.findOne.mockResolvedValueOnce({
             id,
@@ -107,7 +121,11 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
             createdAt: new Date(),
             completedAt: null,
           });
-          return { scheduleId: id + 1000, taskId: `task-${id}`, optimizationRunId: id };
+          return {
+            scheduleId: id + 1000,
+            taskId: `task-${id}`,
+            optimizationRunId: id,
+          };
         },
       );
 
@@ -129,7 +147,13 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
     });
 
     it('reuses recent completed run (idempotency within TTL)', async () => {
-      scheduleRepo.findOne.mockResolvedValue({ id: 1, totalCost: 5000, cctViolations: 0, blocks: [], createdAt: new Date() });
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 5000,
+        cctViolations: 0,
+        blocks: [],
+        createdAt: new Date(),
+      });
       // For cost-optimized: completed run exists
       const completedRun = COMPLETED_RUN(50, 'cost-optimized', 4500, 10);
       const qb = (matches: any) => ({
@@ -150,9 +174,31 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
       });
       optimizationRunRepo.findOne
         .mockResolvedValueOnce(null) // service-optimized in-flight check
-        .mockResolvedValueOnce({ id: 51, scenarioId: 'service-optimized', status: OptimizationRunStatus.RUNNING, metrics: null, errorMessage: null, resultScheduleId: 999, inputFingerprint: 'h51', algorithm: 'mcnf', createdAt: new Date(), completedAt: null })
+        .mockResolvedValueOnce({
+          id: 51,
+          scenarioId: 'service-optimized',
+          status: OptimizationRunStatus.RUNNING,
+          metrics: null,
+          errorMessage: null,
+          resultScheduleId: 999,
+          inputFingerprint: 'h51',
+          algorithm: 'mcnf',
+          createdAt: new Date(),
+          completedAt: null,
+        })
         .mockResolvedValueOnce(null) // maintenance-aware in-flight check
-        .mockResolvedValueOnce({ id: 52, scenarioId: 'maintenance-aware', status: OptimizationRunStatus.RUNNING, metrics: null, errorMessage: null, resultScheduleId: 1000, inputFingerprint: 'h52', algorithm: 'hybrid_pipeline', createdAt: new Date(), completedAt: null });
+        .mockResolvedValueOnce({
+          id: 52,
+          scenarioId: 'maintenance-aware',
+          status: OptimizationRunStatus.RUNNING,
+          metrics: null,
+          errorMessage: null,
+          resultScheduleId: 1000,
+          inputFingerprint: 'h52',
+          algorithm: 'hybrid_pipeline',
+          createdAt: new Date(),
+          completedAt: null,
+        });
 
       const scenarios = await service.generateScenarios(1);
 
@@ -165,7 +211,13 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
     });
 
     it('reports in-flight scenarios as RUNNING without re-enqueueing', async () => {
-      scheduleRepo.findOne.mockResolvedValue({ id: 1, totalCost: 1000, cctViolations: 0, blocks: [], createdAt: new Date() });
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 1000,
+        cctViolations: 0,
+        blocks: [],
+        createdAt: new Date(),
+      });
       const qbEmpty = () => ({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
@@ -198,7 +250,13 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
 
   describe('compareScenarios', () => {
     it('computes real diff between two completed scenarios', async () => {
-      scheduleRepo.findOne.mockResolvedValue({ id: 1, totalCost: 5000, cctViolations: 2, blocks: [{}, {}, {}, {}, {}], createdAt: new Date() });
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 5000,
+        cctViolations: 2,
+        blocks: [{}, {}, {}, {}, {}],
+        createdAt: new Date(),
+      });
       const completed = COMPLETED_RUN(60, 'cost-optimized', 4500, 4);
       const qbCompleted = {
         where: jest.fn().mockReturnThis(),
@@ -235,7 +293,11 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
         completedAt: null,
       });
 
-      const result = await service.compareScenarios(1, 'current', 'cost-optimized');
+      const result = await service.compareScenarios(
+        1,
+        'current',
+        'cost-optimized',
+      );
 
       expect(result.savings).toBe(500); // 5000 - 4500
       expect(result.savingsPercent).toBe(10);
@@ -244,7 +306,13 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
     });
 
     it('throws when scenario id is unknown', async () => {
-      scheduleRepo.findOne.mockResolvedValue({ id: 1, totalCost: 1000, cctViolations: 0, blocks: [], createdAt: new Date() });
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 1000,
+        cctViolations: 0,
+        blocks: [],
+        createdAt: new Date(),
+      });
       optimizationRunRepo.createQueryBuilder.mockReturnValue({
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
@@ -269,7 +337,9 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
         completedAt: null,
       });
 
-      await expect(service.compareScenarios(1, 'current', 'unknown-scenario')).rejects.toThrow();
+      await expect(
+        service.compareScenarios(1, 'current', 'unknown-scenario'),
+      ).rejects.toThrow();
     });
   });
 });

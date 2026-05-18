@@ -71,9 +71,15 @@ export class CreateOptimizationRuns1715450000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_optimization_runs_history;`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_optimization_runs_status;`);
-    await queryRunner.query(`DROP INDEX IF EXISTS idx_optimization_runs_lookup;`);
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_optimization_runs_history;`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_optimization_runs_status;`,
+    );
+    await queryRunner.query(
+      `DROP INDEX IF EXISTS idx_optimization_runs_lookup;`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS optimization_runs;`);
     await queryRunner.query(`DROP TYPE IF EXISTS optimization_run_status;`);
   }

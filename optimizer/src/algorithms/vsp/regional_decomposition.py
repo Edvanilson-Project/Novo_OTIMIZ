@@ -25,10 +25,10 @@ Uso:
 Via API:
     POST /optimize {"algorithm": "regional", "trips": [...]}
 """
+
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
@@ -48,6 +48,7 @@ _OVERLAP_MINUTES = 30
 def _solve_group(args: Tuple) -> VSPSolution:
     """Função de topo para ProcessPoolExecutor (deve ser picklável)."""
     import os
+
     os.environ.setdefault("INTERNAL_OPTIMIZER_KEY", "subprocess-worker-key")
     os.environ.setdefault("DATABASE_URL", "sqlite:///./worker.db")
     os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
@@ -56,6 +57,7 @@ def _solve_group(args: Tuple) -> VSPSolution:
 
     # Reconstrói objetos do domínio no sub-processo
     from ...domain.models import Trip as T, VehicleType as VT, VSPSolution
+
     trips = [T(**d) for d in trip_dicts]
     vts = [VT(**d) for d in vt_dicts]
 
@@ -181,6 +183,7 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         time_budget_s: Optional[float] = None,
     ):
         from ...core.config import get_settings
+
         settings = get_settings()
         super().__init__(
             name="regional_decomposition",
@@ -207,13 +210,15 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
             groups = _group_by_depot(trips)
             logger.info(
                 "regional_decomposition: %d trips → %d grupos por depot",
-                len(trips), len(groups),
+                len(trips),
+                len(groups),
             )
         else:
             groups = _group_by_time_window(trips)
             logger.info(
                 "regional_decomposition: %d trips → %d janelas temporais",
-                len(trips), len(groups),
+                len(trips),
+                len(groups),
             )
 
         # Garante ao menos 1 grupo
@@ -228,10 +233,7 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         trip_dicts_list = [[_trip_to_dict(t) for t in g] for g in group_list]
         vt_dicts = [_vt_to_dict(vt) for vt in vehicle_types]
 
-        args_list = [
-            (tdicts, vt_dicts, self.sub_algorithm, self.vsp_params, sub_budget)
-            for tdicts in trip_dicts_list
-        ]
+        args_list = [(tdicts, vt_dicts, self.sub_algorithm, self.vsp_params, sub_budget) for tdicts in trip_dicts_list]
 
         sub_solutions: List[VSPSolution] = [None] * n_groups  # type: ignore[list-item]
 
@@ -278,7 +280,10 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
 
         logger.info(
             "regional_decomposition: %d grupos → %d blocos, %d não atribuídas, %.1fs",
-            n_groups, len(all_blocks), len(unassigned), self._elapsed(),
+            n_groups,
+            len(all_blocks),
+            len(unassigned),
+            self._elapsed(),
         )
 
         return VSPSolution(

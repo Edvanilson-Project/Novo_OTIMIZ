@@ -23,7 +23,8 @@ describe('AuditController', () => {
         { provide: TenantContext, useValue: tenantCtx },
       ],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(AuditController);

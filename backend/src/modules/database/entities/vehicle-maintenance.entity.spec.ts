@@ -1,4 +1,8 @@
-import { VehicleMaintenance, MaintenanceType, MaintenanceStatus } from './vehicle-maintenance.entity';
+import {
+  VehicleMaintenance,
+  MaintenanceType,
+  MaintenanceStatus,
+} from './vehicle-maintenance.entity';
 
 describe('VehicleMaintenance Entity', () => {
   it('should create an instance with defaults', () => {
@@ -57,7 +61,9 @@ describe('VehicleMaintenance Entity', () => {
     maintenance.notes = 'Vehicle reported slight noise during start';
 
     expect(maintenance.description).toBe('Oil change and filter replacement');
-    expect(maintenance.notes).toBe('Vehicle reported slight noise during start');
+    expect(maintenance.notes).toBe(
+      'Vehicle reported slight noise during start',
+    );
   });
 
   it('should track timestamp fields', () => {

@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -18,7 +25,9 @@ export class UsersService {
   private requireCompanyId(): number {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) {
-      throw new ForbiddenException('Empresa não identificada no contexto autenticado.');
+      throw new ForbiddenException(
+        'Empresa não identificada no contexto autenticado.',
+      );
     }
     return companyId;
   }
@@ -38,15 +47,24 @@ export class UsersService {
   async create(dto: Record<string, any>): Promise<User> {
     const companyId = this.requireCompanyId();
     if (dto.companyId !== undefined && Number(dto.companyId) !== companyId) {
-      throw new BadRequestException('CompanyId divergente do tenant autenticado.');
+      throw new BadRequestException(
+        'CompanyId divergente do tenant autenticado.',
+      );
     }
-    const exists = await this.repo.findOne({ where: { email: dto.email, companyId } });
-    if (exists) throw new ConflictException('Já existe um usuário com este e-mail nesta empresa');
+    const exists = await this.repo.findOne({
+      where: { email: dto.email, companyId },
+    });
+    if (exists)
+      throw new ConflictException(
+        'Já existe um usuário com este e-mail nesta empresa',
+      );
 
     if (dto.role !== undefined && !ALLOWED_ROLES.includes(dto.role)) {
       throw new UnprocessableEntityException(`Role inválida: ${dto.role}`);
     }
-    const passwordHash = dto.password ? await bcrypt.hash(dto.password, 10) : '';
+    const passwordHash = dto.password
+      ? await bcrypt.hash(dto.password, 10)
+      : '';
     const entity = this.repo.create({
       name: dto.name,
       email: dto.email,
@@ -60,8 +78,13 @@ export class UsersService {
 
   async update(id: number, dto: Record<string, any>): Promise<User> {
     const user = await this.findOne(id);
-    if (dto.companyId !== undefined && Number(dto.companyId) !== user.companyId) {
-      throw new BadRequestException('Não é permitido transferir usuário para outra empresa.');
+    if (
+      dto.companyId !== undefined &&
+      Number(dto.companyId) !== user.companyId
+    ) {
+      throw new BadRequestException(
+        'Não é permitido transferir usuário para outra empresa.',
+      );
     }
     if (dto.name !== undefined) user.name = dto.name;
     if (dto.email !== undefined) user.email = dto.email;

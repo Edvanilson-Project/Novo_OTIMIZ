@@ -10,6 +10,7 @@ As colunas são construídas sobre tarefas produzidas pelo run-cutting do CSP.
 Assim, cada tarefa legalmente dirigível precisa ser coberta por pelo menos uma
 jornada, aproximando melhor a formulação clássica de set covering.
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,6 +30,7 @@ settings = get_settings()
 
 try:
     import pulp  # type: ignore
+
     _PULP_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _PULP_AVAILABLE = False
@@ -48,7 +50,9 @@ def _make_solver(time_limit: int, threads: int = 1) -> "pulp.LpSolver":
 class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
     def __init__(self, vsp_params: Optional[Dict[str, Any]] = None, **params: Any):
         # Prioritize ilp_timeout_seconds from params, then vsp_params, then global settings
-        timeout = params.get("ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds))
+        timeout = params.get(
+            "ilp_timeout_seconds", (vsp_params or {}).get("ilp_timeout_seconds", settings.ilp_timeout_seconds)
+        )
         super().__init__(name="set_partitioning_csp", time_budget_s=timeout)
         self.params = params
         self.vsp_params = vsp_params or {}
@@ -63,7 +67,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self.max_candidate_successors = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self.max_columns = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
-        self.max_pricing_iterations = max(0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0)))
+        self.max_pricing_iterations = max(
+            0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0))
+        )
         self.max_pricing_additions = max(1, int(self.vsp_params.get("max_pricing_additions", 512)))
 
     def _task_neighbors(self, tasks: List[Block]) -> Dict[int, List[Block]]:
@@ -85,7 +91,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                         "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
                         "new_cont": self.greedy._block_drive(task),
                         "daily_drive": self.greedy._block_drive(task),
-                        "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
+                        "extended_days_used": (
+                            1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                        ),
                     },
                 )
                 ok, _, data = self.greedy._can_extend(duty, nxt)
@@ -107,37 +115,42 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
 
         # Converter tudo para Decimal
         work_dec = Decimal(str(work))
-        spread_dec = Decimal(str(spread))
+        Decimal(str(spread))
         gaps_sum = Decimal(str(sum(gaps)))
         passive_dec = Decimal(str(passive))
-        
+
         # Custos base
         cost = Decimal(str(getattr(self.greedy, "cost_duty", 50.0)))  # custo fixo por jornada dinâmico
-        cost += (work_dec / Decimal('60.0')) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
-        cost += gaps_sum * Decimal('0.1')
+        cost += (work_dec / Decimal("60.0")) * Decimal(str(_DEFAULT_CREW_COST_PER_HOUR))
+        cost += gaps_sum * Decimal("0.1")
         cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))
-        
+
         # Desvios de metas
-        target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
-        target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
-        
+        target_work = max(
+            self.greedy.min_work,
+            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))),
+        )
+        target_spread = min(
+            self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9))
+        )
+
         overtime_dev = max(0, work - self.greedy.max_work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)
-        
+
         # Converter desvios para Decimal
         overtime_dev_dec = Decimal(str(overtime_dev))
         underwork_dev_dec = Decimal(str(underwork_dev))
         spread_dev_dec = Decimal(str(spread_dev))
         fairness_dev_dec = Decimal(str(fairness_dev))
-        
+
         # Adicionar penalidades de desvio
         cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 0.8)))
         cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.2)))
         cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.15)))
         cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.05)))
-        
+
         return float(cost)
 
     def _feasible_combo(self, combo: Sequence[Block]) -> bool:
@@ -152,7 +165,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                         "new_spread": block.total_duration + self.greedy.pullout + self.greedy.pullback,
                         "new_cont": self.greedy._block_drive(block),
                         "daily_drive": self.greedy._block_drive(block),
-                        "extended_days_used": 1 if self.greedy._block_drive(block) > self.greedy.daily_driving_limit else 0,
+                        "extended_days_used": (
+                            1 if self.greedy._block_drive(block) > self.greedy.daily_driving_limit else 0
+                        ),
                     },
                 )
                 continue
@@ -202,7 +217,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
 
         return columns or [([block], self._piece_cost([block])) for block in ordered]
 
-    def _pricing(self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]) -> List[Tuple[List[Block], float]]:
+    def _pricing(
+        self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]
+    ) -> List[Tuple[List[Block], float]]:
         existing = {tuple(block.id for block in combo) for combo, _ in columns}
         additions: List[Tuple[List[Block], float]] = []
         candidates = sorted(
@@ -247,7 +264,15 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
             y = [pulp.LpVariable(f"y_{index}", lowBound=0) for index in range(len(columns))]
             lp += pulp.lpSum(cost * y[index] for index, (_, cost) in enumerate(columns))
             for task_id in task_ids:
-                lp += pulp.lpSum(y[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1, f"cover_{task_id}"
+                lp += (
+                    pulp.lpSum(
+                        y[index]
+                        for index, (combo, _) in enumerate(columns)
+                        if any(task.id == task_id for task in combo)
+                    )
+                    >= 1,
+                    f"cover_{task_id}",
+                )
             lp.solve(_make_solver(pricing_time_limit_s, threads=settings.ilp_threads))
             duals = {
                 task_id: float(lp.constraints[f"cover_{task_id}"].pi or 0.0)
@@ -266,7 +291,12 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         x = [pulp.LpVariable(f"x_{index}", cat="Binary") for index in range(len(columns))]
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
         for task_id in task_ids:
-            prob += pulp.lpSum(x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1
+            prob += (
+                pulp.lpSum(
+                    x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)
+                )
+                >= 1
+            )
         prob.solve(_make_solver(total_time_limit_s, threads=settings.ilp_threads))
 
         if prob.status != pulp.constants.LpStatusOptimal:
@@ -296,7 +326,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                             "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
                             "new_cont": self.greedy._block_drive(task),
                             "daily_drive": self.greedy._block_drive(task),
-                            "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
+                            "extended_days_used": (
+                                1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                            ),
                         },
                     )
                 else:
@@ -314,7 +346,9 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                                 "new_spread": task.total_duration + self.greedy.pullout + self.greedy.pullback,
                                 "new_cont": self.greedy._block_drive(task),
                                 "daily_drive": self.greedy._block_drive(task),
-                                "extended_days_used": 1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0,
+                                "extended_days_used": (
+                                    1 if self.greedy._block_drive(task) > self.greedy.daily_driving_limit else 0
+                                ),
                             },
                         )
                     else:

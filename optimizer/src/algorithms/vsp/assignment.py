@@ -31,6 +31,7 @@ CUSTO DE MEMÓRIA:
     O(N + N·K) onde K = sucessores viáveis por trip (default cap 64).
     Para N=30k, K=64: ~2M entradas × 24 bytes = ~50 MB.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ import numpy as np
 try:
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import min_weight_full_bipartite_matching
+
     _SCIPY_OK = True
 except Exception:  # pragma: no cover
     csr_matrix = None
@@ -85,16 +87,19 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         if not _SCIPY_OK:
             _log.warning("scipy não disponível, fallback GreedyVSP")
             from .greedy import GreedyVSP
+
             return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depot_id)
 
         N = len(trips)
         _log.info(f"AssignmentVSP iniciado para {N} viagens (sparse N×N matching)")
 
         vehicle = select_vehicle_type(vehicle_types, depot_id)
-        fixed_cost = float(self._p(
-            "fixed_vehicle_activation_cost",
-            vehicle.fixed_cost if vehicle else settings.default_vehicle_fixed_cost,
-        ))
+        fixed_cost = float(
+            self._p(
+                "fixed_vehicle_activation_cost",
+                vehicle.fixed_cost if vehicle else settings.default_vehicle_fixed_cost,
+            )
+        )
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
         idle_cost = float(self._p("idle_cost_per_minute", 0.25))
         min_layover = int(self._p("min_layover_minutes", 8))
@@ -105,10 +110,12 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
-        max_successors = int(self._p(
-            "assignment_max_successors_per_trip",
-            self._p("max_candidate_successors_per_task", 64),
-        ))
+        max_successors = int(
+            self._p(
+                "assignment_max_successors_per_trip",
+                self._p("max_candidate_successors_per_task", 64),
+            )
+        )
         preserve_preferred_pairs = bool(self._p("preserve_preferred_pairs", True))
         preferred_pair_window = int(self._p("preferred_pair_window_minutes", 120))
         pair_break_penalty = float(self._p("pair_break_penalty", fixed_cost * 1.25))
@@ -117,7 +124,9 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
         starts = np.fromiter((t.start_time for t in trips_sorted), dtype=np.int64, count=N)
         ends = np.fromiter((t.end_time for t in trips_sorted), dtype=np.int64, count=N)
-        preferred_pairs = build_preferred_pairs(trips_sorted, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        preferred_pairs = (
+            build_preferred_pairs(trips_sorted, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        )
         trip_order = {int(trip.id): idx for idx, trip in enumerate(trips_sorted)}
         preferred_next = {
             int(trip_id): int(pair_id)
@@ -182,13 +191,13 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
 
                 dh = max(min_layover, int(ti.deadhead_times.get(tj.origin_id, 0)))
                 idle = max(0, gap - dh)
-                
+
                 # Penaliza se precisar de tolerância para ser viável
                 tolerance_penalty = 0.0
                 if gap < dh:
                     # Penalidade por minuto de tolerância utilizada
                     tolerance_penalty = (dh - gap) * 100.0
-                
+
                 cost = (dh * deadhead_cost) + (idle * idle_cost) + tolerance_penalty
                 if ti.destination_id == tj.origin_id:
                     cost -= fixed_cost * 0.05
@@ -232,9 +241,7 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         )
 
         cost_matrix = csr_matrix(
-            (np.asarray(costs, dtype=np.float64),
-             (np.asarray(rows, dtype=np.int32),
-              np.asarray(cols, dtype=np.int32))),
+            (np.asarray(costs, dtype=np.float64), (np.asarray(rows, dtype=np.int32), np.asarray(cols, dtype=np.int32))),
             shape=(N, N),
         )
 
@@ -244,6 +251,7 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         except Exception as exc:
             _log.exception("Bipartite matching falhou: %s — fallback Greedy", exc)
             from .greedy import GreedyVSP
+
             return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depot_id)
         match_ms = (time.perf_counter() - t1) * 1000
         _log.info(f"Bipartite matching resolvido em {match_ms:.0f}ms")
@@ -301,14 +309,16 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
             block = Block(id=bid, trips=chain_trips)
             if vehicle:
                 block.vehicle_type_id = vehicle.id
-            block.meta.update({
-                "activation_cost": fixed_cost,
-                "connection_cost": 0.0,
-                "deadhead_minutes": 0,
-                "idle_minutes": 0,
-                "start_depot_id": depot_id,
-                "end_depot_id": depot_id,
-            })
+            block.meta.update(
+                {
+                    "activation_cost": fixed_cost,
+                    "connection_cost": 0.0,
+                    "deadhead_minutes": 0,
+                    "idle_minutes": 0,
+                    "start_depot_id": depot_id,
+                    "end_depot_id": depot_id,
+                }
+            )
             for a, b in zip(chain[:-1], chain[1:]):
                 ta, tb = trips_sorted[a], trips_sorted[b]
                 gap = int(tb.start_time - ta.end_time)
@@ -327,12 +337,14 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
             block = Block(id=bid, trips=[trips_sorted[i]])
             if vehicle:
                 block.vehicle_type_id = vehicle.id
-            block.meta.update({
-                "activation_cost": fixed_cost,
-                "connection_cost": 0.0,
-                "start_depot_id": depot_id,
-                "end_depot_id": depot_id,
-            })
+            block.meta.update(
+                {
+                    "activation_cost": fixed_cost,
+                    "connection_cost": 0.0,
+                    "start_depot_id": depot_id,
+                    "end_depot_id": depot_id,
+                }
+            )
             blocks.append(block)
             bid += 1
 
@@ -447,14 +459,16 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 merged_block = Block(id=new_id, trips=merged_trips)
                 if vehicle:
                     merged_block.vehicle_type_id = vehicle.id
-                merged_block.meta.update({
-                    "activation_cost": fixed_cost,
-                    "connection_cost": 0.0,
-                    "deadhead_minutes": 0,
-                    "idle_minutes": 0,
-                    "start_depot_id": depot_id,
-                    "end_depot_id": depot_id,
-                })
+                merged_block.meta.update(
+                    {
+                        "activation_cost": fixed_cost,
+                        "connection_cost": 0.0,
+                        "deadhead_minutes": 0,
+                        "idle_minutes": 0,
+                        "start_depot_id": depot_id,
+                        "end_depot_id": depot_id,
+                    }
+                )
                 for ta, tb in zip(merged_trips[:-1], merged_trips[1:]):
                     g = max(0, int(tb.start_time - ta.end_time))
                     dh_ = max(min_layover, int(ta.deadhead_times.get(tb.origin_id, 0)))
@@ -484,11 +498,15 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 break
 
         total_packed = sum(len(b.trips) for b in blocks)
-        pair_meta = pairing_stats(blocks, preferred_pairs) if preferred_pairs else {
-            "preferred_pair_count": 0,
-            "paired_connections_followed": 0,
-            "preferred_pair_breaks": 0,
-        }
+        pair_meta = (
+            pairing_stats(blocks, preferred_pairs)
+            if preferred_pairs
+            else {
+                "preferred_pair_count": 0,
+                "paired_connections_followed": 0,
+                "preferred_pair_breaks": 0,
+            }
+        )
         _log.info(
             f"AssignmentVSP: {total_packed}/{N} trips em {len(blocks)} blocos "
             f"(build={build_ms:.0f}ms, match={match_ms:.0f}ms, "

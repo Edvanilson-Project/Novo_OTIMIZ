@@ -7,6 +7,7 @@ Função objetivo aproximada:
 Cada bloco representa a ativação de um veículo, e cada conexão carrega custo
  de deadhead, ociosidade e energia quando houver frota elétrica.
 """
+
 from __future__ import annotations
 
 import logging
@@ -124,9 +125,7 @@ def build_preferred_pairs(trips: List[Trip], min_layover: int, max_pair_window: 
 
 def pairing_stats(blocks: List[Block], preferred_pairs: Dict[int, int]) -> Dict[str, int]:
     unique_pairs = {
-        tuple(sorted((trip_id, pair_id)))
-        for trip_id, pair_id in preferred_pairs.items()
-        if trip_id < pair_id
+        tuple(sorted((trip_id, pair_id))) for trip_id, pair_id in preferred_pairs.items() if trip_id < pair_id
     }
     consecutive_pairs = {
         tuple(sorted((block.trips[index].id, block.trips[index + 1].id)))
@@ -283,7 +282,9 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         enable_single_trip_compaction = bool(self._p("enable_single_trip_compaction", True))
         single_trip_compaction_max_gap = int(self._p("single_trip_compaction_max_gap_minutes", 420))
         single_trip_compaction_max_gap = max(min_layover, single_trip_compaction_max_gap)
-        preferred_pairs = build_preferred_pairs(sorted_trips, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        preferred_pairs = (
+            build_preferred_pairs(sorted_trips, min_layover, preferred_pair_window) if preserve_preferred_pairs else {}
+        )
 
         # Build trip_group forcing map: trip_group_id → [trip_ids]
         # When a trip has a trip_group_id, its pair must go to the same block (vehicle).
@@ -320,10 +321,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
 
             # For same trip_group with gap=0 (contiguous ida/volta), skip deadhead
             pair_trip = trip_by_id.get(group_trips[0] if group_trips[0] != trip.id else group_trips[-1])
-            is_contiguous_group = (
-                pair_trip is not None
-                and pair_trip.end_time == trip.start_time
-            )
+            is_contiguous_group = pair_trip is not None and pair_trip.end_time == trip.start_time
 
             if gap < 0:
                 # The block has trips AFTER the pair trip from the group.
@@ -400,7 +398,12 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 return None
 
             start_depot = target_blk.meta.get("start_depot_id")
-            if same_depot_required and trip.depot_id is not None and start_depot is not None and trip.depot_id != start_depot:
+            if (
+                same_depot_required
+                and trip.depot_id is not None
+                and start_depot is not None
+                and trip.depot_id != start_depot
+            ):
                 return None
 
             charged, soc_after_charge = self._maybe_recharge(target_blk, gap, vehicle, trip)
@@ -427,8 +430,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "pairing_delta": pairing_delta,
                 "pairing_state": "trip_group_forced",
                 "is_split_shift_window": bool(
-                    allow_vehicle_split_shifts
-                    and split_shift_min_gap <= gap <= split_shift_max_gap
+                    allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap
                 ),
                 "garage_return_cost": garage_return_cost,
             }
@@ -436,8 +438,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 if garage_policy == "always":
                     data["marginal_cost"] = garage_return_cost + pairing_delta
                 elif garage_policy == "never":
-                    pass # stays as calculated (idle)
-                else: # smart
+                    pass  # stays as calculated (idle)
+                else:  # smart
                     data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
 
             return (data["marginal_cost"], target_blk, data)
@@ -474,7 +476,12 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     continue
 
                 start_depot = blk.meta.get("start_depot_id")
-                if same_depot_required and trip.depot_id is not None and start_depot is not None and trip.depot_id != start_depot:
+                if (
+                    same_depot_required
+                    and trip.depot_id is not None
+                    and start_depot is not None
+                    and trip.depot_id != start_depot
+                ):
                     continue
 
                 charged, soc_after_charge = self._maybe_recharge(blk, gap, vehicle, trip)
@@ -496,7 +503,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 block_has_group = False
                 if trip_gid is not None:
                     block_has_group = any(getattr(t, "trip_group_id", None) == trip_gid for t in blk.trips)
-                
+
                 if block_has_group:
                     pairing_delta -= paired_trip_bonus * 3.0
                     pairing_state = "trip_group_match"
@@ -522,14 +529,27 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 marginal_cost = needed * deadhead_cost + slack * idle_cost + energy_need * energy_rate + pairing_delta
                 ranking_key = marginal_cost
                 if best is None or ranking_key < best[0]:
-                    best = (ranking_key, blk, (gap, needed, charged, soc_after_trip, energy_need, marginal_cost, pairing_delta, pairing_state))
-                    
+                    best = (
+                        ranking_key,
+                        blk,
+                        (
+                            gap,
+                            needed,
+                            charged,
+                            soc_after_trip,
+                            energy_need,
+                            marginal_cost,
+                            pairing_delta,
+                            pairing_state,
+                        ),
+                    )
+
             if best is None:
                 return None
-            
+
             b_ranking, b_blk, raw_data = best
             gap, needed, charged, soc_after_trip, energy_need, marginal_cost, pairing_delta, pairing_state = raw_data
-            
+
             data = {
                 "gap": gap,
                 "needed_deadhead": needed,
@@ -540,17 +560,19 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "ranking_key": b_ranking,
                 "pairing_delta": pairing_delta,
                 "pairing_state": pairing_state,
-                "is_split_shift_window": bool(allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap),
+                "is_split_shift_window": bool(
+                    allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap
+                ),
                 "garage_return_cost": garage_return_cost,
             }
             if data["is_split_shift_window"]:
                 if garage_policy == "always":
                     data["marginal_cost"] = garage_return_cost + pairing_delta
                 elif garage_policy == "never":
-                    pass # stays as calculated (idle)
-                else: # smart
+                    pass  # stays as calculated (idle)
+                else:  # smart
                     data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
-                
+
                 data["ranking_key"] = data["marginal_cost"]
 
             return (data["marginal_cost"], b_blk, data)
@@ -589,7 +611,12 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 return None
 
             start_depot = blk.meta.get("start_depot_id")
-            if same_depot_required and trip.depot_id is not None and start_depot is not None and trip.depot_id != start_depot:
+            if (
+                same_depot_required
+                and trip.depot_id is not None
+                and start_depot is not None
+                and trip.depot_id != start_depot
+            ):
                 return None
 
             charged, soc_after_charge = self._maybe_recharge(blk, gap, vehicle, trip)
@@ -616,8 +643,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "pairing_delta": pairing_delta,
                 "pairing_state": "preferred_pair",
                 "is_split_shift_window": bool(
-                    allow_vehicle_split_shifts
-                    and split_shift_min_gap <= gap <= split_shift_max_gap
+                    allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap
                 ),
                 "garage_return_cost": garage_return_cost,
             }
@@ -625,15 +651,19 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 if garage_policy == "always":
                     data["marginal_cost"] = garage_return_cost + pairing_delta
                 elif garage_policy == "never":
-                    pass # stays as calculated (idle)
-                else: # smart
+                    pass  # stays as calculated (idle)
+                else:  # smart
                     data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
 
             return (data["marginal_cost"], blk, data)
 
         for trip in sorted_trips:
-            candidate = _forced_trip_group_candidate(trip) or _forced_preferred_pair_candidate(trip) or _best_candidate(trip)
-            candidate_follows_pair = bool(candidate and candidate[2].get("pairing_state") in ("preferred_pair", "trip_group_forced"))
+            candidate = (
+                _forced_trip_group_candidate(trip) or _forced_preferred_pair_candidate(trip) or _best_candidate(trip)
+            )
+            candidate_follows_pair = bool(
+                candidate and candidate[2].get("pairing_state") in ("preferred_pair", "trip_group_forced")
+            )
             candidate_is_split_shift = bool(candidate and candidate[2].get("is_split_shift_window"))
             # Usar marginal_cost (não ranking_key) para decisão de abrir novo veículo
             candidate_cost = float(candidate[2].get("marginal_cost", 0)) if candidate else 0
@@ -701,9 +731,13 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 blk.trips.append(trip)
             blk.meta["connection_cost"] = float(blk.meta.get("connection_cost", 0.0)) + float(data["marginal_cost"])
             blk.meta["deadhead_minutes"] = int(blk.meta.get("deadhead_minutes", 0)) + int(data["needed_deadhead"])
-            blk.meta["idle_minutes"] = int(blk.meta.get("idle_minutes", 0)) + max(0, int(data["gap"] - data["needed_deadhead"]))
+            blk.meta["idle_minutes"] = int(blk.meta.get("idle_minutes", 0)) + max(
+                0, int(data["gap"] - data["needed_deadhead"])
+            )
             blk.meta["energy_kwh"] = float(blk.meta.get("energy_kwh", 0.0)) + float(data["energy_need_kwh"])
-            blk.meta["pairing_score"] = float(blk.meta.get("pairing_score", 0.0)) - float(data.get("pairing_delta", 0.0))
+            blk.meta["pairing_score"] = float(blk.meta.get("pairing_score", 0.0)) - float(
+                data.get("pairing_delta", 0.0)
+            )
             if data.get("pairing_state") == "preferred_pair":
                 blk.meta["paired_connections_followed"] = int(blk.meta.get("paired_connections_followed", 0)) + 1
             elif data.get("pairing_state") == "pair_break":
@@ -755,9 +789,20 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
                 start_depot = target.meta.get("start_depot_id")
                 end_depot = target.meta.get("end_depot_id")
-                if same_depot_required and start_depot is not None and trip.depot_id is not None and trip.depot_id != start_depot:
+                if (
+                    same_depot_required
+                    and start_depot is not None
+                    and trip.depot_id is not None
+                    and trip.depot_id != start_depot
+                ):
                     return None
-                if same_depot_required and end_depot is not None and trip.depot_id is not None and start_depot is not None and trip.depot_id != start_depot:
+                if (
+                    same_depot_required
+                    and end_depot is not None
+                    and trip.depot_id is not None
+                    and start_depot is not None
+                    and trip.depot_id != start_depot
+                ):
                     return None
                 marginal = needed * deadhead_cost + max(0, gap - needed) * idle_cost
                 return marginal, {"mode": "append", "gap": gap, "needed": needed}
@@ -785,9 +830,20 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
                 start_depot = target.meta.get("start_depot_id")
                 end_depot = target.meta.get("end_depot_id")
-                if same_depot_required and end_depot is not None and trip.depot_id is not None and trip.depot_id != end_depot:
+                if (
+                    same_depot_required
+                    and end_depot is not None
+                    and trip.depot_id is not None
+                    and trip.depot_id != end_depot
+                ):
                     return None
-                if same_depot_required and start_depot is not None and end_depot is not None and trip.depot_id is not None and trip.depot_id != end_depot:
+                if (
+                    same_depot_required
+                    and start_depot is not None
+                    and end_depot is not None
+                    and trip.depot_id is not None
+                    and trip.depot_id != end_depot
+                ):
                     return None
                 marginal = needed * deadhead_cost + max(0, gap - needed) * idle_cost
                 return marginal, {"mode": "prepend", "gap": gap, "needed": needed}
@@ -824,23 +880,41 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     data["needed"] * deadhead_cost + max(0, data["gap"] - data["needed"]) * idle_cost
                 )
                 target.meta["deadhead_minutes"] = int(target.meta.get("deadhead_minutes", 0)) + int(data["needed"])
-                target.meta["idle_minutes"] = int(target.meta.get("idle_minutes", 0)) + max(0, int(data["gap"] - data["needed"]))
-                target.meta["energy_kwh"] = float(target.meta.get("energy_kwh", 0.0)) + float(self._energy_need(trip, vehicle))
+                target.meta["idle_minutes"] = int(target.meta.get("idle_minutes", 0)) + max(
+                    0, int(data["gap"] - data["needed"])
+                )
+                target.meta["energy_kwh"] = float(target.meta.get("energy_kwh", 0.0)) + float(
+                    self._energy_need(trip, vehicle)
+                )
                 if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
-                    target.meta["soc_kwh"] = float(target.meta.get("soc_kwh", vehicle.battery_capacity_kwh)) - float(self._energy_need(trip, vehicle))
-                target.meta["start_depot_id"] = target.trips[0].depot_id if target.trips[0].depot_id is not None else target.meta.get("start_depot_id")
-                target.meta["end_depot_id"] = target.trips[-1].depot_id if target.trips[-1].depot_id is not None else target.meta.get("end_depot_id")
+                    target.meta["soc_kwh"] = float(target.meta.get("soc_kwh", vehicle.battery_capacity_kwh)) - float(
+                        self._energy_need(trip, vehicle)
+                    )
+                target.meta["start_depot_id"] = (
+                    target.trips[0].depot_id
+                    if target.trips[0].depot_id is not None
+                    else target.meta.get("start_depot_id")
+                )
+                target.meta["end_depot_id"] = (
+                    target.trips[-1].depot_id
+                    if target.trips[-1].depot_id is not None
+                    else target.meta.get("end_depot_id")
+                )
 
                 all_blocks.remove(source)
                 moved_count += 1
 
             if moved_count > 0:
                 warnings.append(f"SINGLE_TRIP_BLOCKS_COMPACTED count={moved_count}")
-        pair_meta = pairing_stats(all_blocks, preferred_pairs) if preferred_pairs else {
-            "preferred_pair_count": 0,
-            "paired_connections_followed": 0,
-            "preferred_pair_breaks": 0,
-        }
+        pair_meta = (
+            pairing_stats(all_blocks, preferred_pairs)
+            if preferred_pairs
+            else {
+                "preferred_pair_count": 0,
+                "paired_connections_followed": 0,
+                "preferred_pair_breaks": 0,
+            }
+        )
 
         if same_depot_required:
             for blk in all_blocks:
@@ -868,7 +942,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
             peak = 0
         if pair_meta["preferred_pair_breaks"] > 0:
             warnings.append(
-                f"PREFERRED_PAIR_BREAKS matched={pair_meta['paired_connections_followed']}/{pair_meta['preferred_pair_count']}"
+                f"PREFERRED_PAIR_BREAKS matched={pair_meta['paired_connections_followed']}/{pair_meta['preferred_pair_count']}"  # noqa: E501
             )
 
         return VSPSolution(

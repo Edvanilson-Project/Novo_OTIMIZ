@@ -8,14 +8,18 @@ export class BlockAssignment extends TenantBaseEntity {
   @Column()
   scheduleId: number;
 
-  @ManyToOne(() => Schedule, (schedule) => schedule.blocks, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Schedule, (schedule) => schedule.blocks, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'scheduleId' })
   schedule: Schedule;
 
   @Column({ nullable: true })
   vehicleId: number; // FK para Vehicle
 
-  @ManyToOne(() => Vehicle, (vehicle) => vehicle.blocks, { onDelete: 'SET NULL' })
+  @ManyToOne(() => Vehicle, (vehicle) => vehicle.blocks, {
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'vehicleId' })
   vehicle: Vehicle;
 

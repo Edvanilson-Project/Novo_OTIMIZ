@@ -41,7 +41,10 @@ export class OptimizationAdvancedController {
     @Param('scheduleId', ParseIntPipe) scheduleId: number,
     @Param('scenarioId') scenarioId: string,
   ) {
-    const run = await this.scenarioEvaluator.getScenarioRun(scheduleId, scenarioId);
+    const run = await this.scenarioEvaluator.getScenarioRun(
+      scheduleId,
+      scenarioId,
+    );
     if (!run) return null;
     return {
       id: run.id,
@@ -64,7 +67,11 @@ export class OptimizationAdvancedController {
     @Body('scenario1Id') scenario1Id: string,
     @Body('scenario2Id') scenario2Id: string,
   ) {
-    return this.scenarioEvaluator.compareScenarios(scheduleId, scenario1Id, scenario2Id);
+    return this.scenarioEvaluator.compareScenarios(
+      scheduleId,
+      scenario1Id,
+      scenario2Id,
+    );
   }
 
   @Post('whatif/vehicle-type-change')

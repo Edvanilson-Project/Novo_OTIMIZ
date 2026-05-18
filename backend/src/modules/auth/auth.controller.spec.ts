@@ -31,7 +31,10 @@ describe('AuthController', () => {
 
   it('login calls authService and returns token + user', async () => {
     const res = mockResponse();
-    const result = await controller.login({ email: 'a@b.com', password: 'pass' }, res);
+    const result = await controller.login(
+      { email: 'a@b.com', password: 'pass' },
+      res,
+    );
     expect(service.login).toHaveBeenCalledWith('a@b.com', 'pass');
     expect(result).toMatchObject({ access_token: 'tok123', user: { id: 1 } });
     expect(result.message).toBe('Login realizado com sucesso');
@@ -47,9 +50,9 @@ describe('AuthController', () => {
     );
   });
 
-  it('logout clears cookie and returns message', async () => {
+  it('logout clears cookie and returns message', () => {
     const res = mockResponse();
-    const result = await controller.logout(res);
+    const result = controller.logout(res);
     expect(res.clearCookie).toHaveBeenCalledWith('access_token');
     expect(result).toMatchObject({ message: 'Logout realizado com sucesso' });
   });

@@ -10,7 +10,9 @@ describe('CompaniesController', () => {
 
   beforeEach(async () => {
     service = {
-      findAll: jest.fn().mockResolvedValue([{ id: 1, name: 'Empresa A', slug: 'empresa-a' }]),
+      findAll: jest
+        .fn()
+        .mockResolvedValue([{ id: 1, name: 'Empresa A', slug: 'empresa-a' }]),
       findOne: jest.fn().mockResolvedValue({ id: 1, name: 'Empresa A' }),
       create: jest.fn().mockResolvedValue({ id: 2, name: 'Empresa B' }),
       update: jest.fn().mockResolvedValue({ id: 1, name: 'Updated' }),
@@ -21,7 +23,8 @@ describe('CompaniesController', () => {
       controllers: [CompaniesController],
       providers: [{ provide: CompaniesService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(CompaniesController);

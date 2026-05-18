@@ -11,6 +11,7 @@ Melhorias implementadas:
 - Cache sincronizado com parâmetros de custo
 - Tratamento robusto de erros
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,12 +43,12 @@ settings = get_settings()
 #   Motorista: ~R$2.800–3.500/mês ÷ 220 h = ~R$13–16/h.
 #   Encargos sociais (FGTS 8 %, INSS patronal 20 %, férias, 13°, FGTS-multa) ≈ 70 %.
 #   Custo efetivo total: ~R$22–27/h  →  default R$25/h.
-_DEFAULT_CREW_COST_PER_HOUR = Decimal('25.0')
+_DEFAULT_CREW_COST_PER_HOUR = Decimal("25.0")
 
 # MULTA TRABALHISTA POR VIOLAÇÃO CCT (R$ por ocorrência):
 #   Autuação do MTE + indenização convencional: R$500–1000 por evento.
 #   Mantemos R$500 como piso conservador.
-_CCT_VIOLATION_PENALTY = Decimal('500.0')
+_CCT_VIOLATION_PENALTY = Decimal("500.0")
 
 # INTERVALO IMPRODUTIVO (split-duty):
 #   Limite a partir do qual o intervalo não-pago começa a ser penalizado.
@@ -59,19 +60,19 @@ _LONG_UNPAID_BREAK_LIMIT_MINUTES = 90
 #   tornando o split competitivo com uma nova jornada (cost_duty ≈ R$500)
 #   apenas quando realmente vale a pena (break > ~6 h).
 #   Antes estava em 0.05 → splits longos custavam R$10 independente do tamanho.
-_LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal('0.25')
+_LONG_UNPAID_BREAK_PENALTY_WEIGHT = Decimal("0.25")
 
 # ADICIONAL PADRÃO DE HORA EXTRA (usado como fallback quando CCT não especifica):
 #   CLT art. 59: +50 % para primeiras 2 h; acima disso +100 %.
 #   O método _overtime_cost implementa a escada; este pct é o fallback flat.
-_DEFAULT_OVERTIME_EXTRA_PCT = Decimal('0.5')
+_DEFAULT_OVERTIME_EXTRA_PCT = Decimal("0.5")
 
 # CUSTO FIXO POR JORNADA (R$):
 #   Representa o overhead fixo diário por tripulante além do custo horário:
 #   administração, uniformes, treinamento, aviso prévio amortizado, etc.
 #   Default R$500 ≈ 20 h × R$25/h (custo-dia equivalente de um motorista).
 #   Anteriormente era 0 no __init__, o que zerava a penalidade por # de duties.
-_DEFAULT_COST_DUTY = Decimal('500.0')
+_DEFAULT_COST_DUTY = Decimal("500.0")
 
 
 def _R(v) -> float:
@@ -79,8 +80,8 @@ def _R(v) -> float:
     if v is None:
         return 0.0
     try:
-        return float(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
-    except:
+        return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    except Exception:
         return 0.0
 
 
@@ -108,7 +109,7 @@ def _nocturnal_overlap(start: int, end: int, noct_start_h: int, noct_end_h: int)
             ws_a, we_a = day_base + start_noct, day_base + 1440
             # Parte B: da meia-noite até o fim noturno
             ws_b, we_b = day_base + 1440, day_base + 1440 + end_noct
-            
+
             for ws, we in [(ws_a, we_a), (ws_b, we_b)]:
                 ov_s = max(start, ws)
                 ov_e = min(end, we)
@@ -121,7 +122,7 @@ def _nocturnal_overlap(start: int, end: int, noct_start_h: int, noct_end_h: int)
             ov_e = min(end, we)
             if ov_e > ov_s:
                 total += ov_e - ov_s
-                
+
     return total
 
 
@@ -161,7 +162,17 @@ def _compute_fairness_metrics(duties_objs: Sequence[Any], duties_costs: List[Dic
     if not duties_objs:
         return {
             "num_duties": 0,
-            "work_time": {"min": 0, "max": 0, "mean": 0, "median": 0, "stddev": 0, "cv": 0, "p5": 0, "p95": 0, "gini": 0},
+            "work_time": {
+                "min": 0,
+                "max": 0,
+                "mean": 0,
+                "median": 0,
+                "stddev": 0,
+                "cv": 0,
+                "p5": 0,
+                "p95": 0,
+                "gini": 0,
+            },
             "total_cost": {"min": 0, "max": 0, "mean": 0, "stddev": 0, "cv": 0, "gini": 0},
             "imbalance": {"duties_below_50pct_avg": 0, "duties_above_150pct_avg": 0},
         }
@@ -177,7 +188,7 @@ def _compute_fairness_metrics(duties_objs: Sequence[Any], duties_costs: List[Dic
         mean = sum(sv) / n
         median = sv[n // 2] if n % 2 == 1 else (sv[n // 2 - 1] + sv[n // 2]) / 2
         var = sum((v - mean) ** 2 for v in sv) / n
-        stddev = var ** 0.5
+        stddev = var**0.5
         cv = stddev / mean if mean > 0 else 0.0
         return {
             "min": round(float(sv[0]), 2),
@@ -236,12 +247,12 @@ class CostEvaluator(ICostEvaluator):
         # Parâmetros de negócio (Injetados via OptimizationConfig)
         self.nocturnal_start_hour = 22
         self.nocturnal_end_hour = 5
-        self.nocturnal_factor = Decimal('1.0')
-        self.nocturnal_extra_pct = Decimal('0.20')
-        self.waiting_time_pay_pct = Decimal('0.30')
+        self.nocturnal_factor = Decimal("1.0")
+        self.nocturnal_extra_pct = Decimal("0.20")
+        self.waiting_time_pay_pct = Decimal("0.30")
         self.idle_time_is_paid = True
-        self.holiday_extra_pct = Decimal('1.0')
-        self.sunday_off_weight = Decimal('0.0')
+        self.holiday_extra_pct = Decimal("1.0")
+        self.sunday_off_weight = Decimal("0.0")
 
         # Pesos de custo dinâmicos
         self.cost_vehicle = Decimal(str(settings.default_vehicle_fixed_cost))
@@ -272,13 +283,13 @@ class CostEvaluator(ICostEvaluator):
         self.cost_duty = self._to_decimal(params.get("cost_duty", self.cost_duty))
         self.violation_penalty = self._to_decimal(params.get("cct_violation_penalty", self.violation_penalty))
         self.idle_cost_per_minute = self._to_decimal(params.get("idle_cost_per_minute", self.idle_cost_per_minute))
-        
+
         # Custos por minuto (Mapeamento Direto do Frontend)
         driver_cost = params.get("driver_cost_per_minute") or 0.0
         collector_cost = params.get("collector_cost_per_minute") or 0.0
         if driver_cost > 0 or collector_cost > 0:
             total_per_minute = self._to_decimal(driver_cost) + self._to_decimal(collector_cost)
-            self.crew_cost_per_hour = total_per_minute * Decimal('60.0')
+            self.crew_cost_per_hour = total_per_minute * Decimal("60.0")
 
         # Parâmetros de Regras de Negócio (Sincronização Fundamental)
         self.nocturnal_start_hour = int(params.get("nocturnal_start_hour", self.nocturnal_start_hour))
@@ -289,31 +300,33 @@ class CostEvaluator(ICostEvaluator):
         self.idle_time_is_paid = bool(params.get("idle_time_is_paid", self.idle_time_is_paid))
         self.holiday_extra_pct = self._to_decimal(params.get("holiday_extra_pct", self.holiday_extra_pct))
         self.sunday_off_weight = self._to_decimal(params.get("sunday_off_weight", self.sunday_off_weight))
-        
+
         # Limites de Intervalo
         configured_long_break_limit = params.get("long_unpaid_break_limit_minutes")
         if configured_long_break_limit is None and params.get("max_unpaid_break_minutes") is not None:
             configured_long_break_limit = params.get("max_unpaid_break_minutes")
         if configured_long_break_limit is not None:
             self.long_unpaid_break_limit_minutes = int(configured_long_break_limit)
-        self.long_unpaid_break_penalty_weight = self._to_decimal(params.get("long_unpaid_break_penalty_weight", self.long_unpaid_break_penalty_weight))
+        self.long_unpaid_break_penalty_weight = self._to_decimal(
+            params.get("long_unpaid_break_penalty_weight", self.long_unpaid_break_penalty_weight)
+        )
 
     def _to_decimal(self, value: Any) -> Decimal:
         """Converte qualquer valor para Decimal com precisão garantida.
-        
+
         Args:
             value: Valor a ser convertido (str, float, int, None)
-            
+
         Returns:
             Decimal inicializado via string para perfeita exatidão
-            
+
         Raises:
             ValueError: Se não puder converter para numérico
         """
         if isinstance(value, Decimal):
             return value
         if value is None:
-            return Decimal('0.0')
+            return Decimal("0.0")
         try:
             # Remove notação científica e formata com 8 casas decimais
             formatted = "{0:.8f}".format(float(value))
@@ -332,16 +345,12 @@ class CostEvaluator(ICostEvaluator):
         """
         excess = max(0, int(unpaid_break_minutes) - self.long_unpaid_break_limit_minutes)
         if excess <= 0:
-            return Decimal('0.0')
+            return Decimal("0.0")
 
         tier1 = min(excess, 30)
         tier2 = min(max(0, excess - 30), 60)
         tier3 = max(0, excess - 90)
-        return self.long_unpaid_break_penalty_weight * Decimal(
-            tier1 * 1.0
-            + tier2 * 3.0
-            + tier3 * 10.0
-        )
+        return self.long_unpaid_break_penalty_weight * Decimal(tier1 * 1.0 + tier2 * 3.0 + tier3 * 10.0)
 
     def _overtime_cost(
         self,
@@ -358,21 +367,16 @@ class CostEvaluator(ICostEvaluator):
         via extra_pct_override e aplicado flat sobre todo o bloco de overtime.
         """
         if overtime_minutes <= 0:
-            return Decimal('0.0')
+            return Decimal("0.0")
         if extra_pct_override is not None:
             # Override por CCT/contrato: percentual flat negociado
-            return (
-                Decimal(str(overtime_minutes)) / Decimal('60.0')
-                * self.crew_cost_per_hour
-                * extra_pct_override
-            )
+            return Decimal(str(overtime_minutes)) / Decimal("60.0") * self.crew_cost_per_hour * extra_pct_override
         # Escada CLT: tier1 = primeiras 2h (+50 %); tier2 = além disso (+100 %)
         tier1 = Decimal(str(min(overtime_minutes, 120)))
         tier2 = Decimal(str(max(0, overtime_minutes - 120)))
-        return (
-            (tier1 / Decimal('60.0')) * self.crew_cost_per_hour * Decimal('0.50')
-            + (tier2 / Decimal('60.0')) * self.crew_cost_per_hour * Decimal('1.00')
-        )
+        return (tier1 / Decimal("60.0")) * self.crew_cost_per_hour * Decimal("0.50") + (
+            tier2 / Decimal("60.0")
+        ) * self.crew_cost_per_hour * Decimal("1.00")
 
     def set_dynamic_rules(self, rules: list) -> None:
         """Define regras dinâmicas para esta instância do avaliador.
@@ -391,21 +395,22 @@ class CostEvaluator(ICostEvaluator):
         if vt:
             return {
                 "distance": self._to_decimal(vt.cost_per_km) * self._to_decimal(trip.distance_km),
-                "time": self._to_decimal(vt.cost_per_hour) * (self._to_decimal(trip.duration) / Decimal('60.0')),
+                "time": self._to_decimal(vt.cost_per_hour) * (self._to_decimal(trip.duration) / Decimal("60.0")),
             }
         return {
             "distance": self._to_decimal(trip.distance_km) * self.cost_km,
-            "time": (self._to_decimal(trip.duration) / Decimal('60.0')) * self._to_decimal(settings.default_cost_per_hour),
+            "time": (self._to_decimal(trip.duration) / Decimal("60.0"))
+            * self._to_decimal(settings.default_cost_per_hour),
         }
 
     def vsp_cost_breakdown(self, solution: VSPSolution, vehicle_types: List[VehicleType]) -> Dict[str, Any]:
         vt_map: Dict[int, VehicleType] = {vt.id: vt for vt in vehicle_types}
         blocks: List[Dict[str, Any]] = []
-        activation = Decimal('0.0')
-        connection = Decimal('0.0')
-        distance = Decimal('0.0')
-        time = Decimal('0.0')
-        idle_cost = Decimal('0.0')
+        activation = Decimal("0.0")
+        connection = Decimal("0.0")
+        distance = Decimal("0.0")
+        time = Decimal("0.0")
+        idle_cost = Decimal("0.0")
 
         for block in solution.blocks:
             vt = vt_map.get(block.vehicle_type_id or 0)  # type: ignore[arg-type]
@@ -416,18 +421,20 @@ class CostEvaluator(ICostEvaluator):
                 )
             )
             block_connection = self._to_decimal(block.meta.get("connection_cost", 0.0))
-            block_distance = Decimal('0.0')
-            block_time = Decimal('0.0')
+            block_distance = Decimal("0.0")
+            block_time = Decimal("0.0")
             start_buffer = self._to_decimal(max(0, int(block.meta.get("start_buffer_minutes", 0) or 0)))
             end_buffer = self._to_decimal(max(0, int(block.meta.get("end_buffer_minutes", 0) or 0)))
             has_boundary_buffers = "start_buffer_minutes" in block.meta or "end_buffer_minutes" in block.meta
-            block_idle_cost = (start_buffer + end_buffer) * self.idle_cost_per_minute if has_boundary_buffers else Decimal('0.0')
+            block_idle_cost = (
+                (start_buffer + end_buffer) * self.idle_cost_per_minute if has_boundary_buffers else Decimal("0.0")
+            )
 
             block_deadhead_min = 0
             for trip in block.trips:
                 components = self._vehicle_trip_components(vt, trip)
                 block_distance += components["distance"]  # Já é Decimal
-                block_time += components["time"]          # Já é Decimal
+                block_time += components["time"]  # Já é Decimal
                 if not has_boundary_buffers:
                     idle_before = self._to_decimal(trip.idle_before_minutes)
                     idle_after = self._to_decimal(trip.idle_after_minutes)
@@ -437,10 +444,7 @@ class CostEvaluator(ICostEvaluator):
             # Ativado apenas quando o solver VSP não populou idle_before/idle_after
             # (fallback para solvers que não modelam pull-out/pull-back explicitamente).
             if not has_boundary_buffers and len(block.trips) > 1:
-                _any_idle_set = any(
-                    (t.idle_before_minutes or 0) + (t.idle_after_minutes or 0) > 0
-                    for t in block.trips
-                )
+                _any_idle_set = any((t.idle_before_minutes or 0) + (t.idle_after_minutes or 0) > 0 for t in block.trips)
                 if not _any_idle_set:
                     for k in range(len(block.trips) - 1):
                         gap = block.trips[k + 1].start_time - block.trips[k].end_time
@@ -499,92 +503,90 @@ class CostEvaluator(ICostEvaluator):
 
     def csp_cost_breakdown(self, solution: CSPSolution) -> Dict[str, Any]:
         duties: List[Dict[str, Any]] = []
-        
+
         # Acumuladores em Decimal
-        work_cost = Decimal('0.0')
-        guaranteed_cost = Decimal('0.0')
-        waiting_cost = Decimal('0.0')
-        overtime_cost = Decimal('0.0')
-        long_unpaid_break_penalty = Decimal('0.0')
-        nocturnal_extra = Decimal('0.0')
-        holiday_extra = Decimal('0.0')
-        cct_penalties = Decimal('0.0')
+        work_cost = Decimal("0.0")
+        guaranteed_cost = Decimal("0.0")
+        waiting_cost = Decimal("0.0")
+        overtime_cost = Decimal("0.0")
+        long_unpaid_break_penalty = Decimal("0.0")
+        nocturnal_extra = Decimal("0.0")
+        holiday_extra = Decimal("0.0")
+        cct_penalties = Decimal("0.0")
 
         # ── Compilar regras dinâmicas UMA VEZ (reutilizada em todos os duties) ─
         rule_engine = DynamicRuleEngine(self._dynamic_rules)
         has_dynamic_rules = rule_engine.rule_count > 0
-        dynamic_adjustments_total = Decimal('0.0')
+        dynamic_adjustments_total = Decimal("0.0")
 
         for duty in solution.duties:
-            duty_cct_penalties = (
-                self._to_decimal(duty.rest_violations + duty.shift_violations)
-                * self.violation_penalty
-            )
+            duty_cct_penalties = self._to_decimal(duty.rest_violations + duty.shift_violations) * self.violation_penalty
 
             # Cálculo de Minutos Noturnos Robusto (Trata virada da meia-noite)
             noct_minutes = 0
             for t in getattr(duty, "all_trips", getattr(duty, "trips", [])):
                 noct_minutes += _nocturnal_overlap(
-                    int(t.start_time), int(t.end_time),
-                    self.nocturnal_start_hour, self.nocturnal_end_hour
+                    int(t.start_time), int(t.end_time), self.nocturnal_start_hour, self.nocturnal_end_hour
                 )
-            
+
             # Aplica o nocturnal_factor no trabalho efetivo regulamentar
             regulatory_work_minutes = self._to_decimal(duty.work_time)
             if self.nocturnal_factor > 1.0:
-                extension = self._to_decimal(noct_minutes) * (self.nocturnal_factor - Decimal('1.0'))
+                extension = self._to_decimal(noct_minutes) * (self.nocturnal_factor - Decimal("1.0"))
                 regulatory_work_minutes += extension
 
-            duty_work_cost = (regulatory_work_minutes / Decimal('60.0')) * self.crew_cost_per_hour
-            
+            duty_work_cost = (regulatory_work_minutes / Decimal("60.0")) * self.crew_cost_per_hour
+
             # Minutos Garantidos e Espera (Idle)
             guaranteed_minutes = max(
                 regulatory_work_minutes,
-                self._to_decimal(duty.meta.get("guaranteed_minutes", regulatory_work_minutes) or regulatory_work_minutes),
+                self._to_decimal(
+                    duty.meta.get("guaranteed_minutes", regulatory_work_minutes) or regulatory_work_minutes
+                ),
             )
-            
+
             # Idle time pay logic
             paid_minutes = self._to_decimal(duty.paid_minutes or 0)
             if paid_minutes == 0:
                 # Se o solver não calculou paid_minutes, estimamos baseados no spread e idle
                 paid_minutes = guaranteed_minutes
                 if self.idle_time_is_paid:
-                    idle_minutes = max(Decimal('0.0'), self._to_decimal(duty.spread_time) - regulatory_work_minutes)
+                    idle_minutes = max(Decimal("0.0"), self._to_decimal(duty.spread_time) - regulatory_work_minutes)
                     paid_minutes += idle_minutes * self.waiting_time_pay_pct
 
-            guaranteed_extra_minutes = max(Decimal('0.0'), guaranteed_minutes - regulatory_work_minutes)
-            paid_waiting_minutes = max(Decimal('0.0'), paid_minutes - guaranteed_minutes)
-            
-            duty_guaranteed_cost = (guaranteed_extra_minutes / Decimal('60.0')) * self.crew_cost_per_hour
-            duty_waiting_cost = (paid_waiting_minutes / Decimal('60.0')) * self.crew_cost_per_hour
-            
+            guaranteed_extra_minutes = max(Decimal("0.0"), guaranteed_minutes - regulatory_work_minutes)
+            paid_waiting_minutes = max(Decimal("0.0"), paid_minutes - guaranteed_minutes)
+
+            duty_guaranteed_cost = (guaranteed_extra_minutes / Decimal("60.0")) * self.crew_cost_per_hour
+            duty_waiting_cost = (paid_waiting_minutes / Decimal("60.0")) * self.crew_cost_per_hour
+
             # Adicional de hora extra
             _ot_pct_override = (
-                self._to_decimal(duty.meta["overtime_extra_pct"])
-                if "overtime_extra_pct" in (duty.meta or {})
-                else None
+                self._to_decimal(duty.meta["overtime_extra_pct"]) if "overtime_extra_pct" in (duty.meta or {}) else None
             )
             duty_overtime_cost = self._overtime_cost(
                 max(0, int(duty.overtime_minutes or 0)),
                 extra_pct_override=_ot_pct_override,
             )
-            
+
             unpaid_break_minutes = max(
-                Decimal('0.0'),
-                self._to_decimal(duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0),
+                Decimal("0.0"),
+                self._to_decimal(
+                    duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0
+                ),
             )
             duty_long_break_penalty = self._long_unpaid_break_penalty(unpaid_break_minutes)
-            
+
             # Adicional Noturno Monetário
-            duty_nocturnal_extra = Decimal('0.0')
+            duty_nocturnal_extra = Decimal("0.0")
             if noct_minutes > 0:
                 duty_nocturnal_extra = (
-                    (self._to_decimal(noct_minutes) / Decimal('60.0'))
+                    (self._to_decimal(noct_minutes) / Decimal("60.0"))
                     * self.crew_cost_per_hour
                     * self.nocturnal_extra_pct
                 )
-            
-            duty_holiday_extra = Decimal('0.0')
+
+            duty_holiday_extra = Decimal("0.0")
             is_holiday = bool(
                 duty.meta.get("is_holiday", False)
                 or any(getattr(t, "is_holiday", False) for seg in duty.segments for t in seg.trips)
@@ -593,17 +595,15 @@ class CostEvaluator(ICostEvaluator):
                 duty.meta.get("is_sunday", False)
                 or any(bool(getattr(t, "is_sunday", False)) for seg in duty.segments for t in seg.trips)
             )
-            
+
             if is_holiday or is_sunday:
                 duty_holiday_extra = (
-                    (regulatory_work_minutes / Decimal('60.0'))
-                    * self.crew_cost_per_hour
-                    * self.holiday_extra_pct
+                    (regulatory_work_minutes / Decimal("60.0")) * self.crew_cost_per_hour * self.holiday_extra_pct
                 )
                 if is_sunday and self.sunday_off_weight > 0:
                     duty_cct_penalties += self.sunday_off_weight
             if duty.meta.get("illegal_relief"):
-                duty_cct_penalties += Decimal('1000000')  # Big-M penalty for illegal terminal relief
+                duty_cct_penalties += Decimal("1000000")  # Big-M penalty for illegal terminal relief
 
             # ── REGRAS DINÂMICAS: aplicar modificadores APÓS custos base ──────
             # Custos base estão todos calculados. As regras dinâmicas atuam como
@@ -620,37 +620,48 @@ class CostEvaluator(ICostEvaluator):
                     "nocturnal_minutes": getattr(duty, "nocturnal_minutes", 0),
                     "start_time": getattr(duty, "start_time", None),
                     "end_time": getattr(duty, "end_time", None),
-                    "start_hour": (getattr(duty, "start_time", 0) // 60) if getattr(duty, "start_time", None) is not None else 0,
-                    "end_hour": (getattr(duty, "end_time", 0) // 60) if getattr(duty, "end_time", None) is not None else 0,
-
+                    "start_hour": (
+                        (getattr(duty, "start_time", 0) // 60) if getattr(duty, "start_time", None) is not None else 0
+                    ),
+                    "end_hour": (
+                        (getattr(duty, "end_time", 0) // 60) if getattr(duty, "end_time", None) is not None else 0
+                    ),
                     # Campos de violação
                     "rest_violations": getattr(duty, "rest_violations", 0),
                     "shift_violations": getattr(duty, "shift_violations", 0),
                     "continuous_driving_violation": getattr(duty, "continuous_driving_violation", False),
-
                     # Campos de meta do duty (com fallback para inspeção de viagens)
                     "is_holiday": bool(
                         getattr(duty, "meta", {}).get("is_holiday", False)
-                        or any(getattr(t, "is_holiday", False) for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
+                        or any(
+                            getattr(t, "is_holiday", False)
+                            for t in getattr(duty, "all_trips", getattr(duty, "trips", []))
+                        )
                     ),
                     "is_sunday": bool(
                         getattr(duty, "meta", {}).get("is_sunday", False)
-                        or any(bool(getattr(t, "is_sunday", False)) for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
+                        or any(
+                            bool(getattr(t, "is_sunday", False))
+                            for t in getattr(duty, "all_trips", getattr(duty, "trips", []))
+                        )
                     ),
                     "is_nocturnal": getattr(duty, "nocturnal_minutes", 0) > 0,
                     "has_overtime": (getattr(duty, "overtime_minutes", 0) or 0) > 0,
-
                     # Contagens (protegidas com fallbacks para diferentes nomes de atributos)
                     "num_blocks": len(getattr(duty, "tasks", getattr(duty, "blocks", []))),
                     "num_trips": len(getattr(duty, "all_trips", getattr(duty, "trips", []))),
-
                     # Custos base (para condições baseadas em valor)
                     "base_work_cost": duty_work_cost,
                     "base_overtime_cost": duty_overtime_cost,
                     "base_total": (
-                        duty_work_cost + duty_guaranteed_cost + duty_waiting_cost
-                        + duty_overtime_cost + duty_long_break_penalty
-                        + duty_nocturnal_extra + duty_holiday_extra + duty_cct_penalties
+                        duty_work_cost
+                        + duty_guaranteed_cost
+                        + duty_waiting_cost
+                        + duty_overtime_cost
+                        + duty_long_break_penalty
+                        + duty_nocturnal_extra
+                        + duty_holiday_extra
+                        + duty_cct_penalties
                     ),
                 }
 
@@ -800,7 +811,7 @@ class CostEvaluator(ICostEvaluator):
         Inclui custo de tempo ocioso (pull-out/pull-back e idle entre viagens)."""
         vt_map = {vt.id: vt for vt in vehicle_types}
         vt = vt_map.get(block.vehicle_type_id or 0)  # type: ignore[arg-type]
-        cost = Decimal('0.0')
+        cost = Decimal("0.0")
         idle_cost_per_min = self.idle_cost_per_minute
         if vt:
             cost += self._to_decimal(vt.fixed_cost)
@@ -808,12 +819,16 @@ class CostEvaluator(ICostEvaluator):
                 components = self._vehicle_trip_components(vt, trip)
                 cost += components["distance"] + components["time"]  # Já são Decimal
                 # Custo do tempo ocioso antes/depois da viagem (pull-out/pull-back)
-                cost += (self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)) * idle_cost_per_min
+                cost += (
+                    self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)
+                ) * idle_cost_per_min
         else:
             # Custo fixo de ativação é por bloco, não por viagem
             cost += self.cost_vehicle
             for trip in block.trips:
                 components = self._vehicle_trip_components(None, trip)
                 cost += components["distance"] + components["time"]  # Já são Decimal
-                cost += (self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)) * idle_cost_per_min
+                cost += (
+                    self._to_decimal(trip.idle_before_minutes) + self._to_decimal(trip.idle_after_minutes)
+                ) * idle_cost_per_min
         return float(cost)

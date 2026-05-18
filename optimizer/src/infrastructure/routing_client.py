@@ -10,6 +10,7 @@ MELHORIA MATEMÁTICA v2.0 (DeepSeek R1 Analysis):
 - Fallback Haversine matricial quando OSRM está offline.
 - Cache Redis com TTL configurável por rota individual e por matriz.
 """
+
 import json
 import logging
 import math
@@ -30,7 +31,8 @@ class RoutingClient:
     Cliente de Roteamento Singleton com suporte a Matrix Routing.
     Prioridade: Cache Redis → OSRM Matrix API → Fallback Haversine.
     """
-    _instance: Optional['RoutingClient'] = None
+
+    _instance: Optional["RoutingClient"] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -50,7 +52,7 @@ class RoutingClient:
             logger.warning(f"Falha ao conectar no Redis. O cache de roteamento será desativado. Erro: {e}")
             self.redis = None
 
-        self.osrm_url = settings.osrm_url.rstrip('/')
+        self.osrm_url = settings.osrm_url.rstrip("/")
         self._initialized = True
 
     # ── Rota Individual (legacy, mantido para compatibilidade) ─────────────────
@@ -62,7 +64,7 @@ class RoutingClient:
         dest_lat: float,
         dest_lon: float,
         origin_id: Optional[int] = None,
-        destination_id: Optional[int] = None
+        destination_id: Optional[int] = None,
     ) -> Tuple[float, float]:
         """
         Retorna (distancia_km, duracao_min).
@@ -74,7 +76,7 @@ class RoutingClient:
                 cached_data = self.redis.get(cache_key)
                 if cached_data:
                     data = json.loads(cached_data)
-                    return data['distance_km'], data['duration_min']
+                    return data["distance_km"], data["duration_min"]
             except Exception as e:
                 logger.debug(f"Erro ao ler cache Redis: {e}")
 
@@ -85,10 +87,10 @@ class RoutingClient:
                 response = requests.get(url, timeout=(3.0, 10.0))
                 if response.status_code == 200:
                     result = response.json()
-                    if result.get('code') == 'Ok' and result.get('routes'):
-                        route = result['routes'][0]
-                        dist_km = route['distance'] / 1000.0
-                        dur_min = route['duration'] / 60.0
+                    if result.get("code") == "Ok" and result.get("routes"):
+                        route = result["routes"][0]
+                        dist_km = route["distance"] / 1000.0
+                        dur_min = route["duration"] / 60.0
                         self._save_to_cache(cache_key, dist_km, dur_min)
                         return dist_km, dur_min
                 else:
@@ -124,7 +126,7 @@ class RoutingClient:
             return {}
 
         location_ids = [loc[2] for loc in locations]
-        n = len(locations)
+        len(locations)
 
         # Tentar buscar matriz completa do cache Redis
         matrix_cache_key = self._matrix_cache_key(location_ids)
@@ -134,10 +136,7 @@ class RoutingClient:
                 if cached:
                     raw_matrix = json.loads(cached)
                     # Restaurar chaves de tupla (JSON serializa como strings)
-                    return {
-                        (int(k.split(",")[0]), int(k.split(",")[1])): float(v)
-                        for k, v in raw_matrix.items()
-                    }
+                    return {(int(k.split(",")[0]), int(k.split(",")[1])): float(v) for k, v in raw_matrix.items()}
             except Exception as e:
                 logger.debug(f"Erro ao ler matriz do cache Redis: {e}")
 
@@ -172,19 +171,17 @@ class RoutingClient:
             for j in range(0, n, batch_size):
                 sources = locations[i : i + batch_size]
                 destinations = locations[j : j + batch_size]
-                
+
                 source_ids = location_ids[i : i + batch_size]
                 dest_ids = location_ids[j : j + batch_size]
 
-                # Construir URL para este lote
-                batch_locations = sources + (destinations if i != j else [])
                 # coords: todos os sources seguidos de todos os destinations
                 all_coords = sources + destinations
                 coords_str = ";".join(f"{lon},{lat}" for lat, lon, _ in all_coords)
-                
+
                 source_indices = ";".join(str(idx) for idx in range(len(sources)))
                 dest_indices = ";".join(str(idx) for idx in range(len(sources), len(sources) + len(destinations)))
-                
+
                 url = (
                     f"{self.osrm_url}/table/v1/driving/{coords_str}?"
                     f"sources={source_indices}&destinations={dest_indices}&annotations=duration"
@@ -198,23 +195,23 @@ class RoutingClient:
                         continue
 
                     data = response.json()
-                    if data.get('code') != 'Ok':
+                    if data.get("code") != "Ok":
                         logger.warning(f"OSRM /table batch falhou: {data.get('message', 'Unknown')}")
                         continue
 
-                    durations = data.get('durations', [])
+                    durations = data.get("durations", [])
                     for row_idx, row in enumerate(durations):
                         for col_idx, dur_secs in enumerate(row):
                             origin_id = source_ids[row_idx]
                             dest_id = dest_ids[col_idx]
                             if origin_id == dest_id:
                                 continue
-                            
+
                             if dur_secs is None:
                                 full_matrix[(origin_id, dest_id)] = 999_999.0
                             else:
                                 full_matrix[(origin_id, dest_id)] = max(0.0, float(dur_secs) / 60.0)
-                                
+
                 except Exception as e:
                     logger.warning(f"Falha no lote OSRM ({i},{j}): {e}")
                     continue
@@ -256,11 +253,11 @@ class RoutingClient:
 
     def _matrix_cache_key(self, location_ids: List[int], cost_params_hash: str = "") -> str:
         """Chave de cache Redis para a matriz completa com versionamento.
-        
+
         Args:
             location_ids: IDs das localizações
             cost_params_hash: Hash dos parâmetros de custo atuais
-            
+
         Returns:
             Chave de cache versionada e única para esta combinação
         """
@@ -269,22 +266,22 @@ class RoutingClient:
             ids_hash = hash(tuple(sorted(location_ids)) + (cost_params_hash,))
         else:
             ids_hash = hash(tuple(sorted(location_ids)))
-        
+
         return f"route_matrix:v2:{abs(ids_hash)}"
 
     def _get_cost_params_hash(self) -> str:
         """Gera hash dos parâmetros de custo atuais para versionamento de cache.
-        
+
         Calcula um hash MD5 baseado nos parâmetros de custo atuais.
         Isso garante que mudanças nos custos invalidem automaticamente o cache.
         """
         import hashlib
         import json
-        
+
         params = {
-            "crew_cost": getattr(self.evaluator, 'crew_cost_per_hour', 25.0),
-            "vehicle_cost": getattr(self.evaluator, 'cost_km', 2.5),
-            "timestamp": int(time.time() // 3600)  # Muda a cada hora
+            "crew_cost": getattr(self.evaluator, "crew_cost_per_hour", 25.0),
+            "vehicle_cost": getattr(self.evaluator, "cost_km", 2.5),
+            "timestamp": int(time.time() // 3600),  # Muda a cada hora
         }
         return hashlib.md5(json.dumps(params).encode()).hexdigest()[:8]
 
@@ -313,7 +310,7 @@ class RoutingClient:
         if not self.redis:
             return
         try:
-            value = json.dumps({'distance_km': dist_km, 'duration_min': dur_min})
+            value = json.dumps({"distance_km": dist_km, "duration_min": dur_min})
             self.redis.setex(key, settings.routing_cache_ttl, value)
         except Exception as e:
             logger.debug(f"Erro ao salvar no cache Redis: {e}")
@@ -323,7 +320,10 @@ class RoutingClient:
         R = 6371.0
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
-        a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        )
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         distance_km = R * c
         # 15 km/h = 0.25 km/min

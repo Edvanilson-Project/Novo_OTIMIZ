@@ -10,9 +10,15 @@ describe('LinesController', () => {
 
   beforeEach(async () => {
     service = {
-      findAll: jest.fn().mockResolvedValue([{ id: 1, lineId: 'L1', name: 'Linha 1' }]),
-      findOne: jest.fn().mockResolvedValue({ id: 1, lineId: 'L1', name: 'Linha 1' }),
-      create: jest.fn().mockResolvedValue({ id: 2, lineId: 'L2', name: 'Linha 2' }),
+      findAll: jest
+        .fn()
+        .mockResolvedValue([{ id: 1, lineId: 'L1', name: 'Linha 1' }]),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 1, lineId: 'L1', name: 'Linha 1' }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 2, lineId: 'L2', name: 'Linha 2' }),
       update: jest.fn().mockResolvedValue({ id: 1, name: 'Updated' }),
       remove: jest.fn().mockResolvedValue(undefined),
     };
@@ -21,7 +27,8 @@ describe('LinesController', () => {
       controllers: [LinesController],
       providers: [{ provide: LinesService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(LinesController);

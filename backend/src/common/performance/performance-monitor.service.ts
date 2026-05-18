@@ -24,11 +24,36 @@ export class PerformanceMonitorService {
   private metrics: PerformanceMetric[] = [];
 
   private thresholds: PerformanceThreshold[] = [
-    { metric: 'schedule_generation', targetDuration: 5000, warning: 4000, critical: 6000 },
-    { metric: 'trip_assignment', targetDuration: 2000, warning: 1500, critical: 3000 },
-    { metric: 'scenario_evaluation', targetDuration: 3000, warning: 2500, critical: 4000 },
-    { metric: 'vehicle_optimization', targetDuration: 4000, warning: 3000, critical: 5000 },
-    { metric: 'constraint_validation', targetDuration: 1000, warning: 800, critical: 1500 },
+    {
+      metric: 'schedule_generation',
+      targetDuration: 5000,
+      warning: 4000,
+      critical: 6000,
+    },
+    {
+      metric: 'trip_assignment',
+      targetDuration: 2000,
+      warning: 1500,
+      critical: 3000,
+    },
+    {
+      metric: 'scenario_evaluation',
+      targetDuration: 3000,
+      warning: 2500,
+      critical: 4000,
+    },
+    {
+      metric: 'vehicle_optimization',
+      targetDuration: 4000,
+      warning: 3000,
+      critical: 5000,
+    },
+    {
+      metric: 'constraint_validation',
+      targetDuration: 1000,
+      warning: 800,
+      critical: 1500,
+    },
   ];
 
   recordMetric(name: string, duration: number): void {
@@ -67,7 +92,7 @@ export class PerformanceMonitorService {
 
   recordAsyncMetric(name: string): () => void {
     const startTime = Date.now();
-    const startMemory = process.memoryUsage();
+    const _startMemory = process.memoryUsage();
 
     return () => {
       const endTime = Date.now();
@@ -213,7 +238,12 @@ export class PerformanceMonitorService {
     this.metrics = [];
   }
 
-  setThreshold(metric: string, targetDuration: number, warning: number, critical: number): void {
+  setThreshold(
+    metric: string,
+    targetDuration: number,
+    warning: number,
+    critical: number,
+  ): void {
     const existing = this.thresholds.find((t) => t.metric === metric);
     if (existing) {
       existing.targetDuration = targetDuration;

@@ -30,8 +30,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     // Resposta padrão e opaca para o cliente (Segurança Anti-vazamento)
     const isErrorHttp = exception instanceof HttpException;
-    const message = isErrorHttp 
-      ? (exception as HttpException).getResponse() 
+    const message = isErrorHttp
+      ? exception.getResponse()
       : 'Erro interno do servidor';
 
     response.status(status).json({

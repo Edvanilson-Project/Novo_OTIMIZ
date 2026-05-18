@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
-import { ConfigModule } from '@nestjs/config';
 import { OperationsController } from './operations.controller';
 import { SolutionValidatorService } from './solution-validator.service';
 import { SolutionValidatorController } from './solution-validator.controller';
@@ -13,7 +12,10 @@ import { ScenarioEvaluatorService } from './optimization/scenario-evaluator.serv
 import { WhatIfSimulatorService } from './optimization/whatif-simulator.service';
 import { OperationReportController } from './reporting/operation-report.controller';
 import { OperationReportGeneratorService } from './reporting/operation-report-generator.service';
-import { TripRepository, DriverRepository } from '../database/repositories/operations.repository';
+import {
+  TripRepository,
+  DriverRepository,
+} from '../database/repositories/operations.repository';
 import { Trip } from '../database/entities/trip.entity';
 import { Driver } from '../database/entities/driver.entity';
 import { CompanyParameters } from '../database/entities/company-parameters.entity';

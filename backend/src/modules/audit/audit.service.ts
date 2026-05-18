@@ -35,15 +35,20 @@ export class AuditService {
     } catch (err) {
       this.logger.error(
         `[AUDIT-PERSIST-FAIL] action=${data.action} entity=${data.entity} ` +
-        `entityId=${data.entityId ?? '-'} userId=${data.userId ?? '-'} ` +
-        `companyId=${data.companyId ?? '-'} error=${(err as Error).message}`,
+          `entityId=${data.entityId ?? '-'} userId=${data.userId ?? '-'} ` +
+          `companyId=${data.companyId ?? '-'} error=${(err as Error).message}`,
       );
     }
   }
 
   async findByCompany(
     companyId: number,
-    opts: { entity?: string; days?: number; page?: number; limit?: number } = {},
+    opts: {
+      entity?: string;
+      days?: number;
+      page?: number;
+      limit?: number;
+    } = {},
   ) {
     const { entity, days = 30, page = 1, limit = 50 } = opts;
     const since = new Date();

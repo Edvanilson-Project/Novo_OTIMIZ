@@ -6,7 +6,12 @@ import { OptimizationService } from '../optimization.service';
 import { TenantContext } from '../../../common/context/tenant-context';
 
 export interface WhatIfScenario {
-  type: 'vehicle_type_change' | 'time_shift' | 'trip_removal' | 'trip_addition' | 'parameter_change';
+  type:
+    | 'vehicle_type_change'
+    | 'time_shift'
+    | 'trip_removal'
+    | 'trip_addition'
+    | 'parameter_change';
   description: string;
   affectedElements: string[];
 }
@@ -59,7 +64,8 @@ export class WhatIfSimulatorService {
   ): WhatIfResult {
     const costDifference = (toTypeCost - fromTypeCost) * tripCount;
     const newCost = originalCost + costDifference;
-    const percent = originalCost > 0 ? (costDifference / originalCost) * 100 : 0;
+    const percent =
+      originalCost > 0 ? (costDifference / originalCost) * 100 : 0;
 
     return {
       scenario: {
@@ -71,7 +77,8 @@ export class WhatIfSimulatorService {
       newCost,
       costDifference,
       costDifferencePercent: percent,
-      feasible: originalCost > 0 ? newCost <= originalCost * 1.2 : costDifference <= 0,
+      feasible:
+        originalCost > 0 ? newCost <= originalCost * 1.2 : costDifference <= 0,
       warnings:
         percent > 10
           ? [`Custo aumentará em ${Math.abs(percent).toFixed(1)}%`]
@@ -79,7 +86,9 @@ export class WhatIfSimulatorService {
       recommendations:
         percent > 0
           ? [`Considere revisar utilização do veículo mais caro`]
-          : [`Mudança resultará em economias de R$ ${Math.abs(costDifference).toFixed(2)}`],
+          : [
+              `Mudança resultará em economias de R$ ${Math.abs(costDifference).toFixed(2)}`,
+            ],
       isHeuristic: true, // cálculo escalar; reotimização real exige refator de payload de trips
     };
   }
@@ -103,7 +112,8 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference,
-      costDifferencePercent: originalCost > 0 ? (costDifference / originalCost) * 100 : 0,
+      costDifferencePercent:
+        originalCost > 0 ? (costDifference / originalCost) * 100 : 0,
       feasible: shiftMinutes >= -120 && shiftMinutes <= 120, // ±2 hours
       warnings:
         Math.abs(shiftMinutes) > 60
@@ -124,7 +134,8 @@ export class WhatIfSimulatorService {
     vehicleUsageCount: number,
   ): WhatIfResult {
     // Removing a trip reduces cost, but might still need vehicle
-    const costSavings = vehicleUsageCount > 1 ? tripCost : tripCost + vehicleFixedCost;
+    const costSavings =
+      vehicleUsageCount > 1 ? tripCost : tripCost + vehicleFixedCost;
     const newCost = originalCost - costSavings;
 
     return {
@@ -136,7 +147,8 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference: -costSavings,
-      costDifferencePercent: originalCost > 0 ? (-costSavings / originalCost) * 100 : 0,
+      costDifferencePercent:
+        originalCost > 0 ? (-costSavings / originalCost) * 100 : 0,
       feasible: false, // Trip removal is not feasible for operational schedules
       warnings: [`Remoção de viagem não é recomendada`],
       recommendations: [`Avaliar se viagem é essencial antes de remover`],
@@ -167,10 +179,13 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference: additionalCost,
-      costDifferencePercent: originalCost > 0 ? (additionalCost / originalCost) * 100 : 0,
+      costDifferencePercent:
+        originalCost > 0 ? (additionalCost / originalCost) * 100 : 0,
       feasible: true,
       warnings: willNeedNewVehicle ? [`Requer novo veículo`] : [],
-      recommendations: [`Viagem adicionada aumentará custo em R$ ${additionalCost.toFixed(2)}`],
+      recommendations: [
+        `Viagem adicionada aumentará custo em R$ ${additionalCost.toFixed(2)}`,
+      ],
       isHeuristic: true,
     };
   }
@@ -204,7 +219,9 @@ export class WhatIfSimulatorService {
       originalCost,
       newCost,
       costDifference,
-      costDifferencePercent: parseFloat(((costMultiplier - 1) * 100).toFixed(1)),
+      costDifferencePercent: parseFloat(
+        ((costMultiplier - 1) * 100).toFixed(1),
+      ),
       feasible: true,
       warnings:
         Math.abs(costMultiplier - 1) > 0.05
@@ -236,8 +253,13 @@ export class WhatIfSimulatorService {
   ): Promise<WhatIfRunResult> {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId) throw new NotFoundException('Empresa não identificada.');
-    const baseline = await this.scheduleRepo.findOne({ where: { id: baselineScheduleId, companyId } });
-    if (!baseline) throw new NotFoundException(`Schedule ${baselineScheduleId} não encontrado.`);
+    const baseline = await this.scheduleRepo.findOne({
+      where: { id: baselineScheduleId, companyId },
+    });
+    if (!baseline)
+      throw new NotFoundException(
+        `Schedule ${baselineScheduleId} não encontrado.`,
+      );
 
     const scenarioId = `whatif-${label || 'param-change'}-${Date.now()}`;
     const submission: any = await this.optimizationService.runOptimization(

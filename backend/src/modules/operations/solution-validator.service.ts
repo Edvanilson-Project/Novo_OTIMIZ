@@ -161,7 +161,8 @@ export class SolutionValidatorService {
               vehicleId,
               tripIds: [trip1.tripId, trip2.tripId],
               detail: `Gap ${gap}min < required ${this.toleranceMinutes}min`,
-              suggestedFix: 'Increase gap between trips or assign to different vehicle',
+              suggestedFix:
+                'Increase gap between trips or assign to different vehicle',
             });
           }
         }
@@ -211,7 +212,8 @@ export class SolutionValidatorService {
     params: Record<string, any>,
   ): ValidationError[] {
     const warnings: ValidationError[] = [];
-    const mealBreakMinutes = params.meal_break_minutes ?? params.mealBreakMinutes ?? 30;
+    const mealBreakMinutes =
+      params.meal_break_minutes ?? params.mealBreakMinutes ?? 30;
     const mealBreakThreshold = params.meal_break_threshold ?? 360; // 6h
 
     for (const duty of duties) {
@@ -239,14 +241,25 @@ export class SolutionValidatorService {
   /**
    * Carrega blocos/jornadas/viagens do banco e valida o schedule salvo.
    */
-  async validateScheduleById(scheduleId: number, companyId: number): Promise<ValidationResult> {
+  async validateScheduleById(
+    scheduleId: number,
+    companyId: number,
+  ): Promise<ValidationResult> {
     const [blocks, duties] = await Promise.all([
-      this.blockRepo.find({ where: { scheduleId, companyId }, order: { blockId: 'ASC' } }),
-      this.dutyRepo.find({ where: { scheduleId, companyId }, order: { dutyId: 'ASC' } }),
+      this.blockRepo.find({
+        where: { scheduleId, companyId },
+        order: { blockId: 'ASC' },
+      }),
+      this.dutyRepo.find({
+        where: { scheduleId, companyId },
+        order: { dutyId: 'ASC' },
+      }),
     ]);
 
     if (!blocks.length && !duties.length) {
-      throw new NotFoundException(`Schedule ${scheduleId} não encontrado ou sem dados para a empresa ${companyId}`);
+      throw new NotFoundException(
+        `Schedule ${scheduleId} não encontrado ou sem dados para a empresa ${companyId}`,
+      );
     }
 
     const allTripIds = [
@@ -259,7 +272,14 @@ export class SolutionValidatorService {
     const trips = allTripIds.length
       ? await this.tripRepo.find({
           where: { id: In(allTripIds) },
-          select: { id: true, startTime: true, endTime: true, duration: true, originId: true, destinationId: true },
+          select: {
+            id: true,
+            startTime: true,
+            endTime: true,
+            duration: true,
+            originId: true,
+            destinationId: true,
+          },
         })
       : [];
 
@@ -269,7 +289,11 @@ export class SolutionValidatorService {
       trips: (b.tripIds ?? []).map((id) => {
         const t = trips.find((tr) => tr.id === id);
         return t
-          ? { tripId: t.id, startTime: Number(t.startTime), endTime: Number(t.endTime) }
+          ? {
+              tripId: t.id,
+              startTime: Number(t.startTime),
+              endTime: Number(t.endTime),
+            }
           : { tripId: id };
       }),
       ...(b.metadata ?? {}),
@@ -282,7 +306,16 @@ export class SolutionValidatorService {
     }));
 
     const params = {}; // usa defaults do serviço
-    return this.validate(blocksDto, dutiesDto, trips.map((t) => ({ id: t.id, startTime: t.startTime, endTime: t.endTime })), params);
+    return this.validate(
+      blocksDto,
+      dutiesDto,
+      trips.map((t) => ({
+        id: t.id,
+        startTime: t.startTime,
+        endTime: t.endTime,
+      })),
+      params,
+    );
   }
 
   /**
@@ -299,14 +332,11 @@ export class SolutionValidatorService {
     }
 
     const totalTrips = trips.length;
-    const totalOperatorHours = duties.reduce(
-      (sum, duty) => {
-        const start = duty.startTime;
-        const end = duty.endTime;
-        return sum + (start && end ? (end - start) / 60 : 0);
-      },
-      0,
-    );
+    const totalOperatorHours = duties.reduce((sum, duty) => {
+      const start = duty.startTime;
+      const end = duty.endTime;
+      return sum + (start && end ? (end - start) / 60 : 0);
+    }, 0);
 
     return {
       totalTrips,

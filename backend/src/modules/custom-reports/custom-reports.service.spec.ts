@@ -2,8 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CustomReportsService } from './custom-reports.service';
-import { CustomReport, CustomReportFormat } from '../database/entities/custom-report.entity';
-import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
+import {
+  CustomReport,
+  CustomReportFormat,
+} from '../database/entities/custom-report.entity';
+import { Schedule } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
 import { Line } from '../database/entities/line.entity';
 import { TenantContext } from '../../common/context/tenant-context';
@@ -20,7 +23,9 @@ describe('CustomReportsService', () => {
       find: jest.fn(),
       findOne: jest.fn(),
       create: jest.fn((dto) => ({ ...dto, id: 1 })),
-      save: jest.fn((entity) => Promise.resolve({ ...entity, id: entity.id ?? 1 })),
+      save: jest.fn((entity) =>
+        Promise.resolve({ ...entity, id: entity.id ?? 1 }),
+      ),
       remove: jest.fn(),
     };
     scheduleRepo = { count: jest.fn(), find: jest.fn().mockResolvedValue([]) };
@@ -43,8 +48,12 @@ describe('CustomReportsService', () => {
 
   describe('create', () => {
     it('valida que metrics é lista não-vazia', async () => {
-      await expect(service.create({ name: 'r1', metrics: [] })).rejects.toThrow(BadRequestException);
-      await expect(service.create({ name: 'r1' })).rejects.toThrow(BadRequestException);
+      await expect(service.create({ name: 'r1', metrics: [] })).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.create({ name: 'r1' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejeita métrica não suportada', async () => {
@@ -54,7 +63,10 @@ describe('CustomReportsService', () => {
     });
 
     it('cria template com defaults', async () => {
-      const result = await service.create({ name: 'r1', metrics: ['totalRuns'] });
+      const result = await service.create({
+        name: 'r1',
+        metrics: ['totalRuns'],
+      });
       expect(reportRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           companyId: 7,
@@ -78,7 +90,9 @@ describe('CustomReportsService', () => {
     it('só retorna do próprio tenant', async () => {
       reportRepo.findOne.mockResolvedValue({ id: 1, companyId: 7, name: 'r' });
       const result = await service.findOne(1);
-      expect(reportRepo.findOne).toHaveBeenCalledWith({ where: { id: 1, companyId: 7 } });
+      expect(reportRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 1, companyId: 7 },
+      });
       expect(result.name).toBe('r');
     });
   });
@@ -87,12 +101,15 @@ describe('CustomReportsService', () => {
     it('preview com totalRuns/completedRuns/successRate calcula corretamente', async () => {
       scheduleRepo.count
         .mockResolvedValueOnce(10) // total
-        .mockResolvedValueOnce(7)  // completed
+        .mockResolvedValueOnce(7) // completed
         .mockResolvedValueOnce(2); // failed
 
-      const result = await service.preview(['totalRuns', 'completedRuns', 'failedRuns', 'successRate'], {
-        dateRangeDays: 30,
-      });
+      const result = await service.preview(
+        ['totalRuns', 'completedRuns', 'failedRuns', 'successRate'],
+        {
+          dateRangeDays: 30,
+        },
+      );
 
       expect(result.totalRuns).toBe(10);
       expect(result.completedRuns).toBe(7);
@@ -116,7 +133,10 @@ describe('CustomReportsService', () => {
         { metadata: { num_vehicles: 14, num_crew: 18 }, totalCost: '2000.00' },
       ]);
 
-      const result = await service.preview(['avgVehicles', 'avgCrew', 'avgCost'], {});
+      const result = await service.preview(
+        ['avgVehicles', 'avgCrew', 'avgCost'],
+        {},
+      );
 
       expect(result.avgVehicles).toBe(12);
       expect(result.avgCrew).toBe(15);
@@ -132,8 +152,17 @@ describe('CustomReportsService', () => {
 
   describe('toPdf', () => {
     it('produz Buffer com header PDF válido', async () => {
-      const report: any = { id: 1, name: 'r1', description: 'desc', filters: { dateRangeDays: 30 } };
-      const payload = { generatedAt: '2026-05-14T12:00:00Z', filters: { dateRangeDays: 30 }, totalRuns: 10 };
+      const report: any = {
+        id: 1,
+        name: 'r1',
+        description: 'desc',
+        filters: { dateRangeDays: 30 },
+      };
+      const payload = {
+        generatedAt: '2026-05-14T12:00:00Z',
+        filters: { dateRangeDays: 30 },
+        totalRuns: 10,
+      };
       const buf = await service.toPdf(report, payload);
       expect(Buffer.isBuffer(buf)).toBe(true);
       expect(buf.length).toBeGreaterThan(100);

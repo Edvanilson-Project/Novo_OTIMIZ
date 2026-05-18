@@ -1,16 +1,16 @@
 """
 Classe base para todos os algoritmos com utilidades comuns.
 """
+
 from __future__ import annotations
 
 import itertools
 import logging
 import time
-from typing import List, Optional
+from typing import Optional
 
 from ..core.config import get_settings
 from ..core.exceptions import AlgorithmTimeoutError
-from ..domain.models import Trip
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

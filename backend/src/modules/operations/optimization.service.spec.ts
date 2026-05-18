@@ -47,10 +47,16 @@ describe('OptimizationService polling', () => {
       scheduleRepo as any, // ScheduleRepo
       noopRepo as any, // VehicleTypeRepo
       noopRepo as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
 
@@ -67,12 +73,18 @@ describe('OptimizationService polling', () => {
   });
 
   it('nao agenda um novo poll enquanto o anterior ainda esta em andamento', async () => {
-    ((service as any).persistResults as jest.Mock).mockResolvedValueOnce('completed');
+    ((service as any).persistResults as jest.Mock).mockResolvedValueOnce(
+      'completed',
+    );
     mockedAxios.get
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
-            setTimeout(() => resolve({ data: { status: 'processing', progress_pct: 35 } }), 1000);
+            setTimeout(
+              () =>
+                resolve({ data: { status: 'processing', progress_pct: 35 } }),
+              1000,
+            );
           }) as any,
       )
       .mockResolvedValueOnce({
@@ -84,13 +96,16 @@ describe('OptimizationService polling', () => {
 
     (service as any).pollOptimizerTask('task-1', 259, 16);
 
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(mockedAxios.get).toHaveBeenCalledTimes(1);
 
     await jest.advanceTimersByTimeAsync(5000);
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(mockedAxios.get).toHaveBeenCalledTimes(1);
 
     await jest.advanceTimersByTimeAsync(1000);
     await jest.advanceTimersByTimeAsync(5000);
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
 
     await Promise.resolve();
@@ -107,11 +122,16 @@ describe('OptimizationService polling', () => {
     expect(gateway.notifyOptimizationFinished).toHaveBeenCalledWith(16, 259, {
       status: 'completed',
     });
-    expect(scheduleRepo.update).not.toHaveBeenCalledWith(259, expect.objectContaining({ status: expect.anything() }));
+    expect(scheduleRepo.update).not.toHaveBeenCalledWith(
+      259,
+      expect.objectContaining({ status: expect.anything() }),
+    );
   });
 
   it('marca a execucao como failed quando o resultado concluido vem com hard violation', async () => {
-    ((service as any).persistResults as jest.Mock).mockResolvedValueOnce('failed');
+    ((service as any).persistResults as jest.Mock).mockResolvedValueOnce(
+      'failed',
+    );
     mockedAxios.get.mockResolvedValueOnce({
       data: {
         status: 'completed',
@@ -268,11 +288,15 @@ describe('OptimizationService polling', () => {
     };
     const scheduleRepoLocal = {
       findOne: jest.fn().mockResolvedValueOnce(null),
-      save: jest.fn().mockResolvedValue({ id: 91, companyId: 16, status: 'processing' }),
+      save: jest
+        .fn()
+        .mockResolvedValue({ id: 91, companyId: 16, status: 'processing' }),
       update: jest.fn().mockResolvedValue(undefined),
     };
 
-    mockedAxios.post.mockResolvedValueOnce({ data: { task_id: 'task-group-sync' } } as any);
+    mockedAxios.post.mockResolvedValueOnce({
+      data: { task_id: 'task-group-sync' },
+    } as any);
 
     const localService = new OptimizationService(
       tripRepo as any,
@@ -281,10 +305,16 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any,
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
       { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any,
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any,
       { getCompanyId: jest.fn() } as any,
     );
     (localService as any).pollOptimizerTask = jest.fn();
@@ -321,7 +351,9 @@ describe('OptimizationService polling', () => {
     });
     expect(payload.cct_params.group_infeasibility_mode).toBe('production');
     expect(payload.vsp_params.group_infeasibility_mode).toBe('production');
-    expect(payload.optimization_params.group_infeasibility_mode).toBe('production');
+    expect(payload.optimization_params.group_infeasibility_mode).toBe(
+      'production',
+    );
     expect(payload.optimization_params.random_seed).toBe(42);
     expect(payload.optimization_params.pricing_enabled).toBe(true);
     expect(payload.optimization_params.use_set_covering).toBe(true);
@@ -340,10 +372,16 @@ describe('OptimizationService polling', () => {
       {} as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
-      { transaction: async (cb: any) => cb(manager) } as any, // DataSource
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
+      { transaction: (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -423,10 +461,16 @@ describe('OptimizationService polling', () => {
       {} as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
-      { transaction: async (cb: any) => cb(manager) } as any, // DataSource
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
+      { transaction: (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -548,14 +592,21 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any, // ScheduleRepo
       {} as any, // VehicleTypeRepo
       {} as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
       {
-        getRepository: jest.fn()
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
+      {
+        getRepository: jest
+          .fn()
           .mockReturnValueOnce(mockedBlockRepo)
           .mockReturnValueOnce(mockedDutyRepo),
       } as any, // DataSource
       gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
     (localService as any).logger = {
@@ -568,7 +619,9 @@ describe('OptimizationService polling', () => {
 
     expect(latest.resultSummary.chosen_scenario).toBe('lowest_cost');
     expect(latest.resultSummary.operational_quality_mode).toBe('optimized');
-    expect(latest.resultSummary.rejected_scenarios).toEqual([{ scenario_id: 'current_plan' }]);
+    expect(latest.resultSummary.rejected_scenarios).toEqual([
+      { scenario_id: 'current_plan' },
+    ]);
     expect(latest.resultSummary.operational_quality_decision).toEqual(
       expect.objectContaining({
         mode: 'optimized',
@@ -610,77 +663,96 @@ describe('OptimizationService polling', () => {
     );
   });
 
-  it.each([
-    ['strict'],
-    ['balanced'],
-    ['optimized'],
-  ])('envia override operational_quality_mode=%s ao optimizer', async (mode) => {
-    mockedAxios.post.mockReset();
-    mockedAxios.post.mockResolvedValueOnce({ data: { task_id: `task-${mode}` } } as any);
+  it.each([['strict'], ['balanced'], ['optimized']])(
+    'envia override operational_quality_mode=%s ao optimizer',
+    async (mode) => {
+      mockedAxios.post.mockReset();
+      mockedAxios.post.mockResolvedValueOnce({
+        data: { task_id: `task-${mode}` },
+      } as any);
 
-    const tripRepo = {
-      find: jest.fn().mockResolvedValue([
+      const tripRepo = {
+        find: jest.fn().mockResolvedValue([
+          {
+            id: 1,
+            tripId: 1001,
+            lineId: 11,
+            lineCode: '11',
+            tripGroupId: null,
+            direction: 'outbound',
+            startTime: 100,
+            endTime: 150,
+            originId: 10,
+            destinationId: 20,
+            duration: 50,
+            distanceKm: 12,
+          },
+        ]),
+      };
+      const scheduleRepoLocal = {
+        findOne: jest.fn().mockResolvedValueOnce(null),
+        save: jest
+          .fn()
+          .mockResolvedValue({ id: 901, companyId: 16, status: 'processing' }),
+        update: jest.fn().mockResolvedValue(undefined),
+      };
+      const localService = new OptimizationService(
+        tripRepo as any, // TripRepo
+        { find: jest.fn().mockResolvedValue([]) } as any, // DriverRepo
         {
-          id: 1,
-          tripId: 1001,
-          lineId: 11,
-          lineCode: '11',
-          tripGroupId: null,
-          direction: 'outbound',
-          startTime: 100,
-          endTime: 150,
-          originId: 10,
-          destinationId: 20,
-          duration: 50,
-          distanceKm: 12,
-        },
-      ]),
-    };
-    const scheduleRepoLocal = {
-      findOne: jest.fn().mockResolvedValueOnce(null),
-      save: jest.fn().mockResolvedValue({ id: 901, companyId: 16, status: 'processing' }),
-      update: jest.fn().mockResolvedValue(undefined),
-    };
-    const localService = new OptimizationService(
-      tripRepo as any, // TripRepo
-      { find: jest.fn().mockResolvedValue([]) } as any, // DriverRepo
-      {
-        findOne: jest.fn().mockResolvedValue({
-          force_round_trip: true,
-          allow_vehicle_swap: true,
-          random_seed: 42,
-        }),
-      } as any, // CompanyParametersRepo
-      scheduleRepoLocal as any, // ScheduleRepo
-      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
-      { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
-      {} as any, // DataSource
-      gateway as any, // OptimizationGateway
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any, // ConfigService
-      { getCompanyId: jest.fn() } as any, // TenantContext
-    );
-    (localService as any).pollOptimizerTask = jest.fn();
-    (localService as any).logger = {
-      warn: jest.fn(),
-      error: jest.fn(),
-      log: jest.fn(),
-    };
+          findOne: jest.fn().mockResolvedValue({
+            force_round_trip: true,
+            allow_vehicle_swap: true,
+            random_seed: 42,
+          }),
+        } as any, // CompanyParametersRepo
+        scheduleRepoLocal as any, // ScheduleRepo
+        { find: jest.fn().mockResolvedValue([]) } as any, // VehicleTypeRepo
+        { find: jest.fn().mockResolvedValue([]) } as any, // VehicleRepo
+        {
+          save: jest.fn().mockResolvedValue({ id: 7777 }),
+          update: jest.fn().mockResolvedValue(undefined),
+          findOne: jest.fn().mockResolvedValue(null),
+        } as any, // OptimizationRunRepo
+        {} as any, // DataSource
+        gateway as any, // OptimizationGateway
+        {
+          get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        } as any, // ConfigService
+        { getCompanyId: jest.fn() } as any, // TenantContext
+      );
+      (localService as any).pollOptimizerTask = jest.fn();
+      (localService as any).logger = {
+        warn: jest.fn(),
+        error: jest.fn(),
+        log: jest.fn(),
+      };
 
-    await localService.runOptimization(16, 'hybrid_pipeline', mode);
+      await localService.runOptimization(16, 'hybrid_pipeline', mode);
 
-    const payload = mockedAxios.post.mock.calls[0][1] as any;
-    const pollingContext = ((localService as any).pollOptimizerTask as jest.Mock).mock.calls[0][3];
-    expect(payload.optimization_params.operational_quality_mode).toBe(mode);
-    expect(payload.request_metadata.operational_quality_mode).toBe(mode);
-    expect(payload.request_metadata.requested_operational_quality_mode).toBe(mode);
-    expect(payload.request_metadata.effective_operational_quality_mode).toBe(mode);
-    expect(pollingContext.request_metadata.operational_quality_mode).toBe(mode);
-  });
+      const payload = mockedAxios.post.mock.calls[0][1] as any;
+      const pollingContext = (
+        (localService as any).pollOptimizerTask as jest.Mock
+      ).mock.calls[0][3];
+      expect(payload.optimization_params.operational_quality_mode).toBe(mode);
+      expect(payload.request_metadata.operational_quality_mode).toBe(mode);
+      expect(payload.request_metadata.requested_operational_quality_mode).toBe(
+        mode,
+      );
+      expect(payload.request_metadata.effective_operational_quality_mode).toBe(
+        mode,
+      );
+      expect(pollingContext.request_metadata.operational_quality_mode).toBe(
+        mode,
+      );
+    },
+  );
 
   it('usa modo persistido quando nao ha override e cai para balanced quando nao existe persisted', async () => {
     mockedAxios.post.mockReset();
-    mockedAxios.post.mockResolvedValue({ data: { task_id: 'task-default-mode' } } as any);
+    mockedAxios.post.mockResolvedValue({
+      data: { task_id: 'task-default-mode' },
+    } as any);
 
     const tripRepo = {
       find: jest.fn().mockResolvedValue([
@@ -701,14 +773,23 @@ describe('OptimizationService polling', () => {
       ]),
     };
     const scheduleRepoLocal = {
-      findOne: jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null),
-      save: jest.fn()
+      findOne: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null),
+      save: jest
+        .fn()
         .mockResolvedValueOnce({ id: 902, companyId: 16, status: 'processing' })
-        .mockResolvedValueOnce({ id: 903, companyId: 16, status: 'processing' }),
+        .mockResolvedValueOnce({
+          id: 903,
+          companyId: 16,
+          status: 'processing',
+        }),
       update: jest.fn().mockResolvedValue(undefined),
     };
     const paramRepo = {
-      findOne: jest.fn()
+      findOne: jest
+        .fn()
         .mockResolvedValueOnce({
           force_round_trip: true,
           allow_vehicle_swap: true,
@@ -731,10 +812,16 @@ describe('OptimizationService polling', () => {
       scheduleRepoLocal as any,
       noopMock as any, // VehicleTypeRepo
       noopMock as any, // VehicleRepo
-      { save: jest.fn().mockResolvedValue({ id: 7777 }), update: jest.fn().mockResolvedValue(undefined), findOne: jest.fn().mockResolvedValue(null) } as any, // OptimizationRunRepo
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any, // OptimizationRunRepo
       {} as any,
       gateway as any,
-      { get: jest.fn().mockReturnValue('test-strong-key-for-specs-only') } as any,
+      {
+        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+      } as any,
       { getCompanyId: jest.fn() } as any,
     );
     (localService as any).pollOptimizerTask = jest.fn();
@@ -750,12 +837,18 @@ describe('OptimizationService polling', () => {
     const payloadWithPersisted = mockedAxios.post.mock.calls[0][1] as any;
     const payloadWithFallback = mockedAxios.post.mock.calls[1][1] as any;
 
-    expect(payloadWithPersisted.optimization_params.operational_quality_mode).toBe('optimized');
-    expect(payloadWithFallback.optimization_params.operational_quality_mode).toBe('balanced');
+    expect(
+      payloadWithPersisted.optimization_params.operational_quality_mode,
+    ).toBe('optimized');
+    expect(
+      payloadWithFallback.optimization_params.operational_quality_mode,
+    ).toBe('balanced');
   });
 
   it('mantem codigo de erro quando o polling atinge timeout controlado', async () => {
-    mockedAxios.get.mockResolvedValue({ data: { status: 'processing' } } as any);
+    mockedAxios.get.mockResolvedValue({
+      data: { status: 'processing' },
+    } as any);
     (service as any).persistFailure = jest.fn().mockResolvedValue(undefined);
 
     (service as any).pollOptimizerTask('task-timeout', 777, 16, {

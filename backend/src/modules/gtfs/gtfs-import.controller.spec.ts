@@ -8,7 +8,11 @@ describe('GtfsImportController', () => {
   let controller: GtfsImportController;
   let service: jest.Mocked<Partial<GtfsImportService>>;
 
-  const mockResult = { imported: { terminals: 3, lines: 2, trips: 10 }, skipped: 1, errors: [] };
+  const mockResult = {
+    imported: { terminals: 3, lines: 2, trips: 10 },
+    skipped: 1,
+    errors: [],
+  };
 
   beforeEach(async () => {
     service = {
@@ -19,7 +23,8 @@ describe('GtfsImportController', () => {
       controllers: [GtfsImportController],
       providers: [{ provide: GtfsImportService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(GtfsImportController);
@@ -29,10 +34,14 @@ describe('GtfsImportController', () => {
     const file = { buffer: Buffer.from('zip') } as Express.Multer.File;
     const result = await controller.import(file);
     expect(service.importFromBuffer).toHaveBeenCalledWith(file.buffer);
-    expect(result).toMatchObject({ imported: { terminals: 3, lines: 2, trips: 10 } });
+    expect(result).toMatchObject({
+      imported: { terminals: 3, lines: 2, trips: 10 },
+    });
   });
 
   it('throws BadRequestException when no file provided', async () => {
-    await expect(controller.import(undefined as any)).rejects.toThrow(BadRequestException);
+    await expect(controller.import(undefined as any)).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

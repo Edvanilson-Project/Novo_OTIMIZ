@@ -10,6 +10,8 @@ export class AddDepotIdToTrip1716000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "trips" DROP COLUMN IF EXISTS "depotId"`);
+    await queryRunner.query(
+      `ALTER TABLE "trips" DROP COLUMN IF EXISTS "depotId"`,
+    );
   }
 }

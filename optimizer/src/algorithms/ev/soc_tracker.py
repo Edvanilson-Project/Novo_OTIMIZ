@@ -8,15 +8,16 @@ Saída: relatório por bloco com SoC inicial/final por viagem,
 Usado pelo reports layer e pela resposta de otimização quando
 o VehicleType é EV (is_electric=True).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from ...domain.models import Block, Trip, VehicleType, VSPSolution
+from ...domain.models import Block, VehicleType, VSPSolution
 
 _DEFAULT_KWH_PER_KM = 1.8
-_DEFAULT_CHARGE_EFFICIENCY = 0.90   # eficiência de recarga (90%)
+_DEFAULT_CHARGE_EFFICIENCY = 0.90  # eficiência de recarga (90%)
 
 
 @dataclass
@@ -27,7 +28,7 @@ class TripSoCEvent:
     distance_km: float
     soc_before_kwh: float
     energy_consumed_kwh: float
-    gap_minutes: int             # gap para próxima trip (0 se última)
+    gap_minutes: int  # gap para próxima trip (0 se última)
     energy_recharged_kwh: float  # energia recuperada no gap
     soc_after_kwh: float
     below_minimum: bool
@@ -173,7 +174,8 @@ class EVSoCTracker:
                 nxt_trip = trips[i + 1]
                 gap = nxt_trip.start_time - trip.end_time
                 at_charger = bool(
-                    self.charger_location_ids and (
+                    self.charger_location_ids
+                    and (
                         trip.destination_id in self.charger_location_ids
                         or nxt_trip.origin_id in self.charger_location_ids
                     )
@@ -187,18 +189,20 @@ class EVSoCTracker:
 
             soc_final = soc_after_trip + recharged
 
-            events.append(TripSoCEvent(
-                trip_id=trip.id,
-                start_time=trip.start_time,
-                end_time=trip.end_time,
-                distance_km=trip.distance_km,
-                soc_before_kwh=soc_before,
-                energy_consumed_kwh=kwh_needed,
-                gap_minutes=gap,
-                energy_recharged_kwh=recharged,
-                soc_after_kwh=soc_final,
-                below_minimum=below_min,
-            ))
+            events.append(
+                TripSoCEvent(
+                    trip_id=trip.id,
+                    start_time=trip.start_time,
+                    end_time=trip.end_time,
+                    distance_km=trip.distance_km,
+                    soc_before_kwh=soc_before,
+                    energy_consumed_kwh=kwh_needed,
+                    gap_minutes=gap,
+                    energy_recharged_kwh=recharged,
+                    soc_after_kwh=soc_final,
+                    below_minimum=below_min,
+                )
+            )
 
             if soc_after_trip < min_soc_reached:
                 min_soc_reached = soc_after_trip

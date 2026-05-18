@@ -1,5 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
-import { Throttle, SkipThrottle } from '@nestjs/throttler';
+import { SkipThrottle } from '@nestjs/throttler';
 import { DataSource } from 'typeorm';
 import { AppService } from './app.service';
 import { Public } from './common/decorators/roles.decorator';

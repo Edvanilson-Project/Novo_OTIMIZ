@@ -1,4 +1,7 @@
-import { VehicleAvailabilityWindow, AvailabilityReason } from './vehicle-availability-window.entity';
+import {
+  VehicleAvailabilityWindow,
+  AvailabilityReason,
+} from './vehicle-availability-window.entity';
 
 describe('VehicleAvailabilityWindow Entity', () => {
   it('should create an instance', () => {

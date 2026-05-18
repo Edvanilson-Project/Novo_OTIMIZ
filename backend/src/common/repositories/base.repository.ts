@@ -1,4 +1,10 @@
-import { Repository, FindManyOptions, FindOneOptions, ObjectLiteral, FindOptionsWhere } from 'typeorm';
+import {
+  Repository,
+  FindManyOptions,
+  FindOneOptions,
+  ObjectLiteral,
+  FindOptionsWhere,
+} from 'typeorm';
 import { TenantContext } from '../context/tenant-context';
 
 export class BaseRepository<T extends ObjectLiteral> extends Repository<T> {

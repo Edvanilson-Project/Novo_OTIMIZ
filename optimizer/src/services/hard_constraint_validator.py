@@ -6,6 +6,7 @@ Objetivo:
 - auditar a solução VSP/CSP final
 - transformar erros críticos em relatório estruturado
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -110,14 +111,14 @@ class HardConstraintValidator:
             or 0
         )
         inter_shift = max(int(cct_params.get("inter_shift_rest_minutes", 660) or 660), 660)
-        enforce_same_depot = bool(cct_params.get("enforce_same_depot_start_end", False) or vsp_params.get("same_depot_required", False))
+        enforce_same_depot = bool(
+            cct_params.get("enforce_same_depot_start_end", False) or vsp_params.get("same_depot_required", False)
+        )
         enforce_single_line_duty = bool(cct_params.get("enforce_single_line_duty", False))
         operator_change_terminals_only = bool(cct_params.get("operator_change_terminals_only", True))
         allow_relief_points = bool(cct_params.get("allow_relief_points", False))
         terminal_location_ids = {
-            int(item)
-            for item in (cct_params.get("terminal_location_ids") or [])
-            if item is not None
+            int(item) for item in (cct_params.get("terminal_location_ids") or []) if item is not None
         }
 
         allow_multi_line_block = bool(vsp_params.get("allow_multi_line_block", True))
@@ -168,7 +169,9 @@ class HardConstraintValidator:
             )
             roster_id = int(duty.meta.get("roster_id", 0) or 0)
             if roster_id > 0 and duty.tasks:
-                roster_windows.setdefault(roster_id, []).append((duty.tasks[0].start_time, duty.tasks[-1].end_time, duty.id))
+                roster_windows.setdefault(roster_id, []).append(
+                    (duty.tasks[0].start_time, duty.tasks[-1].end_time, duty.id)
+                )
 
         for roster_id, windows in roster_windows.items():
             ordered = sorted(windows)
@@ -236,7 +239,7 @@ class HardConstraintValidator:
         }
 
     def _audit_operator_assignment(self, result: OptimizationResult, cct_params: Dict[str, Any]) -> List[str]:
-        operator_meta = ((result.csp.meta or {}).get("operator_assignment") or {})
+        operator_meta = (result.csp.meta or {}).get("operator_assignment") or {}
         rosters = list(operator_meta.get("rosters") or [])
         issues: List[str] = []
 
@@ -263,7 +266,9 @@ class HardConstraintValidator:
             return sorted(set(issues))
 
         strict_union = bool(cct_params.get("strict_union_rules", True))
-        profile_map = {int(profile.get("id")): profile for profile in operator_profiles if profile.get("id") is not None}
+        profile_map = {
+            int(profile.get("id")): profile for profile in operator_profiles if profile.get("id") is not None
+        }
 
         for roster in rosters:
             operator_id = roster.get("operator_id")
@@ -299,14 +304,18 @@ class HardConstraintValidator:
             profile = profile_map.get(int(operator_id))
             if profile is None:
                 continue
-            assigned_by_shift.setdefault(str(roster.get("shift_type")), []).append((priority(profile), int(operator_id)))
+            assigned_by_shift.setdefault(str(roster.get("shift_type")), []).append(
+                (priority(profile), int(operator_id))
+            )
 
         for profile in operator_profiles:
             preferred_shifts = set(profile.get("mandatory_shift_types") or profile.get("preferred_shift_types") or [])
             operator_id = int(profile.get("id")) if profile.get("id") is not None else None
             if operator_id is None or not preferred_shifts:
                 continue
-            current_shift = next((str(roster.get("shift_type")) for roster in rosters if roster.get("operator_id") == operator_id), None)
+            current_shift = next(
+                (str(roster.get("shift_type")) for roster in rosters if roster.get("operator_id") == operator_id), None
+            )
             if current_shift in preferred_shifts:
                 continue
             for shift in preferred_shifts:
@@ -315,7 +324,9 @@ class HardConstraintValidator:
                         continue
                     other_profile = profile_map.get(assigned_operator_id)
                     if other_profile and priority(profile) > assigned_priority:
-                        issues.append(f"SENIORITY_PRIORITY_VIOLATION O{operator_id}>{assigned_operator_id} shift={shift}")
+                        issues.append(
+                            f"SENIORITY_PRIORITY_VIOLATION O{operator_id}>{assigned_operator_id} shift={shift}"
+                        )
                         break
 
         return sorted(set(issues))
@@ -366,12 +377,8 @@ class HardConstraintValidator:
         terminal_location_ids: set[int],
         apply_cct: bool = True,
     ) -> bool:
-        terminal_allowed = (
-            not terminal_location_ids
-            or (
-                end_trip.destination_id is not None
-                and int(end_trip.destination_id) in terminal_location_ids
-            )
+        terminal_allowed = not terminal_location_ids or (
+            end_trip.destination_id is not None and int(end_trip.destination_id) in terminal_location_ids
         )
         same_terminal = end_trip.destination_id == start_trip.origin_id and terminal_allowed
         same_depot = (
@@ -490,9 +497,17 @@ class HardConstraintValidator:
                     issues.append(f"DUTY_MIN_INTERVAL_VIOLATION D{duty.id} T{current.id}->{nxt.id}")
         if apply_cct and operational_time_report.get("invalid_rest_position"):
             issues.append(f"INVALID_REST_POSITION D{duty.id}")
-        if apply_cct and operational_time_report.get("mandatory_rest_required") and not operational_time_report.get("has_valid_mandatory_rest"):
+        if (
+            apply_cct
+            and operational_time_report.get("mandatory_rest_required")
+            and not operational_time_report.get("has_valid_mandatory_rest")
+        ):
             issues.append(f"MANDATORY_REST_MISSING D{duty.id}")
-        if enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None:
+        if (
+            enforce_same_depot
+            and duty.meta.get("start_depot_id") is not None
+            and duty.meta.get("end_depot_id") is not None
+        ):
             if duty.meta.get("start_depot_id") != duty.meta.get("end_depot_id"):
                 issues.append(f"DUTY_SAME_DEPOT_VIOLATION D{duty.id}")
         if enforce_single_line_duty:
@@ -510,7 +525,9 @@ class HardConstraintValidator:
             if operator_change_terminals_only and current.trips and nxt.trips:
                 end_trip = current.trips[-1]
                 start_trip = nxt.trips[0]
-                if not self._operator_change_boundary_ok(end_trip, start_trip, allow_relief_points, terminal_location_ids):
+                if not self._operator_change_boundary_ok(
+                    end_trip, start_trip, allow_relief_points, terminal_location_ids
+                ):
                     issues.append(f"OPERATOR_CHANGE_NON_TERMINAL D{duty.id} B{current.id}->{nxt.id}")
         return issues
 
@@ -540,9 +557,7 @@ class HardConstraintValidator:
                     continue
                 gap = next_task.start_time - current_task.end_time
                 if gap < 0:
-                    issues.append(
-                        f"SOURCE_BLOCK_DUTY_OVERLAP SB{source_block_id} D{current_duty_id}->{next_duty_id}"
-                    )
+                    issues.append(f"SOURCE_BLOCK_DUTY_OVERLAP SB{source_block_id} D{current_duty_id}->{next_duty_id}")
                     continue
                 if not current_task.trips or not next_task.trips:
                     continue

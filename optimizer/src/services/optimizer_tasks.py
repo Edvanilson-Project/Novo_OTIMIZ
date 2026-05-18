@@ -16,6 +16,7 @@ Todos os parâmetros recebidos são dicionários JSON-safe (nenhum objeto Pydant
 dataclass é passado pela fronteira Celery). A reconstrução dos objetos de domínio
 (Trip, VehicleType, etc.) é feita internamente nesta task.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,6 @@ from typing import Any, Dict, List, Tuple
 
 from ..core.celery_app import celery_app
 from ..core.exceptions import OptimizerError, HardConstraintViolationError
-from ..core.exceptions import OptimizerError
 from ..domain.models import AlgorithmType, Trip, VehicleType
 from ..services.optimizer_service import OptimizerService
 
@@ -197,8 +197,7 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             or ((result_dict.get("meta") or {}).get("operational_quality_decision") or {}).get("mode")
             or (optimization_params or {}).get("operational_quality_mode")
             or "balanced",
-            result_dict.get("chosen_scenario")
-            or ((result_dict.get("meta") or {}).get("chosen_scenario")),
+            result_dict.get("chosen_scenario") or ((result_dict.get("meta") or {}).get("chosen_scenario")),
         )
         _update_prog(1.0, "Otimização concluída")
 
@@ -213,13 +212,15 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         ):
             error_code = "MANDATORY_GROUP_SPLIT"
         details = dict(getattr(e, "details", {}) or {})
-        details.update({
-            "issues": issues,
-            "run_id": run_id,
-            "line_id": line_id,
-            "company_id": company_id,
-            "algorithm": algorithm_str,
-        })
+        details.update(
+            {
+                "issues": issues,
+                "run_id": run_id,
+                "line_id": line_id,
+                "company_id": company_id,
+                "algorithm": algorithm_str,
+            }
+        )
         return {
             "_is_error": True,
             "status": "failed",
@@ -246,10 +247,6 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "error_code": "INTERNAL_ERROR",
             "message": str(e),
             "details": {"run_id": run_id, "algorithm": algorithm_str},
-            "error_payload": {
-                "message": str(e),
-                "code": "INTERNAL_ERROR",
-                "run_id": run_id
-            },
-            "http_status": 500
+            "error_payload": {"message": str(e), "code": "INTERNAL_ERROR", "run_id": run_id},
+            "http_status": 500,
         }

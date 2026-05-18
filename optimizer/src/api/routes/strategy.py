@@ -1,6 +1,7 @@
 """
 Rotas estratégicas: macro-estimate, what-if e feedback planejado vs realizado.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -70,10 +71,7 @@ def _trip_from_dict(item: dict) -> Trip:
         destination_longitude=item.get("destination_longitude"),
         sent_to_driver_terminal=item.get("sent_to_driver_terminal"),
         gps_valid=item.get("gps_valid"),
-        deadhead_times={
-            int(k): int(v)
-            for k, v in (item.get("deadhead_times") or {}).items()
-        },
+        deadhead_times={int(k): int(v) for k, v in (item.get("deadhead_times") or {}).items()},
     )
 
 
@@ -149,7 +147,9 @@ async def what_if(body: WhatIfRequest) -> WhatIfResponse:
             "name": scenario.name,
             "cct_params": scenario.cct_params.model_dump(exclude_none=True) if scenario.cct_params else {},
             "vsp_params": scenario.vsp_params.model_dump(exclude_none=True) if scenario.vsp_params else {},
-            "optimization_params": body.optimization_params.model_dump(exclude_none=True) if body.optimization_params else {},
+            "optimization_params": (
+                body.optimization_params.model_dump(exclude_none=True) if body.optimization_params else {}
+            ),
         }
         for scenario in body.scenarios
     ]
@@ -194,7 +194,9 @@ async def save_scenario(body: SaveScenarioRequest) -> SaveScenarioResponse:
             "trips": [item.model_dump(exclude_none=True) for item in body.trips],
             "cct_params": body.cct_params.model_dump(exclude_none=True) if body.cct_params else {},
             "vsp_params": body.vsp_params.model_dump(exclude_none=True) if body.vsp_params else {},
-            "optimization_params": body.optimization_params.model_dump(exclude_none=True) if body.optimization_params else {},
+            "optimization_params": (
+                body.optimization_params.model_dump(exclude_none=True) if body.optimization_params else {}
+            ),
             "estimate": {
                 "estimated_vehicles": estimate.estimated_vehicles,
                 "estimated_crew": estimate.estimated_crew,

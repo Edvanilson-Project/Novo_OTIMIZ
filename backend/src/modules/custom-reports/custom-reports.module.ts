@@ -10,7 +10,10 @@ import { Line } from '../database/entities/line.entity';
 import { TenantContext } from '../../common/context/tenant-context';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CustomReport, Schedule, Trip, Line]), JwtModule.register({})],
+  imports: [
+    TypeOrmModule.forFeature([CustomReport, Schedule, Trip, Line]),
+    JwtModule.register({}),
+  ],
   controllers: [CustomReportsController],
   providers: [CustomReportsService, TenantContext],
   exports: [CustomReportsService],

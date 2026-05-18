@@ -6,6 +6,7 @@ Vizinhança: Reloc (mover 1 viagem entre blocos) + Merge.
 Lista tabu: conjunto de (trip_id, from_idx, to_idx) recentemente movidos — evita reversões.
 Critério de aspiração: aceita movimento tabu se melhora o global.
 """
+
 from __future__ import annotations
 
 import random
@@ -22,9 +23,6 @@ from ..utils import is_connection_feasible, quick_cost_from_trips, preferred_pai
 settings = get_settings()
 
 Move = Tuple[int, int, int, int]
-
-
-
 
 
 def _blocks_are_feasible(
@@ -66,9 +64,6 @@ def _blocks_are_feasible(
     return True
 
 
-
-
-
 def _copy_state(state: List[List[int]]) -> List[List[int]]:
     """Cópia profunda eficiente do estado (lista de listas de ints)."""
     return [block[:] for block in state]
@@ -84,7 +79,7 @@ def _generate_reloc_neighbours(
     """Gera até `sample_n` vizinhos via Relocation e Merge."""
     if len(state) < 2:
         return []
-    
+
     neighbours = []
     attempts = min(sample_n * 3, len(state) * max((len(b) for b in state if b), default=1))
     seen: set = set()
@@ -92,7 +87,7 @@ def _generate_reloc_neighbours(
     for _ in range(attempts):
         if len(neighbours) >= sample_n:
             break
-        
+
         src_idx = random.randint(0, len(state) - 1)
         if not state[src_idx]:
             continue
@@ -108,10 +103,10 @@ def _generate_reloc_neighbours(
         trip_id = new_state[src_idx].pop(trip_pos)
         new_state[dst_idx].append(trip_id)
         new_state = [b for b in new_state if b]
-        
+
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
-        
+
         if not _blocks_are_feasible(
             new_state,
             trip_map,
@@ -137,14 +132,14 @@ def _generate_reloc_neighbours(
         if merge_key in seen:
             continue
         seen.add(merge_key)
-        
+
         new_state = _copy_state(state)
         new_state[i].extend(new_state[j])
         del new_state[j]
-        
+
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
-        
+
         if not _blocks_are_feasible(
             new_state,
             trip_map,
@@ -157,7 +152,7 @@ def _generate_reloc_neighbours(
             kwargs.get("strict_hard_constraints", False),
         ):
             continue
-        
+
         move: Move = (-1, j, i, -1)
         neighbours.append((move, new_state))
 
@@ -199,7 +194,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
-        
+
         random_seed = self.vsp_params.get("random_seed")
         if random_seed is not None:
             random.seed(int(random_seed))
@@ -242,13 +237,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
 
         def cost_fn(state: List[List[int]]) -> float:
             sequences = [[trip_map[tid] for tid in block if tid in trip_map] for block in state]
-            base = quick_cost_from_trips(
-                sequences,
-                fvc,
-                icpm,
-                max_work,
-                crew_cw
-            )
+            base = quick_cost_from_trips(sequences, fvc, icpm, max_work, crew_cw)
             pairs = preferred_pair_penalty_from_trips(
                 sequences,
                 preferred_pairs,
@@ -336,7 +325,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 stale_count = 0
 
         best_blocks = self._state_to_blocks(best_state, trip_map)
-        
+
         for block in best_blocks:
             block.trips.sort(key=lambda t: t.start_time)
 

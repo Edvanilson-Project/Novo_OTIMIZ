@@ -16,10 +16,29 @@ export interface GtfsImportResult {
 }
 
 // Raw GTFS row types
-interface GtfsStop { stop_id: string; stop_name: string; stop_lat?: string; stop_lon?: string; }
-interface GtfsRoute { route_id: string; route_short_name?: string; route_long_name?: string; }
-interface GtfsTrip { trip_id: string; route_id: string; direction_id?: string; }
-interface GtfsStopTime { trip_id: string; stop_id: string; departure_time: string; arrival_time: string; stop_sequence: string; }
+interface GtfsStop {
+  stop_id: string;
+  stop_name: string;
+  stop_lat?: string;
+  stop_lon?: string;
+}
+interface GtfsRoute {
+  route_id: string;
+  route_short_name?: string;
+  route_long_name?: string;
+}
+interface GtfsTrip {
+  trip_id: string;
+  route_id: string;
+  direction_id?: string;
+}
+interface GtfsStopTime {
+  trip_id: string;
+  stop_id: string;
+  departure_time: string;
+  arrival_time: string;
+  stop_sequence: string;
+}
 
 @Injectable()
 export class GtfsImportService {
@@ -38,7 +57,9 @@ export class GtfsImportService {
     try {
       zip = new AdmZip(buffer);
     } catch {
-      throw new BadRequestException('Arquivo inválido — esperado ZIP com dados GTFS.');
+      throw new BadRequestException(
+        'Arquivo inválido — esperado ZIP com dados GTFS.',
+      );
     }
 
     const errors: string[] = [];
@@ -48,10 +69,14 @@ export class GtfsImportService {
     const tripsRaw = this._readEntry(zip, 'trips.txt');
     const stopTimesRaw = this._readEntry(zip, 'stop_times.txt');
 
-    if (!stopsRaw) throw new BadRequestException('stops.txt não encontrado no ZIP.');
-    if (!routesRaw) throw new BadRequestException('routes.txt não encontrado no ZIP.');
-    if (!tripsRaw) throw new BadRequestException('trips.txt não encontrado no ZIP.');
-    if (!stopTimesRaw) throw new BadRequestException('stop_times.txt não encontrado no ZIP.');
+    if (!stopsRaw)
+      throw new BadRequestException('stops.txt não encontrado no ZIP.');
+    if (!routesRaw)
+      throw new BadRequestException('routes.txt não encontrado no ZIP.');
+    if (!tripsRaw)
+      throw new BadRequestException('trips.txt não encontrado no ZIP.');
+    if (!stopTimesRaw)
+      throw new BadRequestException('stop_times.txt não encontrado no ZIP.');
 
     const stops = this._parseCsv<GtfsStop>(stopsRaw);
     const routes = this._parseCsv<GtfsRoute>(routesRaw);
@@ -64,7 +89,10 @@ export class GtfsImportService {
     let skipped = 0;
 
     for (const stop of stops) {
-      if (!stop.stop_id || !stop.stop_name) { skipped++; continue; }
+      if (!stop.stop_id || !stop.stop_name) {
+        skipped++;
+        continue;
+      }
       const existing = await this.terminalRepo.findOne({
         where: { terminalId: stop.stop_id, companyId },
       });
@@ -90,7 +118,10 @@ export class GtfsImportService {
     let lineCount = 0;
 
     for (const route of routes) {
-      if (!route.route_id) { skipped++; continue; }
+      if (!route.route_id) {
+        skipped++;
+        continue;
+      }
       const existing = await this.lineRepo.findOne({
         where: { lineId: route.route_id, companyId },
       });
@@ -99,7 +130,11 @@ export class GtfsImportService {
         skipped++;
         continue;
       }
-      const name = (route.route_short_name || route.route_long_name || route.route_id).trim();
+      const name = (
+        route.route_short_name ||
+        route.route_long_name ||
+        route.route_id
+      ).trim();
       const line = this.lineRepo.create({
         companyId,
         lineId: route.route_id,
@@ -135,11 +170,17 @@ export class GtfsImportService {
 
     let tripCount = 0;
     for (const [tripId, times] of stopTimesByTrip) {
-      if (times.length < 2) { skipped++; continue; }
+      if (times.length < 2) {
+        skipped++;
+        continue;
+      }
       const first = times[0];
       const last = times[times.length - 1];
       const routeId = gtfsTripRouteMap.get(tripId);
-      if (!routeId) { errors.push(`trip_id=${tripId}: route_id não encontrado`); continue; }
+      if (!routeId) {
+        errors.push(`trip_id=${tripId}: route_id não encontrado`);
+        continue;
+      }
 
       const originDbId = stopIdToDbId.get(first.stop_id);
       const destDbId = stopIdToDbId.get(last.stop_id);
@@ -147,17 +188,32 @@ export class GtfsImportService {
         errors.push(`trip_id=${tripId}: terminal origin/destino não mapeado`);
         continue;
       }
-      if (originDbId === destDbId) { skipped++; continue; }
+      if (originDbId === destDbId) {
+        skipped++;
+        continue;
+      }
 
       const lineDbId = routeIdToDbId.get(routeId);
       const startTime = this._hhmmssToMinutes(first.departure_time);
       const endTime = this._hhmmssToMinutes(last.arrival_time);
-      if (endTime <= startTime) { skipped++; continue; }
+      if (endTime <= startTime) {
+        skipped++;
+        continue;
+      }
 
       const existing = await this.tripRepo.findOne({
-        where: { lineId: lineDbId, startTime, originId: originDbId, destinationId: destDbId, companyId },
+        where: {
+          lineId: lineDbId,
+          startTime,
+          originId: originDbId,
+          destinationId: destDbId,
+          companyId,
+        },
       });
-      if (existing) { skipped++; continue; }
+      if (existing) {
+        skipped++;
+        continue;
+      }
 
       const trip = this.tripRepo.create({
         companyId,
@@ -174,21 +230,35 @@ export class GtfsImportService {
     }
 
     return {
-      imported: { terminals: terminalCount, lines: lineCount, trips: tripCount },
+      imported: {
+        terminals: terminalCount,
+        lines: lineCount,
+        trips: tripCount,
+      },
       skipped,
       errors: errors.slice(0, 20),
     };
   }
 
   private _readEntry(zip: AdmZipType, filename: string): string | null {
-    const entry = zip.getEntry(filename) ?? zip.getEntries().find(e => e.entryName.endsWith('/' + filename));
+    const entry =
+      zip.getEntry(filename) ??
+      zip.getEntries().find((e) => e.entryName.endsWith('/' + filename));
     return entry ? entry.getData().toString('utf8') : null;
   }
 
   private _parseCsv<T>(content: string): T[] {
-    const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const lines = content
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n');
     if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^﻿/, '').replace(/^"|"$/g, ''));
+    const headers = lines[0].split(',').map((h) =>
+      h
+        .trim()
+        .replace(/^\uFEFF/, '')
+        .replace(/^"|"$/g, ''),
+    );
     const result: T[] = [];
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -208,8 +278,15 @@ export class GtfsImportService {
     let current = '';
     let inQuotes = false;
     for (const ch of line) {
-      if (ch === '"') { inQuotes = !inQuotes; continue; }
-      if (ch === ',' && !inQuotes) { result.push(current); current = ''; continue; }
+      if (ch === '"') {
+        inQuotes = !inQuotes;
+        continue;
+      }
+      if (ch === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+        continue;
+      }
       current += ch;
     }
     result.push(current);

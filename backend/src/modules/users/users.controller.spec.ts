@@ -21,7 +21,8 @@ describe('UsersController', () => {
       controllers: [UsersController],
       providers: [{ provide: UsersService, useValue: service }],
     })
-      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(UsersController);

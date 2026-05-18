@@ -49,17 +49,21 @@ describe('GtfsImportService — dados reais de Salvador em escala de produção'
     terminalRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((d: any) => d),
-      save: jest.fn().mockImplementation(async (e: any) => ({ id: terminalIdSeq++, ...e })),
+      save: jest
+        .fn()
+        .mockImplementation((e: any) => ({ id: terminalIdSeq++, ...e })),
     };
     lineRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((d: any) => d),
-      save: jest.fn().mockImplementation(async (e: any) => ({ id: lineIdSeq++, ...e })),
+      save: jest
+        .fn()
+        .mockImplementation((e: any) => ({ id: lineIdSeq++, ...e })),
     };
     tripRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockImplementation((d: any) => d),
-      save: jest.fn().mockImplementation(async (e: any) => ({ id: 1, ...e })),
+      save: jest.fn().mockImplementation((e: any) => ({ id: 1, ...e })),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -68,7 +72,10 @@ describe('GtfsImportService — dados reais de Salvador em escala de produção'
         { provide: getRepositoryToken(Terminal), useValue: terminalRepo },
         { provide: getRepositoryToken(Line), useValue: lineRepo },
         { provide: getRepositoryToken(Trip), useValue: tripRepo },
-        { provide: TenantContext, useValue: { getCompanyId: jest.fn().mockReturnValue(1) } },
+        {
+          provide: TenantContext,
+          useValue: { getCompanyId: jest.fn().mockReturnValue(1) },
+        },
       ],
     }).compile();
 
@@ -95,8 +102,8 @@ describe('GtfsImportService — dados reais de Salvador em escala de produção'
   it('viagem real dura 55 minutos (08:30→09:25)', async () => {
     await service.importFromBuffer(loadFixtureZip());
     const savedTrip = tripRepo.save.mock.calls[0][0];
-    expect(savedTrip.startTime).toBe(510);   // 8*60+30
-    expect(savedTrip.endTime).toBe(565);     // 9*60+25
+    expect(savedTrip.startTime).toBe(510); // 8*60+30
+    expect(savedTrip.endTime).toBe(565); // 9*60+25
     expect(savedTrip.duration).toBe(55);
   }, 30_000);
 

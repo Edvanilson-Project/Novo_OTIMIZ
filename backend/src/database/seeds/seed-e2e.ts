@@ -45,11 +45,14 @@ async function run() {
 
     // 2. Admin user
     const hash = await bcrypt.hash('admin123', 10);
-    await qr.query(`
+    await qr.query(
+      `
       INSERT INTO users (email, "passwordHash", name, role, "companyId", "isActive", "createdAt", "updatedAt")
       VALUES ('admin@empresa.com', $1, 'Admin E2E', 'super_admin', $2, true, NOW(), NOW())
       ON CONFLICT (email) DO NOTHING
-    `, [hash, companyId]);
+    `,
+      [hash, companyId],
+    );
 
     console.log('✓ Company + admin user seeded (companyId=' + companyId + ')');
 
@@ -63,4 +66,7 @@ async function run() {
   }
 }
 
-run().catch((e) => { console.error(e); process.exit(1); });
+run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

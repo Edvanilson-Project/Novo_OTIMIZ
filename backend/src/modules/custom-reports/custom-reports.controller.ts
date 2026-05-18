@@ -1,10 +1,23 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, ParseIntPipe, UseGuards, HttpCode, HttpStatus,
-  Header, Res,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Header,
+  Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { CustomReportsService, SUPPORTED_METRICS } from './custom-reports.service';
+import {
+  CustomReportsService,
+  SUPPORTED_METRICS,
+} from './custom-reports.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('custom-reports')
@@ -33,7 +46,10 @@ export class CustomReportsController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: Record<string, any>) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Record<string, any>,
+  ) {
     return this.service.update(id, body);
   }
 
@@ -58,7 +74,10 @@ export class CustomReportsController {
   async exportCsv(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
     const payload = await this.service.run(id);
     const csv = this.service.toCsv(payload);
-    res.setHeader('Content-Disposition', `attachment; filename="report-${id}.csv"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="report-${id}.csv"`,
+    );
     res.send(csv);
   }
 
@@ -68,7 +87,10 @@ export class CustomReportsController {
     const payload = await this.service.run(id);
     const pdf = await this.service.toPdf(report, payload);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="report-${id}.pdf"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="report-${id}.pdf"`,
+    );
     res.send(pdf);
   }
 }

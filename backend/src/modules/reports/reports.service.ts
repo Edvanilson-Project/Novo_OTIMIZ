@@ -19,8 +19,12 @@ export class ReportsService {
   async getKpisByCompany(companyId: number) {
     const [totalRuns, completedRuns, failedRuns] = await Promise.all([
       this.scheduleRepo.count({ where: { companyId } }),
-      this.scheduleRepo.count({ where: { companyId, status: ScheduleStatus.COMPLETED } }),
-      this.scheduleRepo.count({ where: { companyId, status: ScheduleStatus.FAILED } }),
+      this.scheduleRepo.count({
+        where: { companyId, status: ScheduleStatus.COMPLETED },
+      }),
+      this.scheduleRepo.count({
+        where: { companyId, status: ScheduleStatus.FAILED },
+      }),
     ]);
 
     const lastCompleted = await this.scheduleRepo.findOne({
@@ -35,14 +39,31 @@ export class ReportsService {
 
     // Trend: últimos 7 dias vs 7 dias anteriores
     const now = new Date();
-    const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
-    const d14 = new Date(now); d14.setDate(d14.getDate() - 14);
+    const d7 = new Date(now);
+    d7.setDate(d7.getDate() - 7);
+    const d14 = new Date(now);
+    d14.setDate(d14.getDate() - 14);
 
     const [last7, prev7] = await Promise.all([
-      this.scheduleRepo.count({ where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(d7) } }),
-      this.scheduleRepo.count({ where: { companyId, status: ScheduleStatus.COMPLETED, createdAt: MoreThanOrEqual(d14) } }),
+      this.scheduleRepo.count({
+        where: {
+          companyId,
+          status: ScheduleStatus.COMPLETED,
+          createdAt: MoreThanOrEqual(d7),
+        },
+      }),
+      this.scheduleRepo.count({
+        where: {
+          companyId,
+          status: ScheduleStatus.COMPLETED,
+          createdAt: MoreThanOrEqual(d14),
+        },
+      }),
     ]);
-    const trend7d = prev7 > 0 ? (((last7 - (prev7 - last7)) / (prev7 - last7 || 1)) * 100).toFixed(1) : null;
+    const trend7d =
+      prev7 > 0
+        ? (((last7 - (prev7 - last7)) / (prev7 - last7 || 1)) * 100).toFixed(1)
+        : null;
 
     // Médias de veículos, crew e custo dos últimos 30 runs
     const recentRuns = await this.scheduleRepo.find({
@@ -51,7 +72,10 @@ export class ReportsService {
       take: 30,
     });
 
-    let sumVehicles = 0, sumCrew = 0, sumCost = 0, countWithData = 0;
+    let sumVehicles = 0,
+      sumCrew = 0,
+      sumCost = 0,
+      countWithData = 0;
     for (const r of recentRuns) {
       const meta = r.metadata as Record<string, any> | null;
       const v = meta?.num_vehicles ?? meta?.vehicles;
@@ -70,15 +94,19 @@ export class ReportsService {
       totalRuns,
       completedRuns,
       failedRuns,
-      successRate: totalRuns > 0 ? ((completedRuns / totalRuns) * 100).toFixed(1) : '0',
+      successRate:
+        totalRuns > 0 ? ((completedRuns / totalRuns) * 100).toFixed(1) : '0',
       totalTrips,
       totalLines,
       trend7d,
-      averages: countWithData > 0 ? {
-        vehicles: +(sumVehicles / countWithData).toFixed(1),
-        crew: +(sumCrew / countWithData).toFixed(1),
-        cost: +(sumCost / countWithData).toFixed(2),
-      } : null,
+      averages:
+        countWithData > 0
+          ? {
+              vehicles: +(sumVehicles / countWithData).toFixed(1),
+              crew: +(sumCrew / countWithData).toFixed(1),
+              cost: +(sumCost / countWithData).toFixed(2),
+            }
+          : null,
       lastOptimization: lastCompleted
         ? {
             id: lastCompleted.id,
@@ -93,7 +121,12 @@ export class ReportsService {
     };
   }
 
-  async getOptimizationHistory(companyId: number, days = 30, page = 1, limit = 50) {
+  async getOptimizationHistory(
+    companyId: number,
+    days = 30,
+    page = 1,
+    limit = 50,
+  ) {
     const since = new Date();
     since.setDate(since.getDate() - days);
     const [runs, total] = await this.scheduleRepo.findAndCount({
@@ -122,14 +155,20 @@ export class ReportsService {
     return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
-  async compareOptimizations(runId1: number, runId2: number, companyId: number) {
+  async compareOptimizations(
+    runId1: number,
+    runId2: number,
+    companyId: number,
+  ) {
     const [run1, run2] = await Promise.all([
       this.scheduleRepo.findOne({ where: { id: runId1, companyId } }),
       this.scheduleRepo.findOne({ where: { id: runId2, companyId } }),
     ]);
 
-    if (!run1) throw new NotFoundException(`Schedule #${runId1} não encontrado`);
-    if (!run2) throw new NotFoundException(`Schedule #${runId2} não encontrado`);
+    if (!run1)
+      throw new NotFoundException(`Schedule #${runId1} não encontrado`);
+    if (!run2)
+      throw new NotFoundException(`Schedule #${runId2} não encontrado`);
 
     const meta1 = run1.metadata as Record<string, any> | null;
     const meta2 = run2.metadata as Record<string, any> | null;
@@ -140,8 +179,24 @@ export class ReportsService {
     const c2 = meta2?.num_crew ?? meta2?.crew ?? 0;
 
     return {
-      run1: { id: run1.id, referenceDate: run1.referenceDate, vehicles: v1, crew: c1, cost: run1.totalCost, violations: run1.cctViolations, algorithm: meta1?.algorithm ?? null },
-      run2: { id: run2.id, referenceDate: run2.referenceDate, vehicles: v2, crew: c2, cost: run2.totalCost, violations: run2.cctViolations, algorithm: meta2?.algorithm ?? null },
+      run1: {
+        id: run1.id,
+        referenceDate: run1.referenceDate,
+        vehicles: v1,
+        crew: c1,
+        cost: run1.totalCost,
+        violations: run1.cctViolations,
+        algorithm: meta1?.algorithm ?? null,
+      },
+      run2: {
+        id: run2.id,
+        referenceDate: run2.referenceDate,
+        vehicles: v2,
+        crew: c2,
+        cost: run2.totalCost,
+        violations: run2.cctViolations,
+        algorithm: meta2?.algorithm ?? null,
+      },
       delta: {
         vehicles: v2 - v1,
         crew: c2 - c1,

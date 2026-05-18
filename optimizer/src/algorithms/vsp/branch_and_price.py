@@ -22,6 +22,7 @@ MIP final:             CBC com todas colunas acumuladas → solução inteira.
 Ryan-Foster (F4):      Se LP fracionário, resolve MIP em TOGETHER/APART sobre par mais
                        fracionário. Aceita ramo se melhora (blocos, custo).
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,6 +40,7 @@ settings = get_settings()
 
 try:
     import pulp  # type: ignore
+
     _PULP_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _PULP_AVAILABLE = False
@@ -50,9 +52,9 @@ _DEFAULT_MIN_LAYOVER = 8
 _DEFAULT_MAX_VEHICLE_SHIFT = 960
 _DEFAULT_MAX_PRICING_ITERS = 5
 _DEFAULT_MAX_PRICING_COLUMNS = 2000
-_DEFAULT_EV_KWH_PER_KM = 1.8     # kWh/km típico ônibus elétrico
+_DEFAULT_EV_KWH_PER_KM = 1.8  # kWh/km típico ônibus elétrico
 _DEFAULT_MAX_DRIVING_MINUTES = 0  # 0 = desabilitado (sem restrição CCT no pricing)
-_DEFAULT_MIN_BREAK_MINUTES = 30   # pausa mínima para resetar condução contínua (CLT)
+_DEFAULT_MIN_BREAK_MINUTES = 30  # pausa mínima para resetar condução contínua (CLT)
 
 # Índices dos elementos do label SPPRC (6-tupla)
 _I_RC, _I_SHIFT, _I_COST, _I_PATH, _I_SOC, _I_DRV = 0, 1, 2, 3, 4, 5
@@ -101,17 +103,11 @@ class MasterProblemLP:
 
         all_trips = sorted({tid for ids, _ in self._columns for tid in ids})
         prob = pulp.LpProblem("BP_Master_LP", pulp.LpMinimize)
-        x = [
-            pulp.LpVariable(f"x_{i}", lowBound=0.0, upBound=1.0)
-            for i in range(len(self._columns))
-        ]
+        x = [pulp.LpVariable(f"x_{i}", lowBound=0.0, upBound=1.0) for i in range(len(self._columns))]
         prob += pulp.lpSum(cost * x[i] for i, (_, cost) in enumerate(self._columns))
         for trip_id in all_trips:
             prob += (
-                pulp.lpSum(
-                    x[i] for i, (ids, _) in enumerate(self._columns) if trip_id in ids
-                )
-                >= 1,
+                pulp.lpSum(x[i] for i, (ids, _) in enumerate(self._columns) if trip_id in ids) >= 1,
                 f"cover_{trip_id}",
             )
         prob.solve(_make_solver(time_limit, threads=settings.ilp_threads))
@@ -135,17 +131,11 @@ class MasterProblemLP:
 
         all_trips = sorted({tid for ids, _ in self._columns for tid in ids})
         prob = pulp.LpProblem("BP_Master_MIP", pulp.LpMinimize)
-        x = [
-            pulp.LpVariable(f"x_{i}", cat="Binary")
-            for i in range(len(self._columns))
-        ]
+        x = [pulp.LpVariable(f"x_{i}", cat="Binary") for i in range(len(self._columns))]
         prob += pulp.lpSum(cost * x[i] for i, (_, cost) in enumerate(self._columns))
         for trip_id in all_trips:
             prob += (
-                pulp.lpSum(
-                    x[i] for i, (ids, _) in enumerate(self._columns) if trip_id in ids
-                )
-                >= 1,
+                pulp.lpSum(x[i] for i, (ids, _) in enumerate(self._columns) if trip_id in ids) >= 1,
                 f"cover_{trip_id}",
             )
         prob.solve(_make_solver(time_limit, threads=settings.ilp_threads))
@@ -328,8 +318,7 @@ class PricingSubproblem:
     @staticmethod
     def _dominates(a: tuple, b: tuple) -> bool:
         """True se label a domina b (rc↓, shift↓, soc↑, drv↓)."""
-        return (a[_I_RC] <= b[_I_RC] and a[_I_SHIFT] <= b[_I_SHIFT]
-                and a[_I_SOC] >= b[_I_SOC] and a[_I_DRV] <= b[_I_DRV])
+        return a[_I_RC] <= b[_I_RC] and a[_I_SHIFT] <= b[_I_SHIFT] and a[_I_SOC] >= b[_I_SOC] and a[_I_DRV] <= b[_I_DRV]
 
     def _prune(self, labels: list) -> list:
         """Remove labels dominados. label = (rc, shift, cost, path_ids, soc, drv)."""
@@ -339,7 +328,7 @@ class PricingSubproblem:
         for lbl in sorted(labels, key=lambda x: (x[_I_RC], x[_I_SHIFT])):
             if not any(self._dominates(k, lbl) and k is not lbl for k in kept):
                 kept.append(lbl)
-        return kept[:self.max_labels_per_node]
+        return kept[: self.max_labels_per_node]
 
     def find_columns(
         self,
@@ -361,15 +350,15 @@ class PricingSubproblem:
 
             # Label inicial para este nó (início de um novo bloco)
             trip_kwh_init = trip.distance_km * self.kwh_per_km if self.is_ev else 0.0
-            soc0 = (self.battery_kwh - trip_kwh_init) if self.is_ev else float('inf')
+            soc0 = (self.battery_kwh - trip_kwh_init) if self.is_ev else float("inf")
             drv0 = trip.duration if self.max_driving_minutes > 0 else 0
-            if (not self.is_ev or soc0 >= self.minimum_soc_kwh) and \
-               (self.max_driving_minutes == 0 or drv0 <= self.max_driving_minutes):
+            if (not self.is_ev or soc0 >= self.minimum_soc_kwh) and (
+                self.max_driving_minutes == 0 or drv0 <= self.max_driving_minutes
+            ):
                 energy_cost_init = trip_kwh_init * self.energy_cost_per_kwh
                 rc0 = self.fixed_cost + energy_cost_init - duals.get(trip.id, 0.0)
                 shift0 = trip.end_time - trip.start_time
-                my_labels.append((rc0, shift0, self.fixed_cost + energy_cost_init,
-                                   (trip.id,), soc0, drv0))
+                my_labels.append((rc0, shift0, self.fixed_cost + energy_cost_init, (trip.id,), soc0, drv0))
             my_labels = self._prune(my_labels)
 
             # Coletar colunas com rc < 0 que terminam neste nó
@@ -387,18 +376,15 @@ class PricingSubproblem:
                 gap_minutes = nxt.start_time - trip.end_time
                 nxt_kwh = nxt.distance_km * self.kwh_per_km if self.is_ev else 0.0
                 nxt_energy_cost = nxt_kwh * self.energy_cost_per_kwh
-                gap_is_break = (self.max_driving_minutes > 0
-                                and gap_minutes >= self.min_break_minutes)
+                gap_is_break = self.max_driving_minutes > 0 and gap_minutes >= self.min_break_minutes
                 # Recharge at charger depot = full battery restore regardless of time
                 at_charger = self.is_ev and bool(
-                    self.charger_location_ids and (
-                        trip.destination_id in self.charger_location_ids
-                        or nxt.origin_id in self.charger_location_ids
-                    )
+                    self.charger_location_ids
+                    and (trip.destination_id in self.charger_location_ids or nxt.origin_id in self.charger_location_ids)
                 )
-                max_recharge = (float('inf') if at_charger
-                                else gap_minutes / 60.0 * self.charge_rate_kw
-                                if self.is_ev else 0.0)
+                max_recharge = (
+                    float("inf") if at_charger else gap_minutes / 60.0 * self.charge_rate_kw if self.is_ev else 0.0
+                )
 
                 new_labels: list = []
                 for lbl in my_labels:
@@ -414,7 +400,7 @@ class PricingSubproblem:
                         if new_soc < self.minimum_soc_kwh:
                             continue
                     else:
-                        new_soc = float('inf')
+                        new_soc = float("inf")
                     if self.max_driving_minutes > 0:
                         new_drv = nxt.duration if gap_is_break else drv + nxt.duration
                         if new_drv > self.max_driving_minutes:
@@ -423,14 +409,11 @@ class PricingSubproblem:
                         new_drv = 0
                     new_rc = rc + arc + nxt_energy_cost - nxt_dual
                     new_cost = cost + arc + nxt_energy_cost
-                    new_labels.append((new_rc, new_shift, new_cost,
-                                       path_ids + (nxt.id,), new_soc, new_drv))
+                    new_labels.append((new_rc, new_shift, new_cost, path_ids + (nxt.id,), new_soc, new_drv))
 
                 if new_labels:
                     existing = labels_at.get(nxt.id, [])
-                    labels_at[nxt.id] = self._prune(
-                        (existing + new_labels) if existing else new_labels
-                    )
+                    labels_at[nxt.id] = self._prune((existing + new_labels) if existing else new_labels)
 
         results.sort(key=lambda r: r[0])
         seen: Set[Tuple[int, ...]] = set()
@@ -483,10 +466,12 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
             return sol
 
         vehicle = select_vehicle_type(vehicle_types, depot_id)
-        fixed_cost = float(self._p(
-            "fixed_vehicle_activation_cost",
-            vehicle.fixed_cost if vehicle else _DEFAULT_FIXED_COST,
-        ))
+        fixed_cost = float(
+            self._p(
+                "fixed_vehicle_activation_cost",
+                vehicle.fixed_cost if vehicle else _DEFAULT_FIXED_COST,
+            )
+        )
         deadhead_cost = float(self._p("deadhead_cost_per_minute", _DEFAULT_DEADHEAD_COST))
         idle_cost = float(self._p("idle_cost_per_minute", _DEFAULT_IDLE_COST))
         min_layover = int(self._p("min_layover_minutes", _DEFAULT_MIN_LAYOVER))
@@ -519,10 +504,7 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         trip_by_id = {t.id: t for t in trips}
         for block in warm_start.blocks:
             # Incluir custo de energia EV nos blocos de warm-start
-            block_energy = (
-                sum(t.distance_km * kwh_per_km * energy_cost_per_kwh for t in block.trips)
-                if is_ev else 0.0
-            )
+            block_energy = sum(t.distance_km * kwh_per_km * energy_cost_per_kwh for t in block.trips) if is_ev else 0.0
             master.add_column([t.id for t in block.trips], fixed_cost + block_energy)
 
         pricing = PricingSubproblem(
