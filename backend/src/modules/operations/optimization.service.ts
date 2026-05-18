@@ -1898,7 +1898,12 @@ export class OptimizationService implements OnModuleInit {
   private collectSolverWarnings(
     result: any,
     sourceMeta: any,
-  ): Array<{ code: string; severity: 'INFO' | 'WARN' | 'CRITICAL'; message: string; detail?: any }> {
+  ): Array<{
+    code: string;
+    severity: 'INFO' | 'WARN' | 'CRITICAL';
+    message: string;
+    detail?: any;
+  }> {
     const warnings: Array<{
       code: string;
       severity: 'INFO' | 'WARN' | 'CRITICAL';
