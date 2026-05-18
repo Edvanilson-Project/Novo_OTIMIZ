@@ -64,12 +64,55 @@ export class OptimizationService implements OnModuleInit {
     private tenantContext: TenantContext,
   ) {
     const key = this.configService.get<string>('INTERNAL_OPTIMIZER_KEY');
-    if (!key || key === 'internal-key-123456') {
+    this.assertValidInternalKey(key);
+    this.INTERNAL_KEY = key as string;
+  }
+
+  /**
+   * Valida que INTERNAL_OPTIMIZER_KEY tem entropia mínima para uso em produção.
+   * Mensagem inclui comando para gerar chave válida.
+   *
+   * Referências:
+   *   - OWASP API Security Top 10 (2023): API4 — Unrestricted Resource Consumption
+   *   - NIST SP 800-63B §5.1.1.2: minimum 32 bits entropy for secret tokens
+   */
+  private assertValidInternalKey(key: string | undefined): void {
+    const KNOWN_DEFAULTS = new Set([
+      'internal-key-123456',
+      'change-me',
+      'changeme',
+      'default',
+      'secret',
+      'password',
+    ]);
+    const MIN_LENGTH = 32; // ~190 bits para base62
+
+    if (!key) {
       throw new Error(
-        'INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)',
+        'INTERNAL_OPTIMIZER_KEY não definido. Gere uma chave forte com: ' +
+          'openssl rand -base64 48 | tr -d "\\n=+/" | cut -c-48',
       );
     }
-    this.INTERNAL_KEY = key;
+    if (KNOWN_DEFAULTS.has(key.toLowerCase())) {
+      throw new Error(
+        `INTERNAL_OPTIMIZER_KEY usa valor padrão conhecido ("${key}"). ` +
+          'Gere uma chave forte com: openssl rand -base64 48 | tr -d "\\n=+/" | cut -c-48',
+      );
+    }
+    if (key.length < MIN_LENGTH) {
+      throw new Error(
+        `INTERNAL_OPTIMIZER_KEY muito curta (${key.length} chars, mínimo ${MIN_LENGTH}). ` +
+          'Gere uma chave forte com: openssl rand -base64 48 | tr -d "\\n=+/" | cut -c-48',
+      );
+    }
+    // Heurística simples de entropia: número de caracteres únicos
+    const uniqueChars = new Set(key).size;
+    if (uniqueChars < 16) {
+      throw new Error(
+        `INTERNAL_OPTIMIZER_KEY com baixa entropia (${uniqueChars} chars únicos < 16). ` +
+          'Gere uma chave forte com: openssl rand -base64 48 | tr -d "\\n=+/" | cut -c-48',
+      );
+    }
   }
 
   async onModuleInit() {
@@ -1235,6 +1278,10 @@ export class OptimizationService implements OnModuleInit {
           roster_count: result.meta?.roster_count ?? 0,
           total_trips: result.total_trips ?? 0,
           algorithm: result.vsp_algorithm ?? '',
+          // BUG-01 fix (auditoria 2026-05-17): expor fallback do solver para que o
+          // operador saiba quando o algoritmo escolhido não rodou (ex: MCNF→Greedy
+          // por timeout/infeasibility). Sem isso, cliente paga por "ILP" e recebe greedy.
+          solver_warnings: this.collectSolverWarnings(result, sourceMeta),
           operational_quality_mode: operationalQuality.operational_quality_mode,
           chosen_scenario: operationalQuality.chosen_scenario,
           rejected_scenarios: operationalQuality.rejected_scenarios,
@@ -1840,6 +1887,71 @@ export class OptimizationService implements OnModuleInit {
         energy_cost_per_kwh: 0.0,
       },
     ];
+  }
+
+  /**
+   * Coleta warnings estruturados do solver para expor ao operador.
+   * BUG-01 fix (auditoria 2026-05-17): fallback do MCNF→Greedy ou de qualquer ILP
+   * para heurística DEVE aparecer aqui — sem isso o cliente acha que está usando
+   * "ILP ótimo" quando na verdade está usando greedy.
+   */
+  private collectSolverWarnings(
+    result: any,
+    sourceMeta: any,
+  ): Array<{ code: string; severity: 'INFO' | 'WARN' | 'CRITICAL'; message: string; detail?: any }> {
+    const warnings: Array<{
+      code: string;
+      severity: 'INFO' | 'WARN' | 'CRITICAL';
+      message: string;
+      detail?: any;
+    }> = [];
+
+    const metaCandidates = [
+      result?.meta,
+      sourceMeta,
+      result?.vsp?.meta,
+      result?.result?.meta,
+    ].filter((m) => m && typeof m === 'object');
+
+    for (const meta of metaCandidates) {
+      if (meta.fallback_used) {
+        warnings.push({
+          code: 'SOLVER_FALLBACK',
+          severity: 'CRITICAL',
+          message:
+            `Solver primário (${meta.original_solver ?? '?'}) falhou e foi substituído por ` +
+            `fallback (${meta.fallback_solver ?? '?'}). Solução pode ser subótima. ` +
+            `Razão: ${meta.fallback_reason ?? 'não especificada'}.`,
+          detail: {
+            original_solver: meta.original_solver ?? null,
+            fallback_solver: meta.fallback_solver ?? null,
+            fallback_reason: meta.fallback_reason ?? null,
+          },
+        });
+      }
+      if (meta.timetable_slack?.pvr_reduction_pct !== undefined) {
+        warnings.push({
+          code: 'TIMETABLE_SLACK_APPLIED',
+          severity: 'INFO',
+          message: `Timetable slack ajustou ${meta.timetable_slack.trips_adjusted} viagens (PVR -${meta.timetable_slack.pvr_reduction_pct?.toFixed?.(1) ?? 0}%)`,
+          detail: meta.timetable_slack,
+        });
+      }
+      const perf = meta.performance;
+      if (perf?.vsp_metaheuristics_skipped) {
+        warnings.push({
+          code: 'METAHEURISTICS_SKIPPED',
+          severity: 'WARN',
+          message:
+            'Metaheurísticas (SA/Tabu/Genetic) puladas por scale guard. ' +
+            `Para forçar, ajuste force_vsp_metaheuristics=true. ` +
+            `(trips=${perf.vsp_metaheuristics_skipped.trip_count}, ` +
+            `blocks=${perf.vsp_metaheuristics_skipped.block_count})`,
+          detail: perf.vsp_metaheuristics_skipped,
+        });
+      }
+    }
+    return warnings;
   }
 
   private extractInvalidResultMessage(result: any): string {

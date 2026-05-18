@@ -25,6 +25,10 @@ class AlgorithmType(str, Enum):
     BRANCH_AND_PRICE = "branch_and_price"
     JOINT_BP = "joint_bp"
     REGIONAL = "regional"
+    ALNS = "alns"
+    LAGRANGEAN_JOINT = "lagrangean_joint"
+    BUNDLE_METHOD = "bundle_method"
+    JOINT_TIMETABLE = "joint_timetable"
 
 
 class SolverPhase(str, Enum):

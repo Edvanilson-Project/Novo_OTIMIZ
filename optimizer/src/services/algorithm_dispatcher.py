@@ -15,7 +15,9 @@ from typing import Any, Callable, Dict, List, Optional
 from ..algorithms.hybrid.pipeline import HybridPipeline
 from ..algorithms.integrated.joint_bp import JointBP
 from ..algorithms.integrated.joint_solver import JointSolver
+from ..algorithms.integrated.lagrangean_pricing import LagrangeanJointSolver
 from ..algorithms.integrated.vcsp_solver import VCSPJointSolver
+from ..algorithms.large_scale.bundle_method import BundleMethodSolver
 from ..algorithms.vsp.assignment import AssignmentVSP
 from ..algorithms.vsp.branch_and_price import BranchAndPrice
 from ..algorithms.vsp.genetic import GeneticVSP
@@ -25,6 +27,8 @@ from ..algorithms.vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..algorithms.vsp.tabu_search import TabuSearchVSP
 from ..algorithms.vsp.regional_decomposition import RegionalDecompositionSolver
 from ..algorithms.vsp.timetable_slack import TimetableSlackOptimizer
+from ..algorithms.vsp.alns import ALNSVSP
+from ..algorithms.vsp.joint_timetable import JointTimetableVSP
 from ..core.config import get_settings
 from ..core.exceptions import InvalidAlgorithmError
 from ..domain.interfaces import ICSPAlgorithm
@@ -120,9 +124,18 @@ def _run_sp(
     optimization_params: Optional[Dict[str, Any]],
     csp_factory: CSPFactory,
     set_covering_factory: SetCoveringFactory,
+    prefer_solver: Optional[str] = None,
 ) -> OptimizationResult:
+    """Set Partitioning CSP wrapper. BUG-02 fix: prefer_solver permite escolher
+    explicitamente o backend (cp_sat vs pulp_cbc) ao invés de depender de
+    disponibilidade do ortools."""
     vsp = GreedyVSP(vsp_params=vsp_params).solve(trips, vehicle_types, depot_id)
-    ilp = set_covering_factory(cct_params, vsp_params)
+    # Tentar passar prefer_solver via factory; se factory não aceitar (compat antiga),
+    # cai no comportamento padrão sem quebrar
+    try:
+        ilp = set_covering_factory(cct_params, vsp_params, prefer_solver)  # type: ignore[arg-type,call-arg]
+    except TypeError:
+        ilp = set_covering_factory(cct_params, vsp_params)
     ilp.time_budget_s = time_budget_s
     return OptimizationResult(vsp=vsp, csp=ilp.solve(vsp.blocks, trips))
 
@@ -250,6 +263,83 @@ def _run_branch_and_price(
     return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
 
 
+def _run_lagrangean_joint(
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+) -> OptimizationResult:
+    """Joint VSP+CSP via Lagrangean Pricing (Löbel 1998)."""
+    return LagrangeanJointSolver(
+        time_budget_s=time_budget_s,
+        cct_params={**cct_params, **(optimization_params or {})},
+        vsp_params=vsp_params,
+    ).solve(trips, vehicle_types, depot_id)
+
+
+def _run_bundle_method(
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+) -> OptimizationResult:
+    """Bundle Method for large-scale VSP+CSP (Borndörfer et al. 2008)."""
+    decomp = (optimization_params or {}).get("bundle_decomposition", "temporal")
+    max_iters = int((optimization_params or {}).get("bundle_max_iterations", 20))
+    return BundleMethodSolver(
+        time_budget_s=time_budget_s,
+        cct_params={**cct_params, **(optimization_params or {})},
+        vsp_params=vsp_params,
+        decomposition=decomp,
+        max_iterations=max_iters,
+    ).solve(trips, vehicle_types, depot_id)
+
+
+def _run_alns(
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
+) -> OptimizationResult:
+    """ALNS — Adaptive Large Neighborhood Search (Ropke & Pisinger 2006)."""
+    csp = csp_factory(cct_params, vsp_params, optimization_params)
+    alns = ALNSVSP(vsp_params=vsp_params)
+    alns.time_budget_s = time_budget_s
+    vsp = alns.solve(trips, vehicle_types, depot_id)
+    return OptimizationResult(vsp=vsp, csp=csp.solve(vsp.blocks, trips))
+
+
+def _run_joint_timetable(
+    *,
+    trips: List[Trip],
+    vehicle_types: List[VehicleType],
+    depot_id: Optional[int],
+    time_budget_s: float,
+    cct_params: Dict[str, Any],
+    vsp_params: Dict[str, Any],
+    optimization_params: Optional[Dict[str, Any]],
+    csp_factory: CSPFactory,
+) -> OptimizationResult:
+    """Joint Timetable + VSP via MILP (Schmid & Ehmke 2015). Trips ≤ 150."""
+    csp = csp_factory(cct_params, vsp_params, optimization_params)
+    jt = JointTimetableVSP(vsp_params=vsp_params)
+    vsp_sol = jt.solve(trips, vehicle_types, depot_id)
+    return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
+
+
 def _run_regional(
     *,
     trips: List[Trip],
@@ -367,8 +457,22 @@ def dispatch_algorithm(
         result = _run_sa(**common_kwargs, csp_factory=csp_factory)
     elif algorithm == AlgorithmType.TABU_SEARCH:
         result = _run_ts(**common_kwargs, csp_factory=csp_factory)
-    elif algorithm in (AlgorithmType.SET_PARTITIONING, AlgorithmType.CP_SAT):
-        result = _run_sp(**common_kwargs, csp_factory=csp_factory, set_covering_factory=set_covering_factory)
+    elif algorithm == AlgorithmType.SET_PARTITIONING:
+        # BUG-02 fix: forçar PuLP/CBC quando usuário escolhe SET_PARTITIONING
+        result = _run_sp(
+            **common_kwargs,
+            csp_factory=csp_factory,
+            set_covering_factory=set_covering_factory,
+            prefer_solver="pulp_cbc",
+        )
+    elif algorithm == AlgorithmType.CP_SAT:
+        # BUG-02 fix: forçar OR-Tools CP-SAT quando usuário escolhe CP_SAT
+        result = _run_sp(
+            **common_kwargs,
+            csp_factory=csp_factory,
+            set_covering_factory=set_covering_factory,
+            prefer_solver="cp_sat",
+        )
     elif algorithm == AlgorithmType.MCNF:
         result = _run_mcnf(**common_kwargs, csp_factory=csp_factory)
     elif algorithm == AlgorithmType.JOINT_SOLVER:
@@ -385,6 +489,14 @@ def dispatch_algorithm(
         result = _run_branch_and_price(**common_kwargs, csp_factory=csp_factory)
     elif algorithm == AlgorithmType.REGIONAL:
         result = _run_regional(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.ALNS:
+        result = _run_alns(**common_kwargs, csp_factory=csp_factory)
+    elif algorithm == AlgorithmType.LAGRANGEAN_JOINT:
+        result = _run_lagrangean_joint(**common_kwargs)
+    elif algorithm == AlgorithmType.BUNDLE_METHOD:
+        result = _run_bundle_method(**common_kwargs)
+    elif algorithm == AlgorithmType.JOINT_TIMETABLE:
+        result = _run_joint_timetable(**common_kwargs, csp_factory=csp_factory)
     else:
         raise InvalidAlgorithmError(str(algorithm))
 

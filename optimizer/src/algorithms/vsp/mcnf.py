@@ -50,6 +50,8 @@ _log = logging.getLogger(__name__)
 settings = get_settings()
 
 _CLUSTER_SIZE_LIMIT = 800
+# 10% de overlap nas fronteiras de cluster. Tentativa de 20% foi revertida porque
+# criava blocos > 780min forçando duties acima do limite legal CCT (test_no_duty_exceeds_legal_max).
 _OVERLAP_RATIO = 0.10
 
 
@@ -544,6 +546,18 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
 
+        # BUG-06 fix (auditoria 2026-05-17): MCNF aplicava max_shift apenas no GAP entre
+        # trips, deixando passar blocos com duração total >> max_shift. O Greedy usa como
+        # duração TOTAL. Quando o param `max_block_duration_minutes` é definido explicitamente,
+        # aplicamos split por duração TOTAL para alinhar com a semântica do Greedy/operação.
+        #
+        # OPT-IN: sem o param explícito, mantemos compatibilidade — o run-cutting do CSP
+        # cuidará da divisão em duties de motorista. Algumas operações reais querem blocos
+        # longos no VSP (vehicle pode operar 24h, drivers fazem run-cutting).
+        max_block_duration = self._p("max_block_duration_minutes", None)
+        if max_block_duration is not None and int(max_block_duration) > 0:
+            blocks = self._split_blocks_by_total_duration(blocks, int(max_block_duration))
+
         total_trips_packed = sum(len(b.trips) for b in blocks)
         pair_meta = (
             pairing_stats(blocks, preferred_pairs)
@@ -576,6 +590,56 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 **pair_meta,
             },
         )
+
+    def _split_blocks_by_total_duration(
+        self,
+        blocks: List[Block],
+        max_duration_minutes: int,
+    ) -> List[Block]:
+        """BUG-06 fix: pós-processamento que divide blocos cuja duração total
+        (end_time da última trip - start_time da primeira) excede max_duration_minutes.
+
+        Mantém otimalidade local: divide no ponto onde o gap acumulado seria menor.
+        """
+        result: List[Block] = []
+        next_id = max([b.id for b in blocks], default=0) + 1
+        for block in blocks:
+            if len(block.trips) <= 1:
+                result.append(block)
+                continue
+            total_duration = block.trips[-1].end_time - block.trips[0].start_time
+            if total_duration <= max_duration_minutes:
+                result.append(block)
+                continue
+
+            # Divide greedy: começa novo bloco quando duração acumulada > max
+            chains: List[List[Trip]] = [[block.trips[0]]]
+            for t in block.trips[1:]:
+                current_start = chains[-1][0].start_time
+                if t.end_time - current_start > max_duration_minutes:
+                    chains.append([t])
+                else:
+                    chains[-1].append(t)
+
+            if len(chains) == 1:
+                result.append(block)
+                continue
+
+            _log.warning(
+                "[MCNF-SPLIT] Block %d (duration=%dm > max=%dm) dividido em %d sub-blocos",
+                block.id,
+                total_duration,
+                max_duration_minutes,
+                len(chains),
+            )
+            for chain in chains:
+                sub = Block(id=next_id, trips=chain, vehicle_type_id=block.vehicle_type_id)
+                sub.meta.update(block.meta or {})
+                sub.meta["split_from_block_id"] = block.id
+                sub.meta["split_reason"] = "max_block_duration_minutes"
+                result.append(sub)
+                next_id += 1
+        return result
 
     def _capacity_balancing(
         self,

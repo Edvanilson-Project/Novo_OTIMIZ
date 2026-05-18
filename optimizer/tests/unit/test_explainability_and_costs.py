@@ -370,7 +370,7 @@ def test_hybrid_group_audit_fallback_is_skipped_for_large_instances(monkeypatch)
 
 
 def test_hybrid_pipeline_skips_vsp_metaheuristics_for_scaled_instances(monkeypatch):
-    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 230)]
+    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 510)]
     baseline_blocks = [Block(id=idx, trips=[trip]) for idx, trip in enumerate(trips, start=1)]
     baseline_vsp = VSPSolution(blocks=baseline_blocks, algorithm="mcnf_vsp")
 

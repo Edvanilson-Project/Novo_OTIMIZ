@@ -34,6 +34,10 @@ MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
 # CP-SAT handles significantly more than CBC/PuLP — limits raised accordingly.
 # Trip limit raised to 1500 so CP-SAT ILP polish runs at 1000v (194 greedy blocks,
 # problem size is determined by blocks not trips — the old 600-trip limit was overly conservative).
+# Auditoria 2026-05-17: limites originais (220/180) eram conservadores demais.
+# Para 500 trips o SA/Tabu termina em ~30-45s com time_budget de 20s no pipeline,
+# então faz sentido permitir até 500 trips com time budget adequado. Acima disso,
+# metaheurísticas geram pouco ganho marginal pelo tempo gasto.
 DEFAULT_MAX_CSP_ILP_TRIPS = 1500
 DEFAULT_MAX_CSP_ILP_BLOCKS = 450
 DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 220

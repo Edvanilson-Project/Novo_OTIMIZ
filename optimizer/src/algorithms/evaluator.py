@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal, ROUND_HALF_UP, getcontext
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 from ..core.config import get_settings
 from ..core.rule_engine import DynamicRuleEngine
@@ -790,7 +790,7 @@ class CostEvaluator(ICostEvaluator):
         vsp = self.vsp_cost_breakdown(result.vsp, vehicle_types)
         csp = self.csp_cost_breakdown(result.csp)
         total = float(vsp["total"]) + float(csp["total"])
-        return {
+        breakdown = {
             "total": _R(total),
             "vsp": vsp,
             "csp": csp,
@@ -799,6 +799,51 @@ class CostEvaluator(ICostEvaluator):
                 "csp": round((float(csp["total"]) / total), 4) if total > 0 else 0.0,
             },
         }
+        # Auditoria 2026-05-17: adiciona gap de otimalidade vs lower bound.
+        # Sem isso, o cliente não sabe se a solução está perto do ótimo ou longe.
+        breakdown["optimality"] = self._optimality_metrics(result)
+        return breakdown
+
+    def _optimality_metrics(self, result: OptimizationResult) -> Dict[str, Any]:
+        """Calcula lower bound de Bodin & Golden (1981) e gap de otimalidade VSP.
+
+        Lower bound = max(número de viagens simultâneas).
+        Toda solução viável deve usar ≥ LB veículos; gap = (actual - LB) / LB × 100.
+
+        Referência: Bodin L., Golden B. (1981) "Classification in vehicle routing
+        and scheduling", Networks 11(2):97-108.
+        """
+        try:
+            all_trips = [t for b in result.vsp.blocks for t in b.trips]
+            if result.vsp.unassigned_trips:
+                all_trips.extend(result.vsp.unassigned_trips)
+            if not all_trips:
+                return {"vsp_lower_bound": 0, "vsp_actual": 0, "vsp_gap_pct": 0.0}
+            events: List[Tuple[int, int]] = []
+            for t in all_trips:
+                events.append((int(t.start_time), 1))
+                events.append((int(t.end_time), -1))
+            events.sort(key=lambda e: (e[0], e[1]))
+            concurrent = peak = 0
+            for _, delta in events:
+                concurrent += delta
+                if concurrent > peak:
+                    peak = concurrent
+            actual = len(result.vsp.blocks)
+            gap_pct = ((actual - peak) / peak * 100.0) if peak > 0 else 0.0
+            return {
+                "vsp_lower_bound": peak,
+                "vsp_actual": actual,
+                "vsp_gap_pct": round(gap_pct, 2),
+                "vsp_gap_explained": (
+                    "Gap = (veículos usados - peak concurrent trips) / peak × 100. "
+                    "Gap=0 significa ótimo na cota inferior de Bodin & Golden (1981); "
+                    "gap > 0 pode ser otimização subótima OU restrição operacional (max_shift, etc)."
+                ),
+            }
+        except Exception as exc:  # pragma: no cover - defesa contra erro inesperado
+            logger.warning("[OPTIMALITY] cálculo falhou: %s", exc)
+            return {"vsp_lower_bound": None, "vsp_actual": None, "vsp_gap_pct": None}
 
     # ── Penalidade de inviabilidade ───────────────────────────────────────────
 

@@ -782,3 +782,68 @@ class WeeklyRosteringResponse(BaseModel):
     algorithm: str
     feasible: bool
     meta: Dict[str, Any]
+
+
+class DisruptionRecoveryRequest(BaseModel):
+    """Payload para re-otimização incremental após perturbação operacional."""
+    trips: List[TripInput] = Field(..., description="Lista completa de trips do schedule")
+    vehicle_types: List[VehicleTypeInput] = Field(...)
+    disrupted_trip_ids: List[int] = Field(..., description="IDs das trips perturbadas/atrasadas/canceladas")
+    current_blocks: List[List[TripInput]] = Field(
+        default_factory=list,
+        description="Schedule atual como lista de blocos (cada bloco = lista de trips)"
+    )
+    depot_id: Optional[int] = None
+    vsp_params: Dict[str, Any] = Field(default_factory=dict)
+    run_id: Optional[str] = None
+
+
+class DisruptionRecoveryResponse(BaseModel):
+    status: str = "ok"
+    run_id: Optional[str] = None
+    num_vehicles: int
+    disruption_strategy: str
+    disruption_affected_blocks: int
+    disruption_frozen_blocks: int
+    disruption_reoptimized_blocks: int
+    disruption_trips_reassigned: int
+    disruption_affected_ratio: float
+    meta: Dict[str, Any] = {}
+
+
+class DemandForecastRequestItem(BaseModel):
+    line_id: int
+    hour: int = Field(..., ge=0, le=23)
+    day_of_week: int = Field(..., ge=0, le=6)
+    month: int = Field(default=6, ge=1, le=12)
+    is_holiday: bool = False
+    weather_score: float = Field(default=1.0, ge=0.0, le=2.0)
+
+
+class DemandForecastRequest(BaseModel):
+    requests: List[DemandForecastRequestItem]
+    historical_data: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Dados históricos para treino (se omitido, usa fallback de média global)"
+    )
+    capacity_per_bus: int = Field(default=40, ge=1)
+    target_load_factor: float = Field(default=0.75, gt=0.0, le=1.0)
+
+
+class DemandForecastPrediction(BaseModel):
+    line_id: int
+    hour: int
+    day_of_week: int
+    predicted_passengers: float
+    confidence_low: float
+    confidence_high: float
+    model_used: str
+    recommended_buses_per_hour: Optional[int] = None
+    headway_minutes: Optional[int] = None
+
+
+class DemandForecastResponse(BaseModel):
+    status: str = "ok"
+    predictions: List[DemandForecastPrediction]
+    model_trained_on_samples: int
+    feature_importances: Dict[str, float] = {}

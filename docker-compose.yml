@@ -128,6 +128,73 @@ services:
       retries: 5
       start_period: 30s
 
+  celery-worker:
+    build:
+      context: ./optimizer
+      dockerfile: Dockerfile
+    container_name: otimiz-v2-celery-worker
+    restart: unless-stopped
+    command: celery -A src.worker worker --loglevel=info --concurrency=2 --queues=optimizer
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-otimiz_admin}
+      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_NAME=${DB_NAME:-otimiz_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - WORKER_TYPE=general
+    networks:
+      - otimiz-network
+
+  celery-worker-depot:
+    build:
+      context: ./optimizer
+      dockerfile: Dockerfile
+    container_name: otimiz-v2-celery-worker-depot
+    restart: unless-stopped
+    command: celery -A src.worker worker --loglevel=info --concurrency=4 --queues=optimizer_depot
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-otimiz_admin}
+      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_NAME=${DB_NAME:-otimiz_db}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - WORKER_TYPE=depot
+    networks:
+      - otimiz-network
+
+  celery-flower:
+    image: mher/flower:2.0
+    container_name: otimiz-v2-flower
+    restart: unless-stopped
+    command: celery flower --broker=redis://redis:6379/0 --port=5555
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "5555:5555"
+    networks:
+      - otimiz-network
+
 networks:
   otimiz-network:
     driver: bridge

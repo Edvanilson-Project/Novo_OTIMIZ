@@ -148,11 +148,99 @@ class OptimizerService:
             cct_params["operator_single_vehicle_only"] = True
             vsp_params["allow_vehicle_swap"] = False
 
-        # Propagar TODOS os parâmetros do DTO global para cct_params e vsp_params
-        # Isso garante compatibilidade com solvers legados e validadores.
+        # BUG-04 fix (auditoria 2026-05-17): propagar TODOS os parâmetros para ambos
+        # cct_params e vsp_params causa colisão semântica (ex: "max_shift_minutes" tem
+        # significado diferente para veículo vs motorista). Agora usamos whitelist.
+        #
+        # Parâmetros que só fazem sentido em CCT (tripulação/motorista):
+        _CCT_ONLY_KEYS = {
+            "max_work_minutes",
+            "max_driving_minutes",
+            "min_break_minutes",
+            "meal_break_minutes",
+            "mandatory_break_after_minutes",
+            "inter_shift_rest_minutes",
+            "min_inter_shift_rest_minutes",
+            "max_spread_soft",
+            "max_spread_hard",
+            "cost_duty",
+            "min_paid_hours",
+            "overtime_multiplier",
+            "overtime_limit_minutes",
+            "nocturnal_start_hour",
+            "nocturnal_end_hour",
+            "nocturnal_extra_pct",
+            "holiday_extra_pct",
+            "idle_time_is_paid",
+            "waiting_time_pay_pct",
+            "enforce_trip_groups_hard",
+            "operator_pairing_hard",
+            "operator_single_vehicle_only",
+            "operator_change_terminals_only",
+            "enforce_single_line_duty",
+            "daily_driving_limit_minutes",
+            "long_unpaid_break_limit_minutes",
+            "long_unpaid_break_penalty_weight",
+        }
+        # Parâmetros que só fazem sentido em VSP (veículos):
+        _VSP_ONLY_KEYS = {
+            "max_vehicle_shift_minutes",
+            "max_block_duration_minutes",
+            "fixed_vehicle_activation_cost",
+            "deadhead_cost_per_minute",
+            "idle_cost_per_minute",
+            "allow_multi_line_block",
+            "allow_vehicle_swap",
+            "same_depot_required",
+            "preserve_preferred_pairs",
+            "preferred_pair_window_minutes",
+            "pair_break_penalty",
+            "paired_trip_bonus",
+            "hard_pairing_vehicle_level",
+            "hard_pairing_penalty",
+            "vehicle_idle_gap_behavior",
+            "vehicle_idle_gap_threshold_minutes",
+            "mcnf_ilp_timeout_seconds",
+            "timetable_slack_minutes",
+            "timetable_slack_step_minutes",
+            "max_vsp_metaheuristic_trips",
+            "max_vsp_metaheuristic_blocks",
+            "force_vsp_metaheuristics",
+            "algorithm_preference",
+        }
+        # Compartilhados (cabem em ambos os namespaces):
+        _SHARED_KEYS = {
+            "min_layover_minutes",
+            "enforce_min_interval",
+            "strict_min_interval",
+            "connection_tolerance_minutes",
+            "enforce_same_depot_start_end",
+            "force_round_trip",
+            "trip_group_keep_bonus",
+            "strict_hard_validation",
+            "pullout_minutes",
+            "pullback_minutes",
+            "pullout_counts_in_driver_shift",
+            "pullback_counts_in_driver_shift",
+            "random_seed",
+            "time_budget_s",
+            "operational_quality_mode",
+            "dynamic_rules",
+        }
         for key, value in intent_params.items():
-            if key not in ("trips", "vehicle_types"):  # evitar sobrecarga
+            if key in ("trips", "vehicle_types"):
+                continue
+            in_cct = key in _CCT_ONLY_KEYS or key in _SHARED_KEYS
+            in_vsp = key in _VSP_ONLY_KEYS or key in _SHARED_KEYS
+            if not in_cct and not in_vsp:
+                # Não conhecido — propaga para ambos (compat) mas registra
+                logger.debug("[PARAMS-UNKNOWN] key=%s propagada para CCT+VSP (compat)", key)
                 cct_params[key] = value
+                vsp_params[key] = value
+                continue
+            if in_cct:
+                cct_params[key] = value
+            if in_vsp:
                 vsp_params[key] = value
 
         # Mapeamentos específicos de nomes legados.
@@ -3677,9 +3765,34 @@ class OptimizerService:
             return self._make_set_covering_csp(full_params, vsp_params)
         return GreedyCSP(vsp_params=vsp_params, **full_params)
 
-    def _make_set_covering_csp(self, cct_params: Dict[str, Any], vsp_params: Dict[str, Any]):
-        # CP-SAT (OR-Tools) preferido por ser mais rápido em scheduling.
-        # Fallback automático para PuLP/CBC se ortools não estiver instalado.
+    def _make_set_covering_csp(
+        self,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        prefer_solver: Optional[str] = None,
+    ):
+        """Constrói CSP de set covering. BUG-02 fix (auditoria 2026-05-17):
+        permite escolher explicitamente entre CP-SAT (OR-Tools) e PuLP/CBC.
+
+        prefer_solver:
+            - "cp_sat"   → força OR-Tools CP-SAT (raise se não disponível)
+            - "pulp_cbc" → força PuLP+CBC (não usa OR-Tools mesmo se disponível)
+            - None       → comportamento padrão: CP-SAT se disponível, senão CBC
+        """
+        if prefer_solver == "pulp_cbc":
+            return SetPartitioningOptimizedCSP(vsp_params=vsp_params, **cct_params)
+
+        if prefer_solver == "cp_sat":
+            try:
+                from ortools.sat.python import cp_model as _  # noqa: F401
+            except ImportError as exc:
+                raise InvalidAlgorithmError(
+                    "AlgorithmType.CP_SAT requested but ortools is not installed. "
+                    "Install with: pip install ortools>=9.10.0 — or choose SET_PARTITIONING."
+                ) from exc
+            return CPSatCSP(vsp_params=vsp_params, **cct_params)
+
+        # Default: CP-SAT preferido, fallback silencioso para CBC se ortools indisponível
         try:
             from ortools.sat.python import cp_model as _  # noqa: F401
 

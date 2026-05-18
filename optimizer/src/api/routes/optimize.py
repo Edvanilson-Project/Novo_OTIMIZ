@@ -25,8 +25,15 @@ from fastapi import APIRouter, HTTPException
 from ...core.config import get_settings
 from ...domain.models import VehicleType
 from ...services.optimizer_tasks import run_optimization_task
+from ...algorithms.integrated.disruption_recovery import DisruptionRecoverySolver
+from ...services.demand_forecaster import DemandForecaster
 from ..schemas import (
     BlockOutput,
+    DemandForecastRequest,
+    DemandForecastResponse,
+    DemandForecastPrediction,
+    DisruptionRecoveryRequest,
+    DisruptionRecoveryResponse,
     DutyOutput,
     ErrorResponse,
     OptimizeRequest,
@@ -406,3 +413,135 @@ async def get_optimization_status(task_id: str) -> TaskStatusResponse:
 
     # ── Estado desconhecido (REVOKED, etc.) ──────────────────────────────────
     return TaskStatusResponse(status="failed", task_id=task_id, error={"state": state})
+
+
+@router.post(
+    "/recover",
+    response_model=DisruptionRecoveryResponse,
+    tags=["optimization"],
+    summary="Re-otimização incremental após perturbação operacional",
+    description=(
+        "Dado o schedule atual e as trips perturbadas (atrasadas/canceladas/veículo avariado), "
+        "reconstrói o menor subconjunto de blocos necessário para restaurar a viabilidade "
+        "operacional. Blocos não afetados permanecem congelados. Execução síncrona (< 5s)."
+    ),
+)
+async def disruption_recovery(body: DisruptionRecoveryRequest):
+    """Endpoint de recuperação de perturbações."""
+    from ...domain.models import Trip, VehicleType as VT
+
+    try:
+        trips = [
+            Trip(
+                id=t.id, line_id=t.line_id, start_time=t.start_time, end_time=t.end_time,
+                origin_id=t.origin_id, destination_id=t.destination_id,
+                duration=t.duration, distance_km=t.distance_km, depot_id=t.depot_id,
+                deadhead_times={int(k): int(v) for k, v in t.deadhead_times.items()},
+            )
+            for t in body.trips
+        ]
+        vehicle_types = [
+            VT(
+                id=v.id, name=v.name, passenger_capacity=v.passenger_capacity,
+                cost_per_km=v.cost_per_km, cost_per_hour=v.cost_per_hour,
+                fixed_cost=v.fixed_cost,
+            )
+            for v in body.vehicle_types
+        ]
+        current_blocks = [
+            [
+                Trip(
+                    id=t.id, line_id=t.line_id, start_time=t.start_time, end_time=t.end_time,
+                    origin_id=t.origin_id, destination_id=t.destination_id,
+                    duration=t.duration, distance_km=t.distance_km, depot_id=t.depot_id,
+                    deadhead_times={int(k): int(v) for k, v in t.deadhead_times.items()},
+                )
+                for t in block
+            ]
+            for block in body.current_blocks
+        ]
+
+        solver = DisruptionRecoverySolver(vsp_params=body.vsp_params)
+        result = solver.solve(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            disrupted_trip_ids=set(body.disrupted_trip_ids),
+            current_blocks=current_blocks,
+            depot_id=body.depot_id,
+        )
+        meta = result.vsp.meta or {}
+        return DisruptionRecoveryResponse(
+            run_id=body.run_id,
+            num_vehicles=result.vsp.num_vehicles,
+            disruption_strategy=str(meta.get("disruption_strategy", "incremental")),
+            disruption_affected_blocks=int(meta.get("disruption_affected_blocks", 0)),
+            disruption_frozen_blocks=int(meta.get("disruption_frozen_blocks", 0)),
+            disruption_reoptimized_blocks=int(meta.get("disruption_reoptimized_blocks", 0)),
+            disruption_trips_reassigned=int(meta.get("disruption_trips_reassigned", 0)),
+            disruption_affected_ratio=float(meta.get("disruption_affected_ratio", 0.0)),
+            meta=meta,
+        )
+    except Exception as exc:
+        logger.exception("disruption_recovery_failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/demand-forecast",
+    response_model=DemandForecastResponse,
+    tags=["optimization"],
+    summary="Previsão de demanda por linha e período (ML)",
+    description=(
+        "Treina um modelo GradientBoosting (sklearn) com dados históricos opcionais e "
+        "prediz ridership (passageiros) por (line_id, hour, day_of_week). "
+        "Sem histórico, usa fallback de média global. "
+        "Retorna também a frequência recomendada (ônibus/hora) para cada combinação."
+    ),
+)
+async def demand_forecast(body: DemandForecastRequest):
+    """Endpoint de previsão de demanda com sklearn."""
+    try:
+        forecaster = DemandForecaster()
+        n_samples = 0
+        if body.historical_data:
+            forecaster.fit(body.historical_data)
+            n_samples = len(body.historical_data)
+
+        request_dicts = [
+            {
+                "line_id": r.line_id, "hour": r.hour, "day_of_week": r.day_of_week,
+                "month": r.month, "is_holiday": r.is_holiday, "weather_score": r.weather_score,
+                "passengers": 0,
+            }
+            for r in body.requests
+        ]
+        raw_preds = forecaster.predict(request_dicts)
+
+        predictions = []
+        for req, pred in zip(body.requests, raw_preds):
+            rec = forecaster.recommend_frequency(
+                line_id=req.line_id, hour=req.hour, day_of_week=req.day_of_week,
+                capacity_per_bus=body.capacity_per_bus,
+                target_load_factor=body.target_load_factor,
+                month=req.month, is_holiday=req.is_holiday, weather_score=req.weather_score,
+            )
+            predictions.append(DemandForecastPrediction(
+                line_id=pred.line_id,
+                hour=pred.hour,
+                day_of_week=pred.day_of_week,
+                predicted_passengers=pred.predicted_passengers,
+                confidence_low=pred.confidence_low,
+                confidence_high=pred.confidence_high,
+                model_used=pred.model_used,
+                recommended_buses_per_hour=rec.recommended_buses_per_hour,
+                headway_minutes=rec.headway_minutes,
+            ))
+
+        return DemandForecastResponse(
+            predictions=predictions,
+            model_trained_on_samples=n_samples,
+            feature_importances=forecaster.feature_importances(),
+        )
+    except Exception as exc:
+        logger.exception("demand_forecast_failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

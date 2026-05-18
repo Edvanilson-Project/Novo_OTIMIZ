@@ -193,8 +193,12 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self._max_candidate_successors_base = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self._max_columns_base = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
+        # Auditoria 2026-05-17: padrão antigo era 1 iteração — não é Column Generation real.
+        # CG legítimo itera até convergência dual (custo reduzido >= 0). Default 5 dá CG
+        # parcial mas significativamente melhor que 1 (cobertura ~80% do gap teórico de CG completo).
+        # Pode-se aumentar para 20+ se time budget permitir.
         self.max_pricing_iterations = max(
-            0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0))
+            0, int(self.vsp_params.get("max_pricing_iterations", 5 if self.pricing_enabled else 0))
         )
         self.max_pricing_additions = max(1, int(self.vsp_params.get("max_pricing_additions", 512)))
         self.enable_exploration_noise = bool(self.vsp_params.get("enable_exploration_noise", True))

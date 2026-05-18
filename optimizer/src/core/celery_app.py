@@ -28,6 +28,16 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    # Roteamento por fila: tarefas de depot usam fila dedicada com 4 workers
+    task_routes={
+        "run_optimization": {"queue": "optimizer"},
+        "run_depot_optimization": {"queue": "optimizer_depot"},
+        "run_disruption_recovery": {"queue": "optimizer"},
+    },
+    task_queues={
+        "optimizer": {"exchange": "optimizer", "routing_key": "optimizer"},
+        "optimizer_depot": {"exchange": "optimizer_depot", "routing_key": "optimizer_depot"},
+    },
     # Serialização e Compressão (GZIP previne OOM no Redis em grandes payloads)
     task_serializer="json",
     result_serializer="json",
