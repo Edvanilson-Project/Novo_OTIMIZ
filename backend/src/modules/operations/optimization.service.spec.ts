@@ -55,7 +55,7 @@ describe('OptimizationService polling', () => {
       {} as any, // DataSource
       gateway as any, // OptimizationGateway
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
@@ -313,7 +313,7 @@ describe('OptimizationService polling', () => {
       {} as any,
       gateway as any,
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any,
       { getCompanyId: jest.fn() } as any,
     );
@@ -380,7 +380,7 @@ describe('OptimizationService polling', () => {
       { transaction: (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
@@ -469,7 +469,7 @@ describe('OptimizationService polling', () => {
       { transaction: (cb: any) => cb(manager) } as any, // DataSource
       gateway as any, // OptimizationGateway
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
@@ -605,7 +605,7 @@ describe('OptimizationService polling', () => {
       } as any, // DataSource
       gateway as any, // OptimizationGateway
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any, // ConfigService
       { getCompanyId: jest.fn() } as any, // TenantContext
     );
@@ -717,7 +717,7 @@ describe('OptimizationService polling', () => {
         {} as any, // DataSource
         gateway as any, // OptimizationGateway
         {
-          get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+          get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
         } as any, // ConfigService
         { getCompanyId: jest.fn() } as any, // TenantContext
       );
@@ -820,7 +820,7 @@ describe('OptimizationService polling', () => {
       {} as any,
       gateway as any,
       {
-        get: jest.fn().mockReturnValue('test-strong-key-for-specs-only'),
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
       } as any,
       { getCompanyId: jest.fn() } as any,
     );
