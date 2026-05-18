@@ -248,8 +248,9 @@ export class ParametersService {
       trip_group_keep_bonus: 240.0,
       algorithm_preference: 'hybrid_pipeline',
       ilp_timeout_seconds: 120,
-      nocturnal_start_hour: null,
-      nocturnal_end_hour: null,
+      // Nullable in DB schema; explicit null keeps cross-field validation guards working
+      nocturnal_start_hour: null as unknown as number,
+      nocturnal_end_hour: null as unknown as number,
     });
 
     return this.parametersRepository.save(newParams);

@@ -34,7 +34,7 @@ describe('AuditService', () => {
 
     it('handles missing optional fields gracefully', async () => {
       await service.log({
-        action: AuditAction.READ,
+        action: AuditAction.CREATE,
         entity: 'Schedule',
       });
       expect(repo.save).toHaveBeenCalled();
