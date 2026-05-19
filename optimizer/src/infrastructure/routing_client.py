@@ -14,7 +14,6 @@ MELHORIA MATEMÁTICA v2.0 (DeepSeek R1 Analysis):
 import json
 import logging
 import math
-import time
 from typing import Dict, List, Optional, Tuple
 
 import redis
@@ -270,10 +269,11 @@ class RoutingClient:
         return f"route_matrix:v2:{abs(ids_hash)}"
 
     def _get_cost_params_hash(self) -> str:
-        """Gera hash dos parâmetros de custo atuais para versionamento de cache.
+        """Gera hash determinístico dos parâmetros de custo p/ versionamento de cache.
 
-        Calcula um hash MD5 baseado nos parâmetros de custo atuais.
-        Isso garante que mudanças nos custos invalidem automaticamente o cache.
+        IMPORTANTE: nunca inclua componentes temporais (time.time()) na chave —
+        defeitua o TTL do Redis e gera misses determinísticos. Invalidação por
+        tempo deve ser feita via TTL do setex, não via chave.
         """
         import hashlib
         import json
@@ -281,9 +281,8 @@ class RoutingClient:
         params = {
             "crew_cost": getattr(self.evaluator, "crew_cost_per_hour", 25.0),
             "vehicle_cost": getattr(self.evaluator, "cost_km", 2.5),
-            "timestamp": int(time.time() // 3600),  # Muda a cada hora
         }
-        return hashlib.md5(json.dumps(params).encode()).hexdigest()[:8]
+        return hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()[:8]
 
     def _save_matrix_to_cache(
         self,

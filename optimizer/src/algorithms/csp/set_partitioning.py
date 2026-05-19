@@ -1,14 +1,16 @@
 """
-CSP por Set Covering / Column Generation simplificada.
+CSP por Set Partitioning (Exact Cover) / Column Generation simplificada.
 
 Objetivo:
     min Σ_j c_j x_j
 s.a.
-    Σ_j a_ij x_j >= 1
+    Σ_j a_ij x_j == 1   (cada tarefa em EXATAMENTE uma jornada)
 
-As colunas são construídas sobre tarefas produzidas pelo run-cutting do CSP.
-Assim, cada tarefa legalmente dirigível precisa ser coberta por pelo menos uma
-jornada, aproximando melhor a formulação clássica de set covering.
+Por que ==1 e não >=1: covering permite a mesma tarefa em múltiplas jornadas
+selecionadas, gerando duplicação e MANDATORY_GROUP_SPLIT no validator.
+
+Nota: a fase de pricing usa relaxação LP com >=1 apenas para extrair duais π_i
+para o SPPRC; o MILP final aplica ==1 (com slack penalizado por BIG_M).
 """
 
 from __future__ import annotations

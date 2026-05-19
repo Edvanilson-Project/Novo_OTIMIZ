@@ -1,9 +1,14 @@
 """
-CSP por Set Covering / Column Generation OTIMIZADA - Nível Optibus
+CSP por Set Partitioning (Exact Cover) / Column Generation OTIMIZADA - Nível Optibus
 
 OBJETIVO PRINCIPAL:
     min Σ_j c_j x_j (minimizar custo total das jornadas)
-    s.a. Σ_j a_ij x_j >= 1 (cada tarefa coberta por pelo menos uma jornada)
+    s.a. Σ_j a_ij x_j == 1 (cada tarefa em EXATAMENTE uma jornada selecionada)
+
+Nota sobre pricing/column generation: a fase de geração de colunas resolve a
+relaxação LP com >= 1 SOMENTE para extrair valores duais (π_i) usados no
+subproblema SPPRC. O MILP final (build_final_milp) aplica == 1 com slack
+penalizado por BIG_M — evita duplicação de cobertura e MANDATORY_GROUP_SPLIT.
 
 PROBLEMA RESOLVIDO:
     O algoritmo original sofre de 'Out of Memory' e 'Timeouts' devido à explosão combinatória.
@@ -1133,7 +1138,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         1. Pré-processamento: Corta blocos longos que precisam de rendição
         2. Geração de colunas: Com poda agressiva e limites dinâmicos
         3. Pricing iterativo: Se habilitado, melhora qualidade da solução
-        4. Resolução ILP: Usa pulp para problema de set covering
+        4. Resolução ILP: Usa pulp para set partitioning (==1 com slack BIG_M)
         5. Pós-processamento: Garante cobertura completa e viabilidade
 
         GARANTIAS:
