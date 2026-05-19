@@ -287,15 +287,18 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                 columns = columns[: self.max_columns]
                 break
 
-        prob = pulp.LpProblem("CSP_SetCovering", pulp.LpMinimize)
+        prob = pulp.LpProblem("CSP_SetPartitioning", pulp.LpMinimize)
         x = [pulp.LpVariable(f"x_{index}", cat="Binary") for index in range(len(columns))]
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
+        # Partition (==1): cada task em exatamente uma jornada. Antes era covering
+        # (>=1) que permitia duties sobrepostas, gerando MANDATORY_GROUP_SPLIT no
+        # validador (mesma trip em múltiplos rosters). Partition é semântica correta.
         for task_id in task_ids:
             prob += (
                 pulp.lpSum(
                     x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)
                 )
-                >= 1
+                == 1
             )
         prob.solve(_make_solver(total_time_limit_s, threads=settings.ilp_threads))
 

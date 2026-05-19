@@ -1258,12 +1258,14 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 if task.id in task_to_columns:
                     task_to_columns[task.id].append(col_idx)
 
-        prob = pulp.LpProblem("CSP_SetCovering_MILP", pulp.LpMinimize)
+        prob = pulp.LpProblem("CSP_SetPartitioning_MILP", pulp.LpMinimize)
         x = [pulp.LpVariable(f"x_{index}", cat="Binary") for index in range(len(columns))]
-        s_int = {t_id: pulp.LpVariable(f"s_int_{t_id}", cat="Integer", lowBound=0) for t_id in task_ids}
+        # Slack binário: 0 = task coberta exatamente uma vez, 1 = task descoberta (penalizada BIG_M)
+        s_int = {t_id: pulp.LpVariable(f"s_int_{t_id}", cat="Binary") for t_id in task_ids}
 
-        # Aplica Warm Start Básico (Tenta forçar valores inicias nas colunas unitárias via Greedy fallback subentendido)
-        # Identifica tarefas que já tinham colunas únicas no Greedy/RunCutting
+        # Warm start: colunas unitárias (greedy seed) viáveis para partição.
+        # Quando há colunas maiores selecionadas, o solver descarta as unitárias
+        # conflitantes via restrição == 1.
         for i, (combo, _) in enumerate(columns):
             if len(combo) == 1:
                 x[i].setInitialValue(1.0)
@@ -1275,11 +1277,15 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         obj_terms.extend([(s_int[t_id], BIG_M) for t_id in task_ids])
         prob += pulp.LpAffineExpression(obj_terms)
 
-        # Restrições Constraints Vetorizadas (10x a 50x mais rápido que comprehension generator)
+        # Partition (==1 + slack): cada task em exatamente UMA jornada selecionada.
+        # Antes era covering (>=1) que permitia mesma task em múltiplas jornadas,
+        # gerando duplicação de cobertura e MANDATORY_GROUP_SPLIT no validator.
+        # Slack=1 ⟹ task descoberta (cost BIG_M), evita infactibilidade quando
+        # não há column pool completo.
         for task_id in task_ids:
             constraint_terms = [(x[i], 1.0) for i in task_to_columns[task_id]]
             constraint_terms.append((s_int[task_id], 1.0))
-            prob += pulp.LpAffineExpression(constraint_terms) >= 1.0, f"cover_int_{task_id}"
+            prob += pulp.LpAffineExpression(constraint_terms) == 1.0, f"cover_int_{task_id}"
 
         # Resolve Submetendo Cortes, Heurística e Gap Tolerado para convergência rápida em instâncias massivas
         prob.solve(

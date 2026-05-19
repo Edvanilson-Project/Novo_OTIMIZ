@@ -49,9 +49,7 @@ def _solve_group(args: Tuple) -> VSPSolution:
     """Função de topo para ProcessPoolExecutor (deve ser picklável)."""
     import os
 
-    os.environ.setdefault("INTERNAL_OPTIMIZER_KEY", "subprocess-worker-key")
-    os.environ.setdefault("DATABASE_URL", "sqlite:///./worker.db")
-    os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+    os.environ.setdefault("REDIS_URL", "redis://redis:6379/0")
 
     trip_dicts, vt_dicts, sub_algorithm, vsp_params, time_budget_s = args
 

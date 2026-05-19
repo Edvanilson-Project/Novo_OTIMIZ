@@ -571,32 +571,6 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
         return paths
 
-    def validate_solution_quality(self, result: OptimizationResult) -> Dict[str, Any]:
-        """Valida a qualidade matemática da solução."""
-        validation = {
-            "optimality_gap": None,
-            "constraint_violations": 0,
-            "cost_consistency": True,
-            "cct_compliance": True,
-        }
-
-        # 1. Verificar violações CCT (spread_time = jornada wall-clock; Duty não tem duration_minutes)
-        for duty in result.csp.duties:
-            if duty.spread_time > 480:
-                validation["constraint_violations"] += 1
-                validation["cct_compliance"] = False
-
-        # 2. Verificar consistência de custos
-        internal_cost = result.total_cost
-        api_cost = self.evaluator.total_cost_breakdown(result, [])["total"]
-        validation["cost_consistency"] = self._validate_cost_consistency(internal_cost, api_cost)
-
-        # 3. Calcular gap de otimalidade (se disponível)
-        if hasattr(result, "lower_bound"):
-            validation["optimality_gap"] = (result.total_cost - result.lower_bound) / result.total_cost
-
-        return validation
-
     def _evaluate_path(self, path: List[Trip]) -> Dict:
         """Determina o arranjo mais barato de tripulação para uma sequência de veículo."""
         vehicle_fixed = self._to_decimal(self.cct_params.get("vehicle_fixed_cost", 800.0))

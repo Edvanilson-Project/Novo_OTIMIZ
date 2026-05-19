@@ -127,6 +127,11 @@ export class OperationsController {
     return this.optimizationService.aiChat(body.metrics, body.question);
   }
 
+  @Post('rostering/weekly')
+  async rosteringWeekly(@Body() body: any) {
+    return this.optimizationService.rosteringWeekly(body);
+  }
+
   @Patch('reassign-trip')
   async reassignTrip(
     @Body('scheduleId') scheduleId: number,

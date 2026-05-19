@@ -100,43 +100,25 @@ const OperationReportViewer: React.FC<OperationReportViewerProps> = ({ scheduleI
     }
   };
 
-  const handleExportPDF = async () => {
+  const downloadBlob = async (path: string, filename: string) => {
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
-      const response = await fetch(`/api/operations/reporting/export-pdf/${scheduleId}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `operacao_relatorio_${scheduleId}.pdf`;
-        a.click();
-      }
+      const response = await apiClient.get(path, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('Erro ao exportar PDF', err);
+      console.error('Erro ao exportar', err);
     }
   };
 
-  const handleExportExcel = async () => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
-      const response = await fetch(`/api/operations/reporting/export-excel/${scheduleId}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `operacao_relatorio_${scheduleId}.xlsx`;
-        a.click();
-      }
-    } catch (err) {
-      console.error('Erro ao exportar Excel', err);
-    }
-  };
+  const handleExportPDF = () =>
+    downloadBlob(`/operations/reporting/export-pdf/${scheduleId}`, `relatorio_${scheduleId}.pdf`);
+
+  const handleExportExcel = () =>
+    downloadBlob(`/operations/reporting/export-excel/${scheduleId}`, `relatorio_${scheduleId}.xlsx`);
 
   const getSeverityColor = (severity: 'critical' | 'warning' | 'info') => {
     switch (severity) {
@@ -165,6 +147,10 @@ const OperationReportViewer: React.FC<OperationReportViewerProps> = ({ scheduleI
 
   if (!report) {
     return <Alert severity="warning">Nenhum relatório disponível</Alert>;
+  }
+
+  if (!report.metrics || !report.scenarioComparison?.current || !report.scenarioComparison?.optimized) {
+    return <Alert severity="warning">Relatório com dados incompletos. Execute uma nova otimização para gerar métricas completas.</Alert>;
   }
 
   return (
@@ -208,7 +194,7 @@ const OperationReportViewer: React.FC<OperationReportViewerProps> = ({ scheduleI
       </Card>
 
       {/* Issues Section */}
-      {report.issues.length > 0 && (
+      {(report.issues?.length ?? 0) > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardHeader title="Questões Identificadas" />
           <CardContent>
@@ -396,7 +382,7 @@ const OperationReportViewer: React.FC<OperationReportViewerProps> = ({ scheduleI
       </Card>
 
       {/* Recommendations */}
-      {report.recommendations.length > 0 && (
+      {(report.recommendations?.length ?? 0) > 0 && (
         <Card>
           <CardHeader title="Recomendações" />
           <CardContent>

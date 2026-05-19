@@ -256,6 +256,15 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         crew_block_limit = int(self._p("crew_block_limit_minutes", 0) or 0)
         if crew_block_limit > 0:
             max_vehicle_shift = min(max_vehicle_shift, crew_block_limit)
+        # max_block_span_minutes: duração TOTAL do bloco-veículo. Distinto de
+        # max_vehicle_shift_minutes (que é semântica de DUTY/motorista). Em
+        # operação real (ex: Salvador), 1 bus roda ~20h com 2-3 motoristas via
+        # run-cutting no CSP. Default 1440 alinha com MCNF; <0 desabilita.
+        # Para regredir ao comportamento antigo (block≤max_vehicle_shift), setar
+        # max_block_span_minutes igual a max_vehicle_shift.
+        max_block_span = int(self._p("max_block_span_minutes", 1440))
+        if max_block_span <= 0:
+            max_block_span = 10**9  # efetivamente infinito
         same_depot_required = bool(self._p("same_depot_required", False))
         allow_multi_line_block = bool(self._p("allow_multi_line_block", True))
         allow_vehicle_split_shifts = bool(self._p("allow_vehicle_split_shifts", True))
@@ -293,6 +302,27 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
             gid = getattr(trip, "trip_group_id", None)
             if gid is not None:
                 trip_group_map.setdefault(gid, []).append(trip.id)
+
+        # hard_pairing_vehicle_level vem do trip_group_inference quando
+        # enforce_trip_groups_hard ou operator_pairing_hard estão ativos. Quando True,
+        # a placement de uma trip num bloco deve verificar que o GRUPO INTEIRO
+        # cabe no max_vehicle_shift — caso contrário, sair do bloco evita SPLIT.
+        hard_pairing_vehicle_level = bool(self._p("hard_pairing_vehicle_level", False))
+
+        def _group_span_fits_block(trip: Trip, blk: Block) -> bool:
+            if not hard_pairing_vehicle_level:
+                return True
+            gid = getattr(trip, "trip_group_id", None)
+            if gid is None:
+                return True
+            group_ids = trip_group_map.get(gid) or []
+            if len(group_ids) <= 1:
+                return True
+            group_max_end = max(
+                (trip_by_id[tid].end_time for tid in group_ids if tid in trip_by_id),
+                default=trip.end_time,
+            )
+            return (group_max_end - blk.start_time) <= max_block_span
 
         def _forced_trip_group_candidate(trip: Trip) -> Optional[Tuple[float, Block, Dict[str, Any]]]:
             """If another trip in the same trip_group is already assigned,
@@ -392,7 +422,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 return None
             if max_idle_gap is not None and gap > max_idle_gap:
                 return None
-            if trip.end_time - target_blk.start_time > max_vehicle_shift:
+            if trip.end_time - target_blk.start_time > max_block_span:
                 return None
             if not allow_multi_line_block and last.line_id != trip.line_id:
                 return None
@@ -472,7 +502,11 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     continue
                 if max_idle_gap is not None and gap > max_idle_gap:
                     continue
-                if trip.end_time - blk.start_time > max_vehicle_shift:
+                if trip.end_time - blk.start_time > max_block_span:
+                    continue
+                # Lookahead: rejeitar bloco que não cabe o grupo inteiro evita SPLIT
+                # do par ida/volta mais tarde quando max_block_span estoura.
+                if not _group_span_fits_block(trip, blk):
                     continue
 
                 start_depot = blk.meta.get("start_depot_id")
@@ -607,7 +641,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 return None
             if max_idle_gap is not None and gap > max_idle_gap:
                 return None
-            if trip.end_time - blk.start_time > max_vehicle_shift:
+            if trip.end_time - blk.start_time > max_block_span:
                 return None
 
             start_depot = blk.meta.get("start_depot_id")
@@ -729,7 +763,11 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 blk.trips.insert(insert_idx + 1, trip)
             else:
                 blk.trips.append(trip)
-            blk.meta["connection_cost"] = float(blk.meta.get("connection_cost", 0.0)) + float(data["marginal_cost"])
+            # connection_cost deve refletir custo REAL (deadhead+idle+energy), não o
+            # pairing_delta (bonus heurístico) — senão totals ficam negativos com 100+ pares.
+            # O bonus já está em pairing_score abaixo.
+            real_connection_cost = float(data["marginal_cost"]) - float(data.get("pairing_delta", 0.0))
+            blk.meta["connection_cost"] = float(blk.meta.get("connection_cost", 0.0)) + real_connection_cost
             blk.meta["deadhead_minutes"] = int(blk.meta.get("deadhead_minutes", 0)) + int(data["needed_deadhead"])
             blk.meta["idle_minutes"] = int(blk.meta.get("idle_minutes", 0)) + max(
                 0, int(data["gap"] - data["needed_deadhead"])
@@ -751,7 +789,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
 
             still_active: List[Block] = []
             for active in active_blocks:
-                if trip.start_time - active.trips[-1].end_time > max_vehicle_shift:
+                if trip.start_time - active.trips[-1].end_time > max_block_span:
                     closed_blocks.append(active)
                 else:
                     still_active.append(active)
@@ -785,7 +823,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
                 if max_idle_gap is not None and gap > max_idle_gap:
                     return None
-                if trip.end_time - target.start_time > max_vehicle_shift:
+                if trip.end_time - target.start_time > max_block_span:
                     return None
                 start_depot = target.meta.get("start_depot_id")
                 end_depot = target.meta.get("end_depot_id")
@@ -826,7 +864,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     return None
                 if max_idle_gap is not None and gap > max_idle_gap:
                     return None
-                if target.end_time - trip.start_time > max_vehicle_shift:
+                if target.end_time - trip.start_time > max_block_span:
                     return None
                 start_depot = target.meta.get("start_depot_id")
                 end_depot = target.meta.get("end_depot_id")
@@ -906,6 +944,99 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
 
             if moved_count > 0:
                 warnings.append(f"SINGLE_TRIP_BLOCKS_COMPACTED count={moved_count}")
+
+        # Multi-block stitching: emendar blocos sequenciais quando o final de um
+        # cabe antes do início do outro respeitando deadhead+CCT.
+        # IMPORTANTE: max_vehicle_shift é restrição de JORNADA (driver shift), não
+        # de BLOCO (vehicle daily run). Um bus pode rodar 20h com 2-3 motoristas
+        # (paridade com MCNF). O CSP cuida do split em duties. Por isso usamos
+        # `max_block_span_minutes` (default 1440 = dia inteiro) ao invés de
+        # max_vehicle_shift aqui. Lower bound de single-depot VSP é Dilworth (max
+        # concurrent trips); greedy mioope fica acima sem este pass (Löbel 1998).
+        enable_multi_block_stitch = bool(self._p("enable_multi_block_stitch", True))
+        if enable_multi_block_stitch and not (vehicle and vehicle.is_electric):
+            stitch_max_gap = int(self._p("multi_block_stitch_max_gap_minutes", 240))
+            max_block_span = int(self._p("max_block_span_minutes", 1440))
+            stitched_count = 0
+            # Iteração de ponto-fixo: continua emendar até convergir
+            changed = True
+            iter_count = 0
+            max_iters = 8
+            while changed and iter_count < max_iters:
+                changed = False
+                iter_count += 1
+                ordered = sorted(all_blocks, key=lambda b: (b.start_time, b.id))
+                for source in list(ordered):
+                    if source not in all_blocks or not source.trips:
+                        continue
+                    last = source.trips[-1]
+                    best_target: Optional[Block] = None
+                    best_score = None
+                    for target in ordered:
+                        if target.id == source.id or target not in all_blocks or not target.trips:
+                            continue
+                        first = target.trips[0]
+                        gap = int(first.start_time - last.end_time)
+                        if gap < 0 or gap > stitch_max_gap:
+                            continue
+                        # Span combinado dentro do limite de bloco (VEÍCULO, não driver).
+                        if target.trips[-1].end_time - source.start_time > max_block_span:
+                            continue
+                        # Multi-line check
+                        if not allow_multi_line_block and last.line_id != first.line_id:
+                            continue
+                        # Depot check
+                        src_depot = source.meta.get("start_depot_id")
+                        tgt_depot = target.meta.get("start_depot_id")
+                        if same_depot_required and src_depot is not None and tgt_depot is not None and src_depot != tgt_depot:
+                            continue
+                        # Idle gap
+                        if max_idle_gap is not None and gap > max_idle_gap:
+                            continue
+                        # Connection feasibility (deadhead + CCT)
+                        if not is_connection_feasible(
+                            last,
+                            first,
+                            min_layover=min_layover,
+                            min_break=int(min_break) if min_break is not None else 30,
+                            enforce_min_interval=enforce_min_interval,
+                            connection_tolerance=connection_tolerance,
+                        ):
+                            continue
+                        # EV SoC check skipado (já verificado para vehicle não-elétrico)
+                        # Score: prioriza gap menor (menos idle desperdiçado)
+                        score = gap
+                        if best_score is None or score < best_score:
+                            best_score = score
+                            best_target = target
+                    if best_target is not None:
+                        # Merge target em source
+                        deadhead_need = max(
+                            min_layover,
+                            int(last.deadhead_times.get(best_target.trips[0].origin_id, 0)),
+                        )
+                        gap = int(best_target.trips[0].start_time - last.end_time)
+                        source.trips.extend(best_target.trips)
+                        source.meta["connection_cost"] = float(source.meta.get("connection_cost", 0.0)) + float(
+                            best_target.meta.get("connection_cost", 0.0)
+                            + deadhead_need * deadhead_cost
+                            + max(0, gap - deadhead_need) * idle_cost
+                        )
+                        source.meta["deadhead_minutes"] = int(source.meta.get("deadhead_minutes", 0)) + int(
+                            best_target.meta.get("deadhead_minutes", 0)
+                        ) + deadhead_need
+                        source.meta["idle_minutes"] = int(source.meta.get("idle_minutes", 0)) + int(
+                            best_target.meta.get("idle_minutes", 0)
+                        ) + max(0, gap - deadhead_need)
+                        source.meta["energy_kwh"] = float(source.meta.get("energy_kwh", 0.0)) + float(
+                            best_target.meta.get("energy_kwh", 0.0)
+                        )
+                        source.meta["end_depot_id"] = best_target.meta.get("end_depot_id", source.meta.get("end_depot_id"))
+                        all_blocks.remove(best_target)
+                        stitched_count += 1
+                        changed = True
+            if stitched_count > 0:
+                warnings.append(f"MULTI_BLOCK_STITCHED count={stitched_count} iters={iter_count}")
         pair_meta = (
             pairing_stats(all_blocks, preferred_pairs)
             if preferred_pairs

@@ -104,6 +104,10 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
     return <Alert severity="info">{error ?? 'Sem dados de jornadas disponíveis.'}</Alert>;
   }
 
+  if (!data.summary) {
+    return <Alert severity="info">Resumo de jornadas indisponível para esta escala.</Alert>;
+  }
+
   const s = data.summary;
   const violations = s.totalRestViolations + s.totalShiftViolations;
 

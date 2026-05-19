@@ -57,15 +57,13 @@ _OVERLAP_RATIO = 0.10
 
 class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
     """
-    Otimiza a frota com Bipartite Graph Matching (Linear Sum Assignment).
+    Min-Cost Network Flow para VSP de único depósito (Löbel 1998).
 
-    A formulação expande N trips em uma matriz de Custo 2N x 2N:
-    [ T->T (Conexão)    | T->D (Pull-in)  ]
-    ---------------------------------------
-    [ D->T (Pull-out)   | D->D (Dummy)    ]
-
-    A resolução desta matriz por `linear_sum_assignment` garante a cadeia
-    global incancelável que minimiza os custos operacionais da frota.
+    Modelagem como MILP binário via PuLP/CBC:
+    - Variáveis X[i,j]: arco trip i → trip j (conexão)
+    - Variáveis P_out[depot, i]: pull-out (saída do depósito)
+    - Variáveis P_in[i, depot]: pull-in (retorno ao depósito)
+    - Restrições de cobertura garantem cada trip coberta exatamente uma vez.
 
     Para instâncias >800 trips, aplica particionamento temporal com overlap
     para manter a qualidade da solução enquanto evita OOM.

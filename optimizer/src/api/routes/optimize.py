@@ -12,6 +12,7 @@ TRATAMENTO DE ERROS (Ajuste 1):
   (hints, codes, recommendations) que o frontend exibe ao utilizador.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -182,8 +183,10 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
     if body.wait_for_completion:
         try:
             # Execução síncrona direta (ignora fila Celery/Redis para resposta imediata)
-            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos
-            result_raw = run_optimization_task(payload)
+            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos.
+            # asyncio.to_thread evita bloquear o event loop (rota é async). O CBC/PuLP
+            # libera GIL durante solve, então thread pool é seguro e correto.
+            result_raw = await asyncio.to_thread(run_optimization_task, payload)
 
             if isinstance(result_raw, dict) and result_raw.get("_is_error"):
                 err = result_raw.get("error_payload", {})
@@ -197,12 +200,15 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             logger.error(f"Erro na execução síncrona: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Erro ao processar otimização síncrona: {str(e)}")
 
-    # Calcula Fingerprint Determinístico para o Smart Cache com versionamento
+    # Calcula Fingerprint Determinístico para o Smart Cache com versionamento.
+    # IMPORTANTE: fingerprint depende SÓ do problema de entrada (não do tempo).
+    # Antes incluía cache_bucket_hour=time//3600, o que invalidava o cache a cada
+    # hora apesar do TTL de 12h. Expiração temporal já é controlada por
+    # task_timestamp + setex TTL — não precisa também na chave.
     try:
         cache_payload = {
             **payload,
             "cache_version": CACHE_VERSION,
-            "cache_bucket_hour": int(time.time() // 3600),
         }
         payload_str = json.dumps(cache_payload, sort_keys=True)
         fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
@@ -214,60 +220,65 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
 
     try:
-        cached_task_id = await redis_client.get(cache_key)
-        if cached_task_id:
-            # Verificar estado da task com segurança (evita erro se backend estiver desabilitado)
-            task_state = "UNKNOWN"
-            try:
-                task_state = AsyncResult(cached_task_id).state
-            except Exception as e:
-                logger.warning(f"Não foi possível verificar estado da task {cached_task_id}: {str(e)}")
-
-            task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
-
-            # Validação adicional: garantir que a task não é muito antiga
-            if task_timestamp and int(time.time()) - int(task_timestamp) > 43200:  # 12 horas
-                logger.info(f"Cache expirado para task {cached_task_id}")
-                await redis_client.delete(cache_key)
-            elif task_state in ("PENDING", "STARTED", "SUCCESS"):
-                logger.info(
-                    "optimization_cache_hit: task_id=%s fingerprint=%s state=%s",
-                    cached_task_id,
-                    fingerprint,
-                    task_state,
-                )
-                await redis_client.aclose()
-                return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
-    except Exception as exc:
-        logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
-        # Continuar sem cache em caso de erro
-
-    try:
-        task = run_optimization_task.delay(payload)
         try:
-            # Retenção do cache por 12 horas (43200s) com timestamp
-            await redis_client.setex(cache_key, 43200, task.id)
-            await redis_client.setex(f"optimizer:task_timestamp:{task.id}", 43200, int(time.time()))
+            cached_task_id = await redis_client.get(cache_key)
+            if cached_task_id:
+                # Verificar estado da task com segurança (evita erro se backend estiver desabilitado)
+                task_state = "UNKNOWN"
+                try:
+                    task_state = AsyncResult(cached_task_id).state
+                except Exception as e:
+                    logger.warning(f"Não foi possível verificar estado da task {cached_task_id}: {str(e)}")
+
+                task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
+
+                # Validação adicional: garantir que a task não é muito antiga
+                if task_timestamp and int(time.time()) - int(task_timestamp) > 43200:  # 12 horas
+                    logger.info(f"Cache expirado para task {cached_task_id}")
+                    await redis_client.delete(cache_key)
+                elif task_state in ("PENDING", "STARTED", "SUCCESS"):
+                    logger.info(
+                        "optimization_cache_hit: task_id=%s fingerprint=%s state=%s",
+                        cached_task_id,
+                        fingerprint,
+                        task_state,
+                    )
+                    return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
         except Exception as exc:
-            logger.error(f"Falha ao salvar cache no Redis: {str(exc)}", exc_info=True)
+            logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
             # Continuar sem cache em caso de erro
-    except Exception as exc:
-        logger.exception("Falha ao enfileirar tarefa no Celery")
-        await redis_client.aclose()
-        raise HTTPException(
-            status_code=503,
-            detail=f"Fila de tarefas indisponível (Redis/Celery): {exc}",
-        ) from exc
 
-    await redis_client.aclose()
+        try:
+            task = run_optimization_task.delay(payload)
+            try:
+                # Retenção do cache por 12 horas (43200s) com timestamp
+                await redis_client.setex(cache_key, 43200, task.id)
+                await redis_client.setex(f"optimizer:task_timestamp:{task.id}", 43200, int(time.time()))
+            except Exception as exc:
+                logger.error(f"Falha ao salvar cache no Redis: {str(exc)}", exc_info=True)
+                # Continuar sem cache em caso de erro
+        except Exception as exc:
+            logger.exception("Falha ao enfileirar tarefa no Celery")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Fila de tarefas indisponível (Redis/Celery): {exc}",
+            ) from exc
 
-    logger.info(
-        "optimization_queued: task_id=%s run_id=%s trips=%d",
-        task.id,
-        body.run_id,
-        len(body.trips),
-    )
-    return TaskSubmittedResponse(status="processing", task_id=task.id)
+        logger.info(
+            "optimization_queued: task_id=%s run_id=%s trips=%d",
+            task.id,
+            body.run_id,
+            len(body.trips),
+        )
+        return TaskSubmittedResponse(status="processing", task_id=task.id)
+    finally:
+        # aclose() em finally garante fechamento em todos os caminhos (sucesso, exceção,
+        # cache hit, falha do Celery). Antes vazava conexão se exceção ocorresse entre
+        # cache lookup e enqueue.
+        try:
+            await redis_client.aclose()
+        except Exception:
+            pass
 
 
 # ── POST /optimize/chat — Chat interativo com a IA ────────────────────────────

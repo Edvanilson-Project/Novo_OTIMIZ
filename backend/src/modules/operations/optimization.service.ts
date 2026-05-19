@@ -147,6 +147,23 @@ export class OptimizationService implements OnModuleInit {
         `Cleared ${stale.affected} stale PROCESSING lock(s) on startup`,
       );
     }
+
+    // Polling fire-and-forget é perdido em restart do backend → OptimizationRun
+    // fica em RUNNING para sempre. Reconcilia o mesmo critério aplicado a schedules.
+    const staleRuns = await this.optimizationRunRepo.update(
+      { status: OptimizationRunStatus.RUNNING },
+      {
+        status: OptimizationRunStatus.FAILED,
+        errorMessage:
+          'OptimizationRun estava em RUNNING quando o backend iniciou (polling perdido).',
+        completedAt: new Date(),
+      },
+    );
+    if (staleRuns.affected && staleRuns.affected > 0) {
+      this.logger.warn(
+        `Cleared ${staleRuns.affected} stale RUNNING OptimizationRun(s) on startup`,
+      );
+    }
   }
 
   async runOptimization(
@@ -2928,5 +2945,14 @@ export class OptimizationService implements OnModuleInit {
         ? audit.sample_splits.slice(0, this.DETAIL_LIMIT)
         : [],
     };
+  }
+
+  async rosteringWeekly(body: any) {
+    const { data } = await axios.post(
+      `${this.OPTIMIZER_URL}/optimize/rostering/weekly`,
+      body,
+      { headers: { 'X-Internal-Key': this.INTERNAL_KEY }, timeout: 120000 },
+    );
+    return data;
   }
 }

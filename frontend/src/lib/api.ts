@@ -236,8 +236,8 @@ export const operationReportingApi = {
     apiClient.get(`/operations/reporting/compare/${scheduleId}`, { params: { compareWith } }).then((r) => r.data),
   getDutyStats: (scheduleId: ID) =>
     apiClient.get(`/operations/reporting/duties/${scheduleId}`).then((r) => r.data),
-  exportPdfUrl: (scheduleId: ID) => `/api/operations/reporting/export-pdf/${scheduleId}`,
-  exportExcelUrl: (scheduleId: ID) => `/api/operations/reporting/export-excel/${scheduleId}`,
+  exportPdfUrl: (scheduleId: ID) => `${API_BASE_URL}/operations/reporting/export-pdf/${scheduleId}`,
+  exportExcelUrl: (scheduleId: ID) => `${API_BASE_URL}/operations/reporting/export-excel/${scheduleId}`,
 };
 
 // ─── Scenarios & Advanced Optimization ───────────────────────────────────────
@@ -267,7 +267,7 @@ export const scenariosApi = {
 // ─── Weekly Rostering ─────────────────────────────────────────────────────────
 export const weeklyRosteringApi = {
   solve: (body: object) =>
-    apiClient.post('/optimizer/rostering/weekly', body).then((r) => r.data),
+    apiClient.post('/operations/rostering/weekly', body).then((r) => r.data),
 };
 
 export const gtfsApi = {

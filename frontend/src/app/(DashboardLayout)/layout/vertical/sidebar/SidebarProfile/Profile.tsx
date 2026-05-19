@@ -3,7 +3,7 @@ import { Box, Avatar, Typography, IconButton, Tooltip, useMediaQuery, Dialog, Di
 import { IconPower } from '@tabler/icons-react';
 import { CustomizerContext } from "@/app/context/customizerContext";
 import { useContext, useState } from 'react';
-import { getSessionUser } from '@/lib/api';
+import { getSessionUser, clearSession, apiClient } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -21,9 +21,9 @@ export const Profile = () => {
   const router = useRouter();
   const user = getSessionUser();
 
-  const handleLogout = () => {
-    localStorage.removeItem('otimiz_token');
-    localStorage.removeItem('otimiz_user');
+  const handleLogout = async () => {
+    try { await apiClient.post('/auth/logout'); } catch { /* ignora erro de rede */ }
+    clearSession();
     setConfirmOpen(false);
     router.push('/auth/login');
   };

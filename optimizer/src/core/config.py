@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:3001"])
 
     # ── Database (PostgreSQL async) ───────────────────────────────────────────
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_database: str = "otmiz_new"
-    db_username: str = "postgres"
-    db_password: str = "postgres"
+    db_host: str = Field(default="postgres", validation_alias="DB_HOST")
+    db_port: int = Field(default=5432, validation_alias="DB_PORT")
+    db_database: str = Field(default="otimiz_db", validation_alias="DB_NAME")
+    db_username: str = Field(default="otimiz_admin", validation_alias="DB_USER")
+    db_password: str = Field(default="otimiz_password", validation_alias="DB_PASSWORD")
 
     @property
     def database_url(self) -> str:
@@ -55,8 +55,8 @@ class Settings(BaseSettings):
         )
 
     # ── Backend NestJS (notificações de status) ───────────────────────────────
-    backend_url: str = "http://localhost:3001/api/v1"
-    backend_secret: str = "optimizer-internal-secret"
+    backend_url: str = Field(default="http://backend:3001/api/v1", validation_alias="BACKEND_URL")
+    backend_secret: str = Field(default="optimizer-internal-secret", validation_alias="BACKEND_SECRET")
 
     # ── Estratégia (persistência + reconciliação) ────────────────────────────
     strategy_data_dir: str = "./data/strategy"
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     openrouter_model: str = ""  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
 
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
-    redis_url: str = "redis://localhost:6379/0"  # Lida de REDIS_URL no .env ou docker-compose
+    redis_url: str = Field(default="redis://redis:6379/0", validation_alias="REDIS_URL")
     celery_task_soft_time_limit: int = 1200  # 20 min
     celery_task_time_limit: int = 1500  # 25 min
 

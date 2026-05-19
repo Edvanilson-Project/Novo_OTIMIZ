@@ -211,6 +211,13 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         self.apply_cct = bool(params.get("apply_cct", True))
         self.enforce_min_interval = bool(params.get("enforce_min_interval", params.get("strict_min_interval", False)))
+        # Quando ativo, atribuição a roster respeita cohesion de trip_group_id:
+        # se preferred roster (que já tem outras trips do mesmo grupo) está
+        # incompatível por CCT, abre novo roster ao invés de dividir o grupo.
+        self.enforce_trip_groups_hard = bool(
+            params.get("enforce_trip_groups_hard", False)
+            or params.get("operator_pairing_hard", False)
+        )
         if self.apply_cct and self.enforce_min_interval:
             # Um intervalo positivo entre viagens/tarefas do motorista não pode
             # ser menor que o intervalo mínimo parametrizado.
@@ -1653,8 +1660,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         continue
                     assigned_roster = roster
                     break
-            # Second pass: try any compatible roster
-            if assigned_roster is None:
+            # Second pass: try any compatible roster.
+            # Skip quando hard_pairing ativo e preferred existe — abrir novo roster
+            # preserva cohesion do trip_group em vez de gerar MANDATORY_GROUP_SPLIT.
+            skip_fallback = (
+                assigned_roster is None
+                and preferred_roster is not None
+                and self.enforce_trip_groups_hard
+            )
+            if assigned_roster is None and not skip_fallback:
                 if preferred_roster is not None:
                     warnings.append(f"PAIR_GROUP_ROSTER_SPLIT D{duty.id} expected_roster={preferred_roster}")
                 compatible_rosters = [roster for roster in sorted_rosters if roster_is_compatible(roster)]

@@ -63,3 +63,36 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## 5. Domain Knowledge — Optimizer (VSP/CSP)
+
+Critical invariants to preserve when editing algorithm code:
+
+**`max_vehicle_shift_minutes` vs `max_block_span_minutes`**
+- `max_vehicle_shift_minutes` = driver duty duration (CCT/CLT Brasil, ~9.3h = 560 min). Constraint on the DRIVER.
+- `max_block_span_minutes` = vehicle daily run limit (default 1440 min = full day). Constraint on the VEHICLE/BLOCK.
+- One bus can run 20h served by 2-3 drivers via run-cutting in CSP. Never conflate the two.
+
+**Set Partition constraint must be `== 1`, not `>= 1`**
+- Each task must appear in exactly one duty (`== 1`).
+- Covering (`>= 1`) allows duplicate coverage → MANDATORY_GROUP_SPLIT violation at roster validation.
+- Files: `csp/set_partitioning.py`, `csp/set_partitioning_optimized.py`.
+
+**Cost accounting in greedy VSP**
+- `pairing_delta` is a heuristic bonus for trip-group pairing. It must be subtracted from `marginal_cost` before accumulating into `connection_cost`.
+- Without this: `connection_cost` goes negative → total schedule cost is negative (invalid).
+
+**VSP polynomial optimum**
+- Single-depot VSP is solvable in polynomial time via min-cost flow (Löbel 1998).
+- MCNF lower bound for the real Salvador timetable (298 trips, lines 1↔2): **14 vehicles**.
+- Dilworth lower bound (max concurrent trips = 10) is theoretical; actual optimum is 14 due to deadhead constraints.
+- All 7 algorithms should achieve 14 vehicles on this instance after correct parameterization.
+
+**Cache fingerprint**
+- Never include time-based components (e.g., `time.time() // 3600`) in cache keys — defeats TTL-based expiry.
+
+**Async FastAPI routes**
+- Never call synchronous Celery `.delay()` result fetching or blocking I/O directly in `async def` routes.
+- Use `await asyncio.to_thread(...)` for CPU/blocking calls inside async routes.

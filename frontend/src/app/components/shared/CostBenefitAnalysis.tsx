@@ -229,69 +229,71 @@ const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ scheduleId })
             <Divider />
 
             {/* Best vs Worst Day Comparison */}
-            <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
-                Comparação: Melhor vs Pior Dia
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#e8f5e9' }}>
-                    <Stack spacing={1}>
-                      <Chip label="Melhor Dia" color="success" size="small" />
-                      <Typography variant="caption" color="textSecondary">
-                        {new Date(data.bestDay.generatedAt).toLocaleDateString('pt-BR')}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Custo:</strong>{' '}
-                        R${' '}
-                        {data.bestDay.metrics.totalCost.toLocaleString('pt-BR', {
-                          maximumFractionDigits: 0,
-                        })}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Utilização:</strong> {data.bestDay.metrics.averageUtilization.toFixed(1)}%
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Veículos:</strong> {data.bestDay.metrics.vehiclesUsed}
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#ffebee' }}>
-                    <Stack spacing={1}>
-                      <Chip label="Pior Dia" color="error" size="small" />
-                      <Typography variant="caption" color="textSecondary">
-                        {new Date(data.worstDay.generatedAt).toLocaleDateString('pt-BR')}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Custo:</strong>{' '}
-                        R${' '}
-                        {data.worstDay.metrics.totalCost.toLocaleString('pt-BR', {
-                          maximumFractionDigits: 0,
-                        })}
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Utilização:</strong> {data.worstDay.metrics.averageUtilization.toFixed(1)}%
-                      </Typography>
-                      <Typography variant="body2">
-                        <strong>Veículos:</strong> {data.worstDay.metrics.vehiclesUsed}
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                </Grid>
-              </Grid>
-
-              <Alert severity="info" sx={{ mt: 2 }}>
-                <Typography variant="body2">
-                  Diferença de custo entre melhor e pior dia: R${' '}
-                  {(data.worstDay.metrics.totalCost - data.bestDay.metrics.totalCost).toLocaleString(
-                    'pt-BR',
-                    { maximumFractionDigits: 0 }
-                  )}
+            {data.bestDay?.metrics && data.worstDay?.metrics && (
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2 }}>
+                  Comparação: Melhor vs Pior Dia
                 </Typography>
-              </Alert>
-            </Box>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#e8f5e9' }}>
+                      <Stack spacing={1}>
+                        <Chip label="Melhor Dia" color="success" size="small" />
+                        <Typography variant="caption" color="textSecondary">
+                          {new Date(data.bestDay.generatedAt).toLocaleDateString('pt-BR')}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Custo:</strong>{' '}
+                          R${' '}
+                          {(data.bestDay.metrics.totalCost ?? 0).toLocaleString('pt-BR', {
+                            maximumFractionDigits: 0,
+                          })}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Utilização:</strong> {(data.bestDay.metrics.averageUtilization ?? 0).toFixed(1)}%
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Veículos:</strong> {data.bestDay.metrics.vehiclesUsed ?? '—'}
+                        </Typography>
+                      </Stack>
+                    </Paper>
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <Paper variant="outlined" sx={{ p: 2, backgroundColor: '#ffebee' }}>
+                      <Stack spacing={1}>
+                        <Chip label="Pior Dia" color="error" size="small" />
+                        <Typography variant="caption" color="textSecondary">
+                          {new Date(data.worstDay.generatedAt).toLocaleDateString('pt-BR')}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Custo:</strong>{' '}
+                          R${' '}
+                          {(data.worstDay.metrics.totalCost ?? 0).toLocaleString('pt-BR', {
+                            maximumFractionDigits: 0,
+                          })}
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Utilização:</strong> {(data.worstDay.metrics.averageUtilization ?? 0).toFixed(1)}%
+                        </Typography>
+                        <Typography variant="body2">
+                          <strong>Veículos:</strong> {data.worstDay.metrics.vehiclesUsed ?? '—'}
+                        </Typography>
+                      </Stack>
+                    </Paper>
+                  </Grid>
+                </Grid>
+
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    Diferença de custo entre melhor e pior dia: R${' '}
+                    {((data.worstDay.metrics.totalCost ?? 0) - (data.bestDay.metrics.totalCost ?? 0)).toLocaleString(
+                      'pt-BR',
+                      { maximumFractionDigits: 0 }
+                    )}
+                  </Typography>
+                </Alert>
+              </Box>
+            )}
 
             <Divider />
 
