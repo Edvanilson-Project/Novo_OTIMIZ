@@ -122,7 +122,6 @@ def _evaluate_arrangement(
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-evaluator = CostEvaluator()
 
 
 class WhatIfRequest(BaseModel):
@@ -246,7 +245,9 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
         len(request.blocks),
     )
 
-    # Sincronização de custos dinâmicos
+    # Sincronização de custos dinâmicos: usar instância LOCAL para evitar race condition
+    # com outras requisições rodando em paralelo (thread pool do Uvicorn).
+    local_evaluator = CostEvaluator()
     if request.optimization_params:
         logger.debug(
             "evaluate-delta: Usando pesos customizados: veiculo=%.2f, km=%.2f, jornada=%.2f",
@@ -254,7 +255,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             request.optimization_params.cost_km,
             request.optimization_params.cost_duty,
         )
-        evaluator.set_costs(
+        local_evaluator.set_costs(
             cost_vehicle=request.optimization_params.cost_vehicle,
             cost_km=request.optimization_params.cost_km,
             cost_duty=request.optimization_params.cost_duty,
@@ -451,7 +452,8 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
     """
     logger.info("evaluate-baseline recebido: blocks=%d", len(request.blocks))
 
-    # Sincronização de custos dinâmicos
+    # Sincronização de custos dinâmicos: usar instância LOCAL para evitar race condition
+    local_evaluator = CostEvaluator()
     if request.optimization_params:
         logger.debug(
             "evaluate-baseline: Usando pesos customizados: veiculo=%.2f, km=%.2f, jornada=%.2f",
@@ -459,7 +461,7 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
             request.optimization_params.cost_km,
             request.optimization_params.cost_duty,
         )
-        evaluator.set_costs(
+        local_evaluator.set_costs(
             cost_vehicle=request.optimization_params.cost_vehicle,
             cost_km=request.optimization_params.cost_km,
             cost_duty=request.optimization_params.cost_duty,
