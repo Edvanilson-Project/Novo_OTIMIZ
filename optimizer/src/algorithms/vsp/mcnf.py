@@ -95,7 +95,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         allow_multi = bool(self._p("allow_multi_line_block", True))
 
         if len(trips) <= _CLUSTER_SIZE_LIMIT:
-            return self._solve_subproblem(trips, vehicle_types, depots)
+            solution = self._solve_subproblem(trips, vehicle_types, depots)
+            return self._rescore_vsp_solution(solution, vehicle_types)
 
         if not allow_multi:
             return self._solve_by_line_clustering(trips, vehicle_types, depots)
@@ -137,12 +138,13 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
 
         _log.info(f"MCNF Spatial: {len(all_blocks)} blocos de {len(by_line)} linhas")
 
-        return VSPSolution(
+        solution = VSPSolution(
             blocks=all_blocks,
             unassigned_trips=all_unassigned,
             algorithm=self.name,
             elapsed_ms=self._elapsed_ms(),
         )
+        return self._rescore_vsp_solution(solution, vehicle_types)
 
     def _solve_with_temporal_clustering(
         self,
@@ -213,12 +215,13 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
 
         _log.info(f"MCNF Temporal: {len(all_blocks)} blocos consolidados")
 
-        return VSPSolution(
+        solution = VSPSolution(
             blocks=all_blocks,
             unassigned_trips=all_unassigned,
             algorithm=self.name,
             elapsed_ms=self._elapsed_ms(),
         )
+        return self._rescore_vsp_solution(solution, vehicle_types)
 
     def _temporal_clustering(self, trips_sorted: List[Trip]) -> List[List[Trip]]:
         """
@@ -573,7 +576,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         # Unassigned (should be none if MILP foi factível)
         unassigned_trips = [t for t in trips_sorted if t.id not in {tr.id for b in blocks for tr in b.trips}]
 
-        return VSPSolution(
+        solution = VSPSolution(
             blocks=blocks,
             unassigned_trips=unassigned_trips,
             algorithm=self.name,
@@ -588,6 +591,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 **pair_meta,
             },
         )
+        return self._rescore_vsp_solution(solution, vehicle_types)
 
     def _split_blocks_by_total_duration(
         self,

@@ -67,3 +67,62 @@ class BaseAlgorithm:
 
     def _next_duty_id(self) -> int:
         return next(_global_duty_counter)
+
+    # ── Rescoring via Evaluator (Fase 1: Unificar Objetivo) ───────────────────
+
+    def _rescore_vsp_solution(self, solution, vehicle_types):
+        """Rescora solução VSP com evaluator — fonte única de verdade.
+
+        Chamado ao final de cada algoritmo VSP antes de retornar,
+        para garantir que total_cost = evaluator.vsp_cost_breakdown().
+        """
+        try:
+            from .evaluator import CostEvaluator
+            from ..domain.models import OptimizationResult
+
+            evaluator = CostEvaluator()
+            breakdown = evaluator.vsp_cost_breakdown(solution, vehicle_types or [])
+            solution.total_cost = float(breakdown.get("total", 0.0))
+            solution.meta = solution.meta or {}
+            solution.meta["cost_source"] = "evaluator_vsp"
+            return solution
+        except Exception as e:
+            logger.warning(f"Falha ao rescore VSP: {e}. Mantendo total_cost original.")
+            return solution
+
+    def _rescore_csp_solution(self, solution, vehicle_types=None):
+        """Rescora solução CSP com evaluator — fonte única de verdade.
+
+        Chamado ao final de cada algoritmo CSP antes de retornar,
+        para garantir que total_cost = evaluator.csp_cost_breakdown().
+        """
+        try:
+            from .evaluator import CostEvaluator
+
+            evaluator = CostEvaluator()
+            breakdown = evaluator.csp_cost_breakdown(solution)
+            solution.total_cost = float(breakdown.get("total", 0.0))
+            solution.meta = solution.meta or {}
+            solution.meta["cost_source"] = "evaluator_csp"
+            return solution
+        except Exception as e:
+            logger.warning(f"Falha ao rescore CSP: {e}. Mantendo total_cost original.")
+            return solution
+
+    def _rescore_optimization_result(self, result, vehicle_types):
+        """Rescora OptimizationResult completo (VSP + CSP) com evaluator.
+
+        Usado por solucionadores integrados (VCSP) que retornam OptimizationResult.
+        """
+        try:
+            from .evaluator import CostEvaluator
+
+            evaluator = CostEvaluator()
+            total_cost = evaluator.total_cost(result, vehicle_types or [])
+            result.total_cost = total_cost
+            result.meta = result.meta or {}
+            result.meta["cost_source"] = "evaluator_integrated"
+            return result
+        except Exception as e:
+            logger.warning(f"Falha ao rescore OptimizationResult: {e}. Mantendo total_cost original.")
+            return result

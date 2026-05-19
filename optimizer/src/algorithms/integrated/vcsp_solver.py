@@ -128,7 +128,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                     "fallback_solver": "greedy_vsp_greedy_csp",
                 }
             )
-            return res
+            return self._rescore_optimization_result(res, vehicle_types)
 
         if not trips:
             raise InfeasibleProblemError("Nenhuma viagem fornecida")
@@ -191,7 +191,7 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
             res.meta["fallback_reason"] = status_str
             res.meta["original_solver"] = "vcsp_pulp"
             res.meta["fallback_solver"] = "greedy_vsp_greedy_csp"
-            return res
+            return self._rescore_optimization_result(res, vehicle_types)
 
         # 5. Decodificação da Solução
         blocks = []
@@ -275,9 +275,8 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                 csp_sol.cct_violations += 1
 
         res = OptimizationResult(vsp=vsp_sol, csp=csp_sol, algorithm=self.name, total_elapsed_ms=self._elapsed_ms())
-        res.total_cost = pulp.value(prob.objective)
         res.meta["solver_status"] = status_str
-        return res
+        return self._rescore_optimization_result(res, vehicle_types)
 
     def _to_decimal(self, val: Any) -> Decimal:
         """Converte valores de forma segura para Decimal."""

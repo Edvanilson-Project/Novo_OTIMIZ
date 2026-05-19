@@ -1332,7 +1332,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 "combinations_pruned": self._combinations_pruned,
                 "phase_times": dict(self._phase_times),
             }
-            return fallback
+            return self._rescore_csp_solution(fallback)
 
         # FASE 6: Constrói duties a partir da solução ILP
         duties: List[Duty] = []
@@ -1465,4 +1465,4 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             f"{self._combinations_pruned} combinações podadas"
         )
 
-        return sol
+        return self._rescore_csp_solution(sol)
