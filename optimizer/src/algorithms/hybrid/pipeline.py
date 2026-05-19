@@ -416,15 +416,34 @@ class HybridPipeline(BaseAlgorithm):
             if should_run_ilp:
                 # O polish exato só pode consumir o orçamento restante.
                 ilp_budget = max(1.0, min(remaining_budget_s, self.time_budget_s * 0.25))
-                ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
-                ilp.time_budget_s = ilp_budget
+                # Fase 3: Tentar CP-SAT primeiro (mais rápido em lógica pura), fallback para CBC
+                csp_ilp = None
+                ilp_solver_used = "none"
                 t_phase = time.perf_counter()
                 try:
+                    ilp = CPSatCSP(vsp_params=self.vsp_params, **kwargs)
+                    ilp.time_budget_s = ilp_budget
                     csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                    # Fase 1: Rescoring com evaluator
+                    csp_ilp = self._rescore_csp_solution(csp_ilp)
+                    ilp_solver_used = "cpsat"
+                    logger.info("[PIPELINE] CP-SAT large-scale polish OK")
                 except Exception as e:
-                    logger.error(f"[PIPELINE] Falha crítica no ILP solver: {e}. Mantendo baseline CSP selecionado.")
+                    logger.warning(f"[PIPELINE] CP-SAT falhou em escala grande: {e}. Tentando CBC SetPartitioningCSP...")
+                    try:
+                        ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
+                        ilp.time_budget_s = ilp_budget
+                        csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                        # Fase 1: Rescoring com evaluator
+                        csp_ilp = self._rescore_csp_solution(csp_ilp)
+                        ilp_solver_used = "cbc"
+                    except Exception as e2:
+                        logger.error(f"[PIPELINE] Falha crítica em ILP solver: {e2}. Mantendo baseline CSP.")
+                        csp_ilp = baseline_csp
+
+                if csp_ilp is None:
                     csp_ilp = baseline_csp
-                phase_timings_ms["csp_set_partitioning_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+                phase_timings_ms[f"csp_{ilp_solver_used}_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
                 ilp_better = (
                     csp_ilp.cct_violations,
                     len(csp_ilp.uncovered_blocks or []),
@@ -467,6 +486,8 @@ class HybridPipeline(BaseAlgorithm):
             # Escala normal (<= 1500 blocos): greedy CSP + CP-SAT ILP polish
             t_phase = time.perf_counter()
             csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
+            # Fase 1: Rescoring com evaluator
+            csp_greedy = self._rescore_csp_solution(csp_greedy)
             phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
             csp_final = csp_greedy
 
@@ -504,6 +525,8 @@ class HybridPipeline(BaseAlgorithm):
                 t_phase = time.perf_counter()
                 try:
                     csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+                    # Fase 1: Rescoring com evaluator
+                    csp_ilp = self._rescore_csp_solution(csp_ilp)
                     phase_timings_ms["csp_cpsat_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
                     ilp_better = csp_ilp.duties and (
                         csp_ilp.cct_violations,
