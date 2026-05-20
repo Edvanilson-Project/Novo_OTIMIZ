@@ -48,6 +48,23 @@ TERMINAIS = [
     (9, "Cajazeiras", "periferia_leste"),
 ]
 
+# Coordenadas geográficas aproximadas (lat, lon) dos terminais de Salvador-BA.
+# Fonte: OpenStreetMap / Google Maps (precisão ~500m suficiente para deadhead).
+# Permite que _ensure_deadhead_coverage estime tempos de deslocamento via Haversine
+# em vez de colocar impossible_deadhead=999999 que bloqueia conexões cross-terminal.
+TERMINAL_COORDS: dict[int, tuple[float, float]] = {
+    0: (-12.9717, -38.5030),  # Lapa (centro)
+    1: (-12.9755, -38.4602),  # Iguatemi
+    2: (-12.8826, -38.3938),  # Mussurunga
+    3: (-12.8641, -38.4259),  # Pirajá
+    4: (-12.9244, -38.6245),  # Bom Despacho (área ferry)
+    5: (-12.8916, -38.6194),  # Ribeira (orla)
+    6: (-12.8228, -38.4752),  # Acesso Norte
+    7: (-12.9956, -38.4814),  # Bela Vista
+    8: (-12.9074, -38.5999),  # Lapa Orla
+    9: (-12.8718, -38.3673),  # Cajazeiras
+}
+
 # Linhas de Salvador com características aproximadas (origem, destino, distância, frq_pico)
 LINHAS = [
     # Linhas radiais (Centro ↔ Periferia)
@@ -114,12 +131,17 @@ def make_salvador_trips(
             dur = max(25, min(dur, 90))
             end = start + dur
 
+            orig_lat, orig_lon = TERMINAL_COORDS.get(orig, (-12.97, -38.51))
+            dest_lat, dest_lon = TERMINAL_COORDS.get(dest, (-12.97, -38.51))
+
             # IDA
             trips.append(Trip(
                 id=trip_id, line_id=line_id,
                 origin_id=orig, destination_id=dest,
                 start_time=start, end_time=end, duration=dur,
                 distance_km=dist_km,
+                origin_latitude=orig_lat, origin_longitude=orig_lon,
+                destination_latitude=dest_lat, destination_longitude=dest_lon,
             ))
             trip_id += 1
 
@@ -131,6 +153,8 @@ def make_salvador_trips(
                 origin_id=dest, destination_id=orig,
                 start_time=volta_start, end_time=volta_start + volta_dur, duration=volta_dur,
                 distance_km=dist_km,
+                origin_latitude=dest_lat, origin_longitude=dest_lon,
+                destination_latitude=orig_lat, destination_longitude=orig_lon,
             ))
             trip_id += 1
 

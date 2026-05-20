@@ -289,6 +289,22 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
                 columns = columns[: self.max_columns]
                 break
 
+        # Garantia pós-pricing: o MILP (==1) só é factível se toda task tiver
+        # ao menos uma coluna UNITÁRIA (single-task).
+        # - _generate_columns trunca em max_columns antes de gerar unit cols para todas
+        # - o loop de pricing pode re-truncar para max_columns depois
+        # - tasks em colunas multi-task mas sem unit col própria podem tornar
+        #   a partição exata impossível (sem escape para o solver)
+        # Adicionamos unit cols para tasks sem uma; contadas separadamente
+        # para não distorcer workpieces_generated (que reflete o limite configurado).
+        unit_cols_added = 0
+        single_task_ids = {combo[0].id for combo, _ in columns if len(combo) == 1}
+        for task in tasks:
+            if task.id not in single_task_ids:
+                columns.append(([task], self._piece_cost([task])))
+                unit_cols_added += 1
+                _log.debug("Coluna unitária adicionada para task %s (sem coluna unitária na pool)", task.id)
+
         prob = pulp.LpProblem("CSP_SetPartitioning", pulp.LpMinimize)
         x = [pulp.LpVariable(f"x_{index}", cat="Binary") for index in range(len(columns))]
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
@@ -307,7 +323,8 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         if prob.status != pulp.constants.LpStatusOptimal:
             _log.warning("ILP solver status: %s — falling back to greedy CSP", pulp.LpStatus[prob.status])
             fallback = self.greedy.solve(blocks, trips)
-            fallback.meta["workpieces_generated"] = len(columns)
+            fallback.meta["workpieces_generated"] = len(columns) - unit_cols_added
+            fallback.meta["unit_columns_for_coverage"] = unit_cols_added
             fallback.meta["column_generation"] = {
                 "max_generated_columns": self.max_columns,
                 "fallback": True,
@@ -388,7 +405,8 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         sol.algorithm = self.name
         sol.meta.update(
             {
-                "workpieces_generated": len(columns),
+                "workpieces_generated": len(columns) - unit_cols_added,
+                "unit_columns_for_coverage": unit_cols_added,
                 "pricing_enabled": self.pricing_enabled,
                 "objective": "min sum(c_j * x_j)",
                 "task_count": len(tasks),
