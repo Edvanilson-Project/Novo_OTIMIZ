@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -24,19 +25,23 @@ describe('AuthController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [{ provide: AuthService, useValue: service }],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get(AuthController);
   });
 
-  it('login calls authService and returns token + user', async () => {
+  it('login calls authService and returns user (no token in body)', async () => {
     const res = mockResponse();
     const result = await controller.login(
       { email: 'a@b.com', password: 'pass' },
       res,
     );
     expect(service.login).toHaveBeenCalledWith('a@b.com', 'pass');
-    expect(result).toMatchObject({ access_token: 'tok123', user: { id: 1 } });
+    expect(result).toMatchObject({ user: { id: 1 } });
+    expect((result as any).access_token).toBeUndefined();
     expect(result.message).toBe('Login realizado com sucesso');
   });
 

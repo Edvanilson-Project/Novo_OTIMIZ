@@ -49,6 +49,7 @@ def _recompute_idle_minutes(blocks: List[Block]) -> None:
 def _evaluate_arrangement(
     blocks_data: List[Dict[str, Any]],
     vehicle_types: List[VehicleType],
+    evaluator: "CostEvaluator",
     optimization_params: Optional[OptimizationParametersDTO] = None,
     extra_meta: Optional[Dict[str, Any]] = None,
     algorithm_label: str = "arrangement",
@@ -111,7 +112,7 @@ def _evaluate_arrangement(
 
     result = OptimizationResult(vsp=mock_vsp, csp=fast_csp)
     cost_breakdown = evaluator.total_cost_breakdown(result, vehicle_types)
-    block_responses = [_block_to_response(b, vehicle_types) for b in block_objects]
+    block_responses = [_block_to_response(b, vehicle_types, evaluator) for b in block_objects]
 
     return WhatIfResponse(
         status="ok",
@@ -197,7 +198,7 @@ def _block_from_dict(data: Dict[str, Any]) -> Block:
     return block
 
 
-def _block_to_response(block: Block, vehicle_types: List[VehicleType]) -> BlockResponse:
+def _block_to_response(block: Block, vehicle_types: List[VehicleType], evaluator: "CostEvaluator") -> BlockResponse:
     trip_data = []
     for t in block.trips:
         trip_data.append(
@@ -422,6 +423,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            evaluator=local_evaluator,
             optimization_params=request.optimization_params,
             extra_meta={
                 "what_if_source_block": source_block_id,
@@ -473,6 +475,7 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            evaluator=local_evaluator,
             optimization_params=request.optimization_params,
             algorithm_label="baseline",
         )

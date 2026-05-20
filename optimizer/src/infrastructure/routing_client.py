@@ -278,9 +278,10 @@ class RoutingClient:
         import hashlib
         import json
 
+        evaluator = getattr(self, "evaluator", None)
         params = {
-            "crew_cost": getattr(self.evaluator, "crew_cost_per_hour", 25.0),
-            "vehicle_cost": getattr(self.evaluator, "cost_km", 2.5),
+            "crew_cost": getattr(evaluator, "crew_cost_per_hour", 25.0),
+            "vehicle_cost": getattr(evaluator, "cost_km", 2.5),
         }
         return hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()[:8]
 

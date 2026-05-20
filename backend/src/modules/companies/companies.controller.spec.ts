@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { CompaniesController } from './companies.controller';
 import { CompaniesService } from './companies.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { TenantContext } from '../../common/context/tenant-context';
 
 describe('CompaniesController', () => {
   let controller: CompaniesController;
@@ -21,7 +22,10 @@ describe('CompaniesController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CompaniesController],
-      providers: [{ provide: CompaniesService, useValue: service }],
+      providers: [
+        { provide: CompaniesService, useValue: service },
+        { provide: TenantContext, useValue: { getCompanyId: () => null } },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })

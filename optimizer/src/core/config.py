@@ -56,7 +56,7 @@ class Settings(BaseSettings):
 
     # ── Backend NestJS (notificações de status) ───────────────────────────────
     backend_url: str = Field(default="http://backend:3001/api/v1", validation_alias="BACKEND_URL")
-    backend_secret: str = Field(default="optimizer-internal-secret", validation_alias="BACKEND_SECRET")
+    backend_secret: str = Field(default="", validation_alias="BACKEND_SECRET")
 
     # ── Estratégia (persistência + reconciliação) ────────────────────────────
     strategy_data_dir: str = "./data/strategy"
@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     def reject_known_default_key(cls, v: str) -> str:
         if not v or v == "internal-key-123456":
             raise ValueError("INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)")
+        return v
+
+    @field_validator("backend_secret", mode="after")
+    @classmethod
+    def reject_default_backend_secret(cls, v: str) -> str:
+        if not v or v == "optimizer-internal-secret":
+            raise ValueError("BACKEND_SECRET must be set to a strong random value (not the default)")
         return v
 
     @field_validator("debug", mode="before")

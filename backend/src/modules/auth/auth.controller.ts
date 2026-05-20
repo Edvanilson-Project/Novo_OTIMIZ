@@ -1,9 +1,10 @@
-import { Controller, Post, Body, Res } from '@nestjs/common';
+import { Controller, Post, Get, Body, Res, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import * as express from 'express';
 import { AuthService } from './auth.service';
 import { Public } from '../../common/decorators/roles.decorator';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -42,9 +43,17 @@ export class AuthController {
 
     return {
       message: 'Login realizado com sucesso',
-      access_token: result.access_token,
       user: result.user,
     };
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Perfil do usuário autenticado' })
+  @ApiResponse({ status: 200, description: 'Dados do usuário atual.' })
+  @ApiResponse({ status: 401, description: 'Não autenticado.' })
+  getProfile(@Req() req: express.Request) {
+    return (req as any).user;
   }
 
   @Public()

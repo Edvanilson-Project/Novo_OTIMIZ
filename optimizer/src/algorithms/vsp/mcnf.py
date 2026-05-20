@@ -351,6 +351,9 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
                 idle = gap - dh
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
+                # Incentivo por continuidade no mesmo terminal: sem deadhead necessário,
+                # reduzimos levemente o custo para que MCNF prefira essas conexões ao
+                # invés de misturar picos manhã+tarde no mesmo bloco (que prejudica o CSP).
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
                     cost -= fixed_cost * 0.05
                 pair_target = preferred_next.get(int(trips_sorted[i].id))

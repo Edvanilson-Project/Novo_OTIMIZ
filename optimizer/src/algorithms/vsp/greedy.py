@@ -1004,6 +1004,16 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                         ):
                             continue
                         # EV SoC check skipado (já verificado para vehicle não-elétrico)
+                        # Regra 1: gap na janela split-shift só emenda se allow_vehicle_split_shifts=True.
+                        _gap_is_split_shift = split_shift_min_gap <= gap <= split_shift_max_gap
+                        if _gap_is_split_shift and not allow_vehicle_split_shifts:
+                            continue
+                        # Regra 2: fora da janela split-shift, só emenda se custo < ativar novo veículo.
+                        if not _gap_is_split_shift:
+                            dh_need = max(min_layover, int(last.deadhead_times.get(first.origin_id, 0)))
+                            stitch_cost = dh_need * deadhead_cost + max(0, gap - dh_need) * idle_cost
+                            if stitch_cost >= fixed_cost * reuse_ratio:
+                                continue
                         # Score: prioriza gap menor (menos idle desperdiçado)
                         score = gap
                         if best_score is None or score < best_score:

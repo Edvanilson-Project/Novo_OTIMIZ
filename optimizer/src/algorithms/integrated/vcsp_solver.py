@@ -423,8 +423,8 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
 
     def _generate_paths(self, trips: List[Trip]) -> List[Dict]:
         """Gera caminhos viáveis com podas agressivas e limite de expansão."""
-        MAX_PATHS = 20000  # Limite absoluto de caminhos a gerar
-        MAX_DEPTH = 30  # Máximo de viagens por caminho (dia completo ~20 viagens/veículo)
+        MAX_PATHS = int(self.vsp_params.get("max_paths", 20000))  # Limite absoluto de caminhos a gerar
+        MAX_DEPTH = int(self.vsp_params.get("max_path_depth", 30))  # Máximo de viagens por caminho
         # Budget por trip-inicial: evita que DFS consuma todos os slots começando
         # apenas nos primeiros trips e deixe trips tardios sem multi-trip paths.
         PER_START_BUDGET = max(50, MAX_PATHS // max(1, len(trips)))

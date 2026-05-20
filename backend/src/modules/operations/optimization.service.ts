@@ -318,7 +318,7 @@ export class OptimizationService implements OnModuleInit {
           };
         }),
         vehicle_types: this.buildVehicleTypesPayload(vehicleTypes, params),
-        cct_params: cctParams,
+        cct_params: Object.assign({}, cctParams, { force_round_trip: forceRoundTrip }),
         optimization_params: {
           cost_vehicle: params?.cost_vehicle ?? DEFAULT_COST_VEHICLE,
           vehicle_fixed_cost: params?.vehicle_fixed_cost ?? null,
