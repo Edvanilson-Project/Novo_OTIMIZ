@@ -57,6 +57,19 @@ class CPSatCSP(SetPartitioningCSP):
             return self.greedy.solve(blocks, trips)
 
         columns = self._generate_columns(tasks)
+
+        # Garante cobertura mínima: se alguma tarefa não está coberta, cria coluna unitária para ela
+        # Isso evita que o solver falhe com cobertura e caia em fallback greedy desnecessário.
+        covered_tasks = set()
+        for combo, _ in columns:
+            for block in combo:
+                covered_tasks.add(block.id)
+
+        for task in tasks:
+            if task.id not in covered_tasks:
+                columns.append(([task], self._piece_cost([task])))
+                _log.debug("Adicionada coluna unitária para tarefa %s não coberta", task.id)
+
         task_ids = [task.id for task in tasks]
         time_limit = max(1, int(self.time_budget_s))
 
@@ -65,9 +78,20 @@ class CPSatCSP(SetPartitioningCSP):
         x = [model.NewBoolVar(f"x_{i}") for i in range(len(columns))]
 
         # Objetivo: minimizar custo total (custos escalados para inteiros)
-        model.Minimize(sum(int(cost * _COST_SCALE) * x[i] for i, (_, cost) in enumerate(columns)))
+        # Adicionamos variáveis slack penalizadas com BIG_M para evitar infactibilidade.
+        _max_col_cost = max((cost for _, cost in columns), default=100.0)
+        BIG_M = max(_max_col_cost * len(task_ids) + 1.0, 1000.0)
 
-        # Restrição: cada tarefa coberta por pelo menos 1 jornada
+        s = {tid: model.NewBoolVar(f"s_{tid}") for tid in task_ids}
+
+        model.Minimize(
+            sum(int(cost * _COST_SCALE) * x[i] for i, (_, cost) in enumerate(columns))
+            + sum(int(BIG_M * _COST_SCALE) * s[tid] for tid in task_ids)
+        )
+
+        # Restrição: cada tarefa coberta por EXATAMENTE 1 jornada (Set Partitioning)
+        # Usamos AddExactlyOne que inclui as variáveis da coluna e a variável slack, garantindo que
+        # ou exatamente uma coluna cobre a tarefa, ou a variável slack correspondente é ativada.
         task_id_set = {tid: set() for tid in task_ids}
         for i, (combo, _) in enumerate(columns):
             for block in combo:
@@ -75,11 +99,7 @@ class CPSatCSP(SetPartitioningCSP):
                     task_id_set[block.id].add(i)
 
         for task_id, covering_cols in task_id_set.items():
-            if covering_cols:
-                model.AddAtLeastOne([x[i] for i in covering_cols])
-            else:
-                _log.warning("Tarefa %s sem coluna cobertura — fallback greedy", task_id)
-                return self.greedy.solve(blocks, trips)
+            model.AddExactlyOne([x[i] for i in covering_cols] + [s[task_id]])
 
         # ── Solver ──────────────────────────────────────────────────────────
         solver = _cp_model.CpSolver()
@@ -91,6 +111,13 @@ class CPSatCSP(SetPartitioningCSP):
 
         if status not in (_cp_model.OPTIMAL, _cp_model.FEASIBLE):
             _log.warning("CP-SAT status: %s — fallback SetPartitioningCSP", solver.StatusName(status))
+            self.name = "set_partitioning_csp_fallback"
+            return super().solve(blocks, trips)
+
+        # Verifica se slack foi ativado — se sim, fallback para CBC (melhor qualidade)
+        slack_activated = any(solver.BooleanValue(s[tid]) for tid in task_ids)
+        if slack_activated:
+            _log.warning("CP-SAT usou variáveis slack — fallback SetPartitioningCSP (CBC)")
             self.name = "set_partitioning_csp_fallback"
             return super().solve(blocks, trips)
 

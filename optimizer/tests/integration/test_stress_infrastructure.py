@@ -66,12 +66,18 @@ async def test_infrastructure_stress_queueing():
         # Verifica se o serviço está de pé primeiro
         try:
             health = await client.get("http://localhost:8000/health/")
-            # Se não estiver online (rodando), o teste é pulado em vez de falhar a CI inteira.
-            # Idealmente, a CI deve levantar os serviços antes de rodar os testes de integração.
             if health.status_code != 200:
                 pytest.skip("Serviço principal /health não responde com 200. Execute o uvicorn e celery primeiro.")
         except httpx.ConnectError:
-             pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
+            pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
+
+        # Verifica se a chave de autenticação é aceita pelo serviço em execução
+        try:
+            probe = await client.post("http://localhost:8000/optimize/", json=payload, headers=headers)
+            if probe.status_code == 403:
+                pytest.skip("INTERNAL_OPTIMIZER_KEY não corresponde ao serviço em execução — configure a chave no ambiente.")
+        except httpx.ConnectError:
+            pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
              
         # Dispara todas as tarefas de uma vez
         tasks = [_send_request(client, request_id) for request_id in range(num_requests)]

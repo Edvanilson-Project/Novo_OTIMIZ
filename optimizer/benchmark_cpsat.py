@@ -13,11 +13,11 @@ import time
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from algorithms.csp.set_partitioning_optimized import SetPartitioningCSP
-from algorithms.csp.cp_sat_csp import CPSatCSP
-from domain.models import Block, Trip
+from src.algorithms.csp.set_partitioning import SetPartitioningCSP
+from src.algorithms.csp.cp_sat_csp import CPSatCSP
+from src.domain.models import Block, Trip
 
 # Fixtures simples para teste
 def _trip(id_val, start, duration, line=1, origin=1, dest=2, depot=1):
