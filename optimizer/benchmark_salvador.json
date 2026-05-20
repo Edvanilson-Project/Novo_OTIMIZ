@@ -30,10 +30,10 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 70.15,
+      "elapsed_s": 70.17,
       "blocks": 12,
-      "duties": 19,
-      "cost": 36253.83,
+      "duties": 16,
+      "cost": 32835.75,
       "violations": 4,
       "uncovered": 0,
       "cpsat_activated": true
@@ -43,7 +43,7 @@
     "label": "Média operadora (700v)",
     "n_trips": 226,
     "greedy": {
-      "elapsed_s": 0.14,
+      "elapsed_s": 0.12,
       "blocks": 35,
       "duties": 61,
       "cost": 70067.06,
@@ -52,7 +52,7 @@
       "cpsat_activated": false
     },
     "branch_and_price": {
-      "elapsed_s": 1.73,
+      "elapsed_s": 1.84,
       "blocks": 35,
       "duties": 61,
       "cost": 66552.56,
@@ -61,7 +61,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 1.22,
+      "elapsed_s": 1.25,
       "blocks": 35,
       "duties": 62,
       "cost": 63503.06,
@@ -70,7 +70,7 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 10.81,
+      "elapsed_s": 10.92,
       "blocks": 35,
       "duties": 59,
       "cost": 63359.48,
@@ -83,7 +83,7 @@
     "label": "Grande operadora (1.400v)",
     "n_trips": 518,
     "greedy": {
-      "elapsed_s": 0.53,
+      "elapsed_s": 0.52,
       "blocks": 72,
       "duties": 125,
       "cost": 154736.4,
@@ -92,7 +92,7 @@
       "cpsat_activated": false
     },
     "branch_and_price": {
-      "elapsed_s": 8.64,
+      "elapsed_s": 8.48,
       "blocks": 72,
       "duties": 125,
       "cost": 146750.15,
@@ -101,7 +101,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 7.8,
+      "elapsed_s": 7.88,
       "blocks": 72,
       "duties": 124,
       "cost": 126905.56,
@@ -110,11 +110,11 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 103.99,
+      "elapsed_s": 115.39,
       "blocks": 72,
-      "duties": 125,
-      "cost": 154736.4,
-      "violations": 9,
+      "duties": 116,
+      "cost": 121388.73,
+      "violations": 0,
       "uncovered": 0,
       "cpsat_activated": true
     }
@@ -123,7 +123,7 @@
     "label": "Frota total estimada (1.400v, seed alt)",
     "n_trips": 518,
     "greedy": {
-      "elapsed_s": 0.38,
+      "elapsed_s": 0.36,
       "blocks": 69,
       "duties": 127,
       "cost": 150163.54,
@@ -141,7 +141,7 @@
       "cpsat_activated": false
     },
     "mcnf": {
-      "elapsed_s": 7.56,
+      "elapsed_s": 8.04,
       "blocks": 69,
       "duties": 121,
       "cost": 123780.12,
@@ -150,11 +150,11 @@
       "cpsat_activated": false
     },
     "hybrid_pipeline": {
-      "elapsed_s": 94.16,
+      "elapsed_s": 103.86,
       "blocks": 69,
-      "duties": 120,
-      "cost": 145654.54,
-      "violations": 8,
+      "duties": 113,
+      "cost": 118534.87,
+      "violations": 0,
       "uncovered": 0,
       "cpsat_activated": true
     }

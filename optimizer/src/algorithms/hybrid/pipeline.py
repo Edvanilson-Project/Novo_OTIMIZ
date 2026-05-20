@@ -170,14 +170,13 @@ class HybridPipeline(BaseAlgorithm):
                 greedy_issues = _vsp_hard_issue_count(greedy_vsp, self.vsp_params)
                 greedy_cost = _vsp_cost(greedy_vsp, self.vsp_params, cached_pairs)
                 greedy_acceptable = (greedy_issues == 0) if strict_hard else (greedy_issues <= best_issues)
+                # Substituir MCNF por greedy SOMENTE se greedy usar estritamente menos veículos.
+                # Não usar custo heurístico como desempate: MCNF produz blocos com maior
+                # separação entre viagens, o que reduz violações CCT no CSP posterior
+                # (benchmark 2026-05-20: greedy 9 viols vs MCNF 0 viols em 518 viagens).
                 greedy_better = greedy_acceptable and (
                     greedy_issues < best_issues
                     or (greedy_issues == best_issues and len(greedy_vsp.blocks) < best_vehicles)
-                    or (
-                        greedy_issues == best_issues
-                        and len(greedy_vsp.blocks) == best_vehicles
-                        and greedy_cost < best_cost
-                    )
                 )
                 logger.info(
                     "[PIPELINE] scale greedy: %d blocks cost=%.0f issues=%d (mcnf: %d blocks) → %s",
