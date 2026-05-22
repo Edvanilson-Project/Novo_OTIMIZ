@@ -10,6 +10,7 @@ import { tap, catchError } from 'rxjs/operators';
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { MetricsService } from '../telemetry/metrics.service';
+import { RequestContext } from '../context/request-context';
 
 export const REQUEST_ID_HEADER = 'X-Request-ID';
 export const CORRELATION_ID_HEADER = 'X-Correlation-ID';
@@ -38,6 +39,10 @@ export class RequestLoggingInterceptor implements NestInterceptor {
 
     // Inject into request context for downstream code
     (req as any).requestId = requestId;
+    const companyId = (req as any).user?.companyId;
+
+    // Store in async context for HTTP clients to access (e.g., axios calls to optimizer)
+    RequestContext.set({ requestId, companyId });
 
     // Add to response headers
     res.setHeader(REQUEST_ID_HEADER, requestId);

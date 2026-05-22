@@ -13,6 +13,7 @@ import axios from 'axios';
 import * as crypto from 'crypto';
 import { DataSource, In, Repository } from 'typeorm';
 import { TenantContext } from '../../common/context/tenant-context';
+import { RequestContext } from '../../common/context/request-context';
 import { BlockAssignment } from '../database/entities/block-assignment.entity';
 import { CompanyParameters } from '../database/entities/company-parameters.entity';
 import { Driver } from '../database/entities/driver.entity';
@@ -114,6 +115,19 @@ export class OptimizationService implements OnModuleInit {
           'Gere uma chave forte com: openssl rand -base64 48 | tr -d "\\n=+/" | cut -c-48',
       );
     }
+  }
+
+  /**
+   * Build axios headers with internal key and correlation ID for tracing.
+   * RequestContext stores the correlation ID from the incoming request's RequestLoggingInterceptor.
+   */
+  private getOptimizerHeaders(additionalHeaders?: Record<string, string>) {
+    const { requestId } = RequestContext.get();
+    return {
+      'X-Internal-Key': this.INTERNAL_KEY,
+      ...(requestId && { 'X-Correlation-ID': requestId }),
+      ...additionalHeaders,
+    };
   }
 
   async onModuleInit() {
@@ -439,7 +453,7 @@ export class OptimizationService implements OnModuleInit {
         `${this.OPTIMIZER_URL}/optimize/`,
         payload,
         {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          headers: this.getOptimizerHeaders(),
         },
       );
       const taskId = submitData.task_id;
@@ -700,7 +714,7 @@ export class OptimizationService implements OnModuleInit {
             time_budget_s: timeBudgetS,
           },
           {
-            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+            headers: this.getOptimizerHeaders(),
             timeout: (timeBudgetS + 30) * 1000,
           },
         );
@@ -764,7 +778,7 @@ export class OptimizationService implements OnModuleInit {
           question,
         },
         {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          headers: this.getOptimizerHeaders(),
           timeout: 70000,
         },
       );
@@ -865,7 +879,7 @@ export class OptimizationService implements OnModuleInit {
         const { data } = await axios.get(
           `${this.OPTIMIZER_URL}/optimize/status/${taskId}`,
           {
-            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+            headers: this.getOptimizerHeaders(),
             timeout: 10000,
           },
         );
@@ -1410,7 +1424,7 @@ export class OptimizationService implements OnModuleInit {
           `${this.OPTIMIZER_URL}/api/v1/evaluate-delta`,
           whatIfPayload,
           {
-            headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+            headers: this.getOptimizerHeaders(),
           },
         );
 
@@ -1517,7 +1531,7 @@ export class OptimizationService implements OnModuleInit {
         `${this.OPTIMIZER_URL}/api/v1/evaluate-delta`,
         pythonPayload,
         {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          headers: this.getOptimizerHeaders(),
           timeout: 15000,
         },
       );
@@ -1571,7 +1585,7 @@ export class OptimizationService implements OnModuleInit {
         `${this.OPTIMIZER_URL}/api/v1/evaluate-baseline`,
         { blocks: pythonBlocks },
         {
-          headers: { 'X-Internal-Key': this.INTERNAL_KEY },
+          headers: this.getOptimizerHeaders(),
           timeout: 15000,
         },
       );
@@ -2982,7 +2996,7 @@ export class OptimizationService implements OnModuleInit {
     const { data } = await axios.post(
       `${this.OPTIMIZER_URL}/optimize/rostering/weekly`,
       body,
-      { headers: { 'X-Internal-Key': this.INTERNAL_KEY }, timeout: 120000 },
+      { headers: this.getOptimizerHeaders(), timeout: 120000 },
     );
     return data;
   }
