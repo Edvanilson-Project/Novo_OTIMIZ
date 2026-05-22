@@ -296,26 +296,39 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
           </Tooltip>
         </Grid>
       )}
-      {optimalityGapPct !== null && (
+      {optimality !== null && (
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <Tooltip
             arrow
             title={
               <Box>
-                <Typography variant="caption" sx={{ display: 'block' }}>
-                  <strong>Gap de Otimalidade</strong> = (UB − LB) / LB × 100.
-                </Typography>
-                <Typography variant="caption" sx={{ display: 'block' }}>
-                  LB = {optimalityLb} (método: {optimalityLbMethod}) · UB = {optimalityUb} veículos.
-                </Typography>
-                <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                  Calculado usando o melhor lower bound disponível entre Bodin &amp; Golden,
-                  Lagrangian e Bundle — quanto menor, mais próximo do ótimo provado.
-                </Typography>
-                {optimalityCertified && (
-                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 'bold' }}>
-                    ✓ Ótimo certificado (gap = 0).
-                  </Typography>
+                {optimalityGapPct === null ? (
+                  <>
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      <strong>Otimalidade desconhecida</strong> — sem certificado de lower bound.
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                      Não é possível calcular o gap de otimalidade sem um lower bound válido.
+                    </Typography>
+                  </>
+                ) : (
+                  <>
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      <strong>Gap de Otimalidade</strong> = (UB − LB) / LB × 100.
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block' }}>
+                      LB = {optimalityLb} (método: {optimalityLbMethod}) · UB = {optimalityUb} veículos.
+                    </Typography>
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                      Calculado usando o melhor lower bound disponível entre Bodin &amp; Golden,
+                      Lagrangian e Bundle — quanto menor, mais próximo do ótimo provado.
+                    </Typography>
+                    {optimalityCertified && (
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 'bold' }}>
+                        ✓ Ótimo certificado (gap = 0).
+                      </Typography>
+                    )}
+                  </>
                 )}
               </Box>
             }
@@ -324,20 +337,24 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
               <KPICard
                 title="Gap de Otimalidade"
                 value={
-                  optimalityCertified
+                  optimalityGapPct === null
+                    ? 'Desconhecida'
+                    : optimalityCertified
                     ? '0% (Ótimo)'
                     : `${Number(optimalityGapPct).toFixed(1)}%`
                 }
                 changeKey={`opt-gap-${optimalityGapPct}-${scheduleVersion}`}
                 icon={<IconScale size="24" />}
                 color={
-                  optimalityCertified || Number(optimalityGapPct) < 5
+                  optimalityGapPct === null
+                    ? theme.palette.text.secondary
+                    : optimalityCertified || Number(optimalityGapPct) < 5
                     ? theme.palette.success.main
                     : Number(optimalityGapPct) < 15
-                      ? theme.palette.warning.main
-                      : theme.palette.error.main
+                    ? theme.palette.warning.main
+                    : theme.palette.error.main
                 }
-                isError={Number(optimalityGapPct) >= 15}
+                isError={optimalityGapPct !== null && Number(optimalityGapPct) >= 15}
               />
             </Box>
           </Tooltip>
