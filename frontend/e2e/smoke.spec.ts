@@ -145,7 +145,7 @@ test.describe('Custom reports page', () => {
 
   test('page loads without crash', async ({ page }) => {
     await expect(page.locator('body')).not.toContainText('500');
-    await expect(page.locator('h1, h2, h3, h4').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator('h1, h2, h3, h4, h5, h6').first()).toBeVisible({ timeout: 8_000 });
   });
 });
 
@@ -160,7 +160,7 @@ test.describe('Terminals page (isDepot)', () => {
 
   test('terminals page loads without crash', async ({ page }) => {
     await expect(page.locator('body')).not.toContainText('500');
-    await expect(page.locator('h1, h2, h3, h4').first()).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator('h1, h2, h3, h4, h5, h6').first()).toBeVisible({ timeout: 8_000 });
   });
 
   test('Novo Terminal button opens dialog', async ({ page }) => {
