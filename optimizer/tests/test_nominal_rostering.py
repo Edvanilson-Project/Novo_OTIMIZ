@@ -1,5 +1,6 @@
 import httpx
 import json
+import pytest
 
 BASE_URL = "http://127.0.0.1:8100"
 
@@ -79,46 +80,30 @@ def test_sentimental_priority_assignment():
         with httpx.Client(base_url=BASE_URL, timeout=10.0) as client:
             print(f"Enviando payload para {BASE_URL}/optimize/rostering/ ...")
             response = client.post("/optimize/rostering/", json=payload)
-            
+
             if response.status_code != 200:
-                print(f"❌ ERRO: Status {response.status_code}")
-                print(response.text)
-                return False
-            
+                pytest.fail(f"Status inesperado {response.status_code}: {response.text}")
+
             data = response.json()
             assignments = data["assignments"]
-            
+
             print(f"Processamento concluído em {data['elapsed_ms']:.2f}ms")
-            
-            # Verificação do Motorista Prioritário
+
             found_ed = False
             for assign in assignments:
-                op_name = assign["operator_name"]
-                duty_id = assign["duty_id"]
-                score = assign["score"]
-                expl = assign["explanations"]
-                
-                print(f"  -> {op_name} (ID: {assign['operator_id']}) atribuído ao Duty #{duty_id} | Score: {score}")
-                
+                print(f"  -> {assign['operator_name']} (ID: {assign['operator_id']}) "
+                      f"Duty #{assign['duty_id']} | Score: {assign['score']}")
+
                 if assign["operator_id"] == "OP_EDVANILSON":
                     found_ed = True
-                    if score >= 5000:
-                        print(f"     ✅ Sucesso: Regra Sentimental [is_vip] aplicada corretamente!")
-                    else:
-                        print(f"     ❌ Falha: Score {score} não reflete a prioridade VIP.")
-                    
-                    print(f"     Motivo Log: {expl}")
+                    assert assign["score"] >= 5000, (
+                        f"Score {assign['score']} não reflete a prioridade VIP (esperado >= 5000)"
+                    )
 
-            if not found_ed:
-                print("❌ Falha: Edvanilson não foi escalado em nenhuma jornada.")
-                return False
+            assert found_ed, "OP_EDVANILSON não foi escalado em nenhuma jornada"
 
-            print("\n--- TESTE FINALIZADO COM SUCESSO ---")
-            return True
-
-    except Exception as e:
-        print(f"❌ Erro de conexão/execução: {str(e)}")
-        return False
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        pytest.skip(f"Servidor não disponível em {BASE_URL}: {e}")
 
 if __name__ == "__main__":
     test_sentimental_priority_assignment()

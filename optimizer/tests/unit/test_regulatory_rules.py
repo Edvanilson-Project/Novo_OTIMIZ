@@ -12,7 +12,8 @@ from src.algorithms.csp.set_partitioning import SetPartitioningCSP
 from src.algorithms.utils import preferred_pair_penalty
 from src.algorithms.vsp.greedy import GreedyVSP, build_preferred_pairs
 from src.core.exceptions import HardConstraintViolationError
-from src.domain.models import AlgorithmType, Block, Trip, VehicleType
+from src.domain.models import AlgorithmType, Block, CSPSolution, Duty, OptimizationResult, Trip, VehicleType, VSPSolution
+from src.services.hard_constraint_validator import HardConstraintValidator
 from src.services.optimizer_service import OptimizerService
 
 
@@ -105,14 +106,23 @@ def test_natural_language_same_depot_rule_generates_warning():
         _trip(2, 450, 60, depot=2, origin=2, dest=3),
     ]
     svc = OptimizerService()
-    with pytest.raises(HardConstraintViolationError) as exc:
-        svc.run(
-            trips,
-            _vehicle(),
-            algorithm=AlgorithmType.GREEDY,
-            vsp_params={"natural_language_rules": ["Início e fim no mesmo depósito"]},
-        )
-    assert "DUTY_SAME_DEPOT_VIOLATION" in str(exc.value)
+    baseline = svc.run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+    )
+    baseline_output = baseline.meta["hard_constraint_report"]["output"]
+    assert not any("SAME_DEPOT_VIOLATION" in issue for issue in baseline_output["issues"])
+
+    result = svc.run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        vsp_params={"natural_language_rules": ["Início e fim no mesmo depósito"]},
+    )
+    output_report = result.meta["hard_constraint_report"]["output"]
+    assert any(issue.startswith("BLOCK_SAME_DEPOT_VIOLATION") for issue in output_report["hard_issues"])
+    assert any(issue.startswith("DUTY_SAME_DEPOT_VIOLATION") for issue in output_report["hard_issues"])
 
 
 def test_ev_soc_rule_marks_unassignable_trip():
@@ -219,6 +229,16 @@ def test_vsp_compacts_single_trip_blocks_when_viable():
         _trip(2, 450, 60, line=94, origin=2, dest=1, depot=1),
         _trip(3, 1200, 60, line=94, origin=1, dest=2, depot=1),
     ]
+    baseline = GreedyVSP(
+        vsp_params={
+            "min_layover_minutes": 15,
+            "idle_cost_per_minute": 10.0,
+            "max_connection_cost_for_reuse_ratio": 1.0,
+            "allow_vehicle_split_shifts": False,
+            "enable_single_trip_compaction": False,
+            "single_trip_compaction_max_gap_minutes": 420,
+        }
+    ).solve(trips, _vehicle())
     sol = GreedyVSP(
         vsp_params={
             "min_layover_minutes": 15,
@@ -229,7 +249,9 @@ def test_vsp_compacts_single_trip_blocks_when_viable():
             "single_trip_compaction_max_gap_minutes": 420,
         }
     ).solve(trips, _vehicle())
-    assert len(sol.blocks) == 2
+    assert len(baseline.blocks) == 2
+    assert len(sol.blocks) < len(baseline.blocks)
+    assert sorted(trip.id for block in sol.blocks for trip in block.trips) == [1, 2, 3]
 
 
 def test_optimizer_avoids_short_layover_in_output_solution():
@@ -552,6 +574,88 @@ def test_hard_validation_rejects_mandatory_group_split():
             "MANDATORY_GROUP_SPLIT deve ser soft, não hard"
 
 
+def test_vsp_force_round_trip_intent_enables_hard_group_split_validation():
+    trips = [
+        _trip(1, 360, 90, line=31, origin=10, dest=20, depot=1, trip_group_id=9901, direction="IDA"),
+        _trip(2, 390, 90, line=31, origin=20, dest=10, depot=1, trip_group_id=9901, direction="VOLTA"),
+    ]
+
+    relaxed = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={"allow_relief_points": True},
+        vsp_params={"preserve_preferred_pairs": True},
+        time_budget_s=2.0,
+    )
+    strict_intent = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={"allow_relief_points": True},
+        vsp_params={"force_round_trip": True, "preserve_preferred_pairs": True},
+        time_budget_s=2.0,
+    )
+
+    relaxed_output = relaxed.meta["hard_constraint_report"]["output"]
+    strict_output = strict_intent.meta["hard_constraint_report"]["output"]
+
+    assert not any("MANDATORY_GROUP_SPLIT" in issue for issue in relaxed_output["hard_issues"])
+    assert any("MANDATORY_GROUP_SPLIT" in issue for issue in strict_output["hard_issues"])
+    assert strict_intent.meta["input"]["cct_params"]["enforce_trip_groups_hard"] is True
+    assert strict_intent.meta["input"]["cct_params"]["operator_pairing_hard"] is True
+
+
+def test_hard_validator_uses_meal_break_parameter_not_min_break_only():
+    # Setup com trips de 200min (> mandatory_break_after=180) → triggera mandatory_rest_required
+    # de fato (max_continuous_drive > limit). Antes do fix CCT em operational_time_service:248,
+    # o trigger vinha de productive_minutes > mandatory_break_after, mas isso conflate trabalho
+    # total com condução contínua (ver CLT art. 235-D).
+    def _build_result():
+        first = Block(id=1, trips=[_trip(1, 360, 200, origin=10, dest=20)])
+        second = Block(id=2, trips=[_trip(2, 590, 200, origin=20, dest=10)])
+        duty = Duty(id=1)
+        duty.add_task(first)
+        duty.add_task(second)
+        # Em produção, finalize_selected_duties popula este meta via _continuous_drive_stats.
+        # Em teste construído manualmente, setamos explícito para refletir o cenário CCT real.
+        duty.meta["max_continuous_drive_minutes"] = 200  # > mandatory_break_after=180
+        result = OptimizationResult(
+            vsp=VSPSolution(blocks=[first, second]),
+            csp=CSPSolution(duties=[duty]),
+        )
+        return result, [*first.trips, *second.trips]
+
+    long_result, long_trips = _build_result()
+    short_result, short_trips = _build_result()
+
+    long_meal_report = HardConstraintValidator().audit_result(
+        long_result,
+        trips=long_trips,
+        cct_params={
+            "min_break_minutes": 30,
+            "meal_break_minutes": 60,
+            "mandatory_break_after_minutes": 180,
+            "max_driving_minutes": 600,
+        },
+        vsp_params={"min_layover_minutes": 30},
+    )
+    short_meal_report = HardConstraintValidator().audit_result(
+        short_result,
+        trips=short_trips,
+        cct_params={
+            "min_break_minutes": 30,
+            "meal_break_minutes": 30,
+            "mandatory_break_after_minutes": 180,
+            "max_driving_minutes": 600,
+        },
+        vsp_params={"min_layover_minutes": 30},
+    )
+
+    assert any(issue.startswith("MANDATORY_REST_MISSING") for issue in long_meal_report["soft_issues"])
+    assert not any(issue.startswith("MANDATORY_REST_MISSING") for issue in short_meal_report["issues"])
+
+
 def test_run_cutting_splits_inside_trip_at_explicit_mid_trip_relief():
     block = Block(
         id=1,
@@ -733,8 +837,9 @@ def test_relief_reassignment_postopt_moves_relief_task_to_future_compatible_duty
 
     assert len(new_duties) == 2
     assert audit["accepted"] >= 1
-    assert audit["improved"] is True
+    assert audit["result"].startswith("accepted_")
     assert audit["final_metrics"]["duties"] == 2
+    assert audit["final_metrics"]["violations"] == 0
     assert any(move["task"]["mid_trip_original_trip_ids"] == [200] for move in audit["accepted_moves"])
 
 
@@ -928,3 +1033,233 @@ def test_hard_validation_rejects_missing_union_compatible_operator():
             time_budget_s=5.0,
         )
     assert "UNASSIGNED_OPERATOR_PROFILE" in str(exc.value)
+
+
+def test_deadhead_hard_validation_respects_connection_tolerance():
+    trips = [
+        _trip(1, 360, 40, line=60, origin=1, dest=2, depot=1),
+        _trip(2, 402, 40, line=60, origin=2, dest=1, depot=1),
+    ]
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={
+            "min_layover_minutes": 15,
+            "connection_tolerance_minutes": 30,
+            "strict_hard_validation": False,
+        },
+        vsp_params={"preserve_preferred_pairs": False},
+        time_budget_s=5.0,
+    )
+    hard_issues = result.meta["hard_constraint_report"]["output"].get("hard_issues", [])
+    assert not any(issue.startswith("DEADHEAD_INFEASIBLE") for issue in hard_issues)
+
+
+def test_hybrid_pipeline_surfaces_ev_charger_capacity_warning():
+    trips = [
+        _trip(1, 360, 50, line=31, origin=1, dest=2, depot=1, energy=30.0),
+        _trip(2, 420, 50, line=31, origin=2, dest=1, depot=1, energy=12.0),
+        _trip(3, 360, 50, line=32, origin=1, dest=2, depot=1, energy=30.0),
+        _trip(4, 420, 50, line=32, origin=2, dest=1, depot=1, energy=12.0),
+    ]
+    result = OptimizerService().run(
+        trips,
+        _vehicle(electric=True),
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        cct_params={"strict_hard_validation": False},
+        vsp_params={
+            "min_layover_minutes": 10,
+            "max_simultaneous_chargers": 1,
+            "allow_multi_line_block": False,
+        },
+        time_budget_s=10.0,
+    )
+    warnings = list(result.vsp.warnings or [])
+    assert any("CHARGER_CAPACITY_EXCEEDED" in warning for warning in warnings)
+
+
+def test_soft_issue_reassignment_postopt_coalesces_split_trip_group_when_feasible():
+    solver = GreedyCSP(strict_hard_validation=False)
+
+    first_task = _task_block(1, [_trip(1, 360, 60, line=70, origin=1, dest=2, trip_group_id=700)])
+    second_task = _task_block(2, [_trip(2, 430, 60, line=70, origin=2, dest=1, trip_group_id=700)])
+
+    duties = [
+        solver._seed_duty_with_task(1, first_task),
+        solver._seed_duty_with_task(2, second_task),
+    ]
+    original_blocks = [
+        Block(id=1, trips=list(first_task.trips)),
+        Block(id=2, trips=list(second_task.trips)),
+    ]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt(duties, original_blocks)
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["final_metrics"]["duty_group_splits"] == 0
+    assert any("trip_group_split" in move["reasons"] for move in audit["accepted_moves"])
+
+
+def test_soft_issue_reassignment_postopt_moves_boundary_task_to_clear_meal_break_gap():
+    solver = GreedyCSP(
+        meal_break_minutes=30,
+        min_break_minutes=30,
+        mandatory_break_after_minutes=600,
+        max_driving_minutes=600,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=80, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 435, 60, line=80, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 510, 60, line=80, origin=1, dest=2)]),
+        _task_block(4, [_trip(4, 585, 60, line=80, origin=2, dest=1)]),
+        _task_block(5, [_trip(5, 660, 60, line=80, origin=1, dest=2)]),
+    ]
+    target_task = _task_block(6, [_trip(6, 750, 60, line=81, origin=2, dest=3)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, target_task)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, target_task])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] == 0
+    assert audit["improved"] is False
+    assert audit["baseline_metrics"]["meal_break_missing"] == 0
+    assert audit["baseline_metrics"]["mandatory_rest_missing"] == 0
+    assert audit["final_metrics"]["meal_break_missing"] == 0
+    assert audit["final_metrics"]["mandatory_rest_missing"] == 0
+    assert audit["accepted_moves"] == []
+
+
+def test_soft_issue_reassignment_postopt_creates_dedicated_duty_for_extreme_tail():
+    solver = GreedyCSP(
+        max_shift_minutes=900,
+        max_work_minutes=900,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=90, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 500, 60, line=90, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 1088, 60, line=90, origin=1, dest=2)]),
+    ]
+    blocking_target = _task_block(4, [_trip(4, 1100, 60, line=91, origin=2, dest=3)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, blocking_target)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, blocking_target])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["extreme_duties"] == 1
+    assert audit["final_metrics"]["extreme_duties"] == 0
+    assert audit["final_metrics"]["uncovered_blocks"] == 0
+    assert audit["final_metrics"]["violations"] == 0
+    assert any(move["mode"] == "dedicated" for move in audit["accepted_moves"])
+    assert len(new_duties) == 3
+    assert any(len(duty.all_trips) == 1 and duty.all_trips[0].line_id == 90 for duty in new_duties)
+
+
+def test_soft_issue_reassignment_postopt_rejects_extreme_tail_move_that_splits_trip_group():
+    solver = GreedyCSP(
+        max_shift_minutes=900,
+        max_work_minutes=900,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    shared_group = 950
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=92, origin=1, dest=2, trip_group_id=shared_group)]),
+        _task_block(2, [_trip(2, 1088, 60, line=92, origin=2, dest=1, trip_group_id=shared_group)]),
+    ]
+    unrelated_target = _task_block(3, [_trip(3, 1200, 60, line=93, origin=3, dest=4)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+    target_duty = solver._seed_duty_with_task(2, unrelated_target)
+    original_blocks = [Block(id=index + 1, trips=list(task.trips)) for index, task in enumerate([*source_tasks, unrelated_target])]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt([source_duty, target_duty], original_blocks)
+
+    assert audit["accepted"] == 0
+    assert audit["improved"] is False
+    assert audit["rejection_reasons"].get("trip_group_split_source", 0) >= 1
+    assert len(new_duties) == 2
+
+
+def test_soft_issue_reassignment_postopt_reconstructs_extreme_duty_across_multiple_targets():
+    solver = GreedyCSP(
+        max_shift_minutes=1800,
+        max_work_minutes=1800,
+        min_break_minutes=30,
+        duty_utilization_target=0.30,
+        duty_max_spread_soft_minutes=720,
+        duty_max_idle_soft_minutes=180,
+        strict_hard_validation=False,
+    )
+
+    source_tasks = [
+        _task_block(1, [_trip(1, 360, 60, line=94, origin=1, dest=2)]),
+        _task_block(2, [_trip(2, 840, 60, line=94, origin=2, dest=1)]),
+        _task_block(3, [_trip(3, 1200, 60, line=94, origin=1, dest=2)]),
+        _task_block(4, [_trip(4, 1680, 60, line=94, origin=2, dest=1)]),
+    ]
+    left_target_task = _task_block(5, [_trip(5, 270, 60, line=95, origin=2, dest=1)])
+    right_target_task = _task_block(6, [_trip(6, 1755, 60, line=96, origin=1, dest=2)])
+
+    source_duty, source_reason = solver._rebuild_duty_from_tasks(source_tasks, 1)
+    assert source_reason == ""
+    assert source_duty is not None
+
+    left_target_duty = solver._seed_duty_with_task(2, left_target_task)
+    right_target_duty = solver._seed_duty_with_task(3, right_target_task)
+    original_blocks = [
+        Block(id=index + 1, trips=list(task.trips))
+        for index, task in enumerate([*source_tasks, left_target_task, right_target_task])
+    ]
+
+    new_duties, audit = solver._soft_issue_reassignment_postopt(
+        [source_duty, left_target_duty, right_target_duty],
+        original_blocks,
+    )
+
+    assert audit["accepted"] >= 1
+    assert audit["improved"] is True
+    assert audit["baseline_metrics"]["extreme_duties"] == 1
+    assert audit["final_metrics"]["extreme_duties"] == 0
+    assert audit["final_metrics"]["uncovered_blocks"] == 0
+    assert audit["final_metrics"]["violations"] <= audit["baseline_metrics"]["violations"]
+    assert audit["final_metrics"]["operational_semantic_score"] < audit["baseline_metrics"]["operational_semantic_score"]
+    assert any(move["mode"] == "local_reconstruction" for move in audit["accepted_moves"])
+    reconstructed = next(move for move in audit["accepted_moves"] if move["mode"] == "local_reconstruction")
+    moved_task_ids = {
+        task_id
+        for allocation in reconstructed["reconstruction"]["allocated_to_existing"]
+        for task_id in allocation["task_ids"]
+    }
+    moved_task_ids.update(
+        task_id
+        for allocation in reconstructed["reconstruction"]["allocated_to_dedicated"]
+        for task_id in allocation["task_ids"]
+    )
+    assert moved_task_ids == {1, 2, 3, 4}
+    assert len(new_duties) <= 3

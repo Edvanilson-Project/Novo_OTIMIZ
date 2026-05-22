@@ -79,6 +79,7 @@ export default function LinesPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [notify, setNotify] = useState<{ msg: string; sev: 'success' | 'error' } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [field]: e.target.value }));
@@ -112,11 +113,12 @@ export default function LinesPage() {
     recolhimentoMinutes: row.recolhimentoMinutes ?? 0,
   });
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
-  const openEdit = (row: Line) => { setEditing(row); setForm(rowToForm(row)); setOpen(true); };
+  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormError(null); setOpen(true); };
+  const openEdit = (row: Line) => { setEditing(row); setForm(rowToForm(row)); setFormError(null); setOpen(true); };
 
   const handleSave = async () => {
-    if (!form.lineId || !form.name) { setNotify({ msg: 'Código e Nome são obrigatórios.', sev: 'error' }); return; }
+    if (!form.lineId || !form.name) { setFormError('Código e Nome da Linha são obrigatórios.'); return; }
+    setFormError(null);
     setSaving(true);
     try {
       const payload = {
@@ -205,12 +207,13 @@ export default function LinesPage() {
       </DashboardCard>
 
       {/* ── Dialog ── */}
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth>
+      <Dialog open={open} onClose={() => { setOpen(false); setFormError(null); }} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <IconRoute size={20} /> {editing ? `Editar: ${editing.name}` : 'Nova Linha'}
         </DialogTitle>
         <DialogContent dividers>
           <Stack spacing={3} sx={{ mt: 1 }}>
+            {formError && <Alert severity="error">{formError}</Alert>}
 
             {/* ── Identificação ── */}
             <Grid container spacing={2}>

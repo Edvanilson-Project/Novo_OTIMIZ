@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from typing import List
 
@@ -21,7 +22,7 @@ async def test_infrastructure_stress_queueing():
     
     payload = {
         "algorithm": "greedy",
-        "time_budget_s": 0.5, # Muito rápido para não travar os workers para sempre
+        "time_budget_s": 1.0, # Este serviço externo rejeita budgets menores que 1 segundo
         "trips": [
             {
                 "id": 1,
@@ -34,17 +35,30 @@ async def test_infrastructure_stress_queueing():
                 "distance_km": 10.0,
             }
         ],
-        "vehicle_types": [],
+        "vehicle_types": [
+            {
+                "id": 1,
+                "name": "Std",
+                "passenger_capacity": 40,
+                "cost_per_km": 1.0,
+                "cost_per_hour": 10.0,
+                "fixed_cost": 100.0,
+            }
+        ],
         "cct_params": {"strict_hard_validation": False},
-        "vsp_params": {"time_budget_s": 0.5}
+        "vsp_params": {"time_budget_s": 1.0}
     }
     
     headers = {
-        "X-Internal-Key": "internal-key-123456"
+        "X-Internal-Key": os.environ.get("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")
     }
 
-    async def _send_request(client: httpx.AsyncClient) -> httpx.Response:
-        return await client.post("http://localhost:8000/optimize/", json=payload, headers=headers)
+    async def _send_request(client: httpx.AsyncClient, request_id: int) -> httpx.Response:
+        request_payload = {
+            **payload,
+            "request_metadata": {"stress_request_id": request_id},
+        }
+        return await client.post("http://localhost:8000/optimize/", json=request_payload, headers=headers)
         
     start_time = time.time()
     
@@ -52,15 +66,21 @@ async def test_infrastructure_stress_queueing():
         # Verifica se o serviço está de pé primeiro
         try:
             health = await client.get("http://localhost:8000/health/")
-            # Se não estiver online (rodando), o teste é pulado em vez de falhar a CI inteira.
-            # Idealmente, a CI deve levantar os serviços antes de rodar os testes de integração.
             if health.status_code != 200:
                 pytest.skip("Serviço principal /health não responde com 200. Execute o uvicorn e celery primeiro.")
         except httpx.ConnectError:
-             pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
+            pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
+
+        # Verifica se a chave de autenticação é aceita pelo serviço em execução
+        try:
+            probe = await client.post("http://localhost:8000/optimize/", json=payload, headers=headers)
+            if probe.status_code == 403:
+                pytest.skip("INTERNAL_OPTIMIZER_KEY não corresponde ao serviço em execução — configure a chave no ambiente.")
+        except httpx.ConnectError:
+            pytest.skip("Serviço de testes não acessível no localhost:8000. Pular teste de integração.")
              
         # Dispara todas as tarefas de uma vez
-        tasks = [_send_request(client) for _ in range(num_requests)]
+        tasks = [_send_request(client, request_id) for request_id in range(num_requests)]
         responses: List[httpx.Response] = await asyncio.gather(*tasks)
 
     elapsed = time.time() - start_time

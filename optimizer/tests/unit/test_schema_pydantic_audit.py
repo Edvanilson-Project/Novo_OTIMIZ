@@ -10,6 +10,8 @@ from pydantic import ValidationError
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from src.algorithms.hybrid.pipeline import HybridPipeline
+from src.domain.models import Block, CSPSolution, Duty, Trip, VSPSolution
 from src.api.schemas import (
     TripInput,
     OptimizeRequest,
@@ -18,6 +20,7 @@ from src.api.schemas import (
     CctParamsInput,
     VspParamsInput,
 )
+from src.core.config import Settings
 
 
 # ─── Fixtures ───────────────────────────────────────────────
@@ -143,6 +146,18 @@ class TestOptimizeRequestSchema:
         )
         assert req.cct_params.connection_tolerance_minutes == 5
 
+    def test_cct_params_preserve_pull_counts_flags(self):
+        req = OptimizeRequest(
+            trips=[TripInput(**make_trip_dict())],
+            algorithm="hybrid_pipeline",
+            cct_params=CctParamsInput(
+                pullout_counts_in_driver_shift=False,
+                pullback_counts_in_driver_shift=False,
+            ),
+        )
+        assert req.cct_params.pullout_counts_in_driver_shift is False
+        assert req.cct_params.pullback_counts_in_driver_shift is False
+
     def test_vsp_params_allow_multi_line(self):
         req = OptimizeRequest(
             trips=[TripInput(**make_trip_dict())],
@@ -158,6 +173,62 @@ class TestOptimizeRequestSchema:
             time_budget_s=15.5,
         )
         assert req.time_budget_s == 15.5
+
+
+class TestSettingsConfig:
+    def test_settings_accepts_release_debug_flag(self, monkeypatch):
+        monkeypatch.setenv("DEBUG", "release")
+        settings = Settings()
+        assert settings.debug is False
+
+    def test_settings_reads_internal_optimizer_key_alias(self, monkeypatch):
+        monkeypatch.setenv("INTERNAL_OPTIMIZER_KEY", "test-internal-key")
+        settings = Settings()
+        assert settings.internal_security_key == "test-internal-key"
+
+
+class TestHybridPipelineBudgetGuards:
+    def test_finalize_skips_ilp_when_budget_is_nearly_exhausted(self, monkeypatch):
+        trips = [
+            Trip(
+                id=1,
+                line_id=1,
+                start_time=360,
+                end_time=420,
+                origin_id=1,
+                destination_id=2,
+                duration=60,
+                distance_km=10.0,
+            )
+        ]
+        vsp_sol = VSPSolution(blocks=[Block(id=1, trips=trips)], algorithm="mcnf")
+        pipeline = HybridPipeline(time_budget_s=4.0)
+        pipeline._start_timer()
+
+        captured = {"greedy_called": 0, "ilp_called": 0}
+
+        def fake_greedy_solve(self, blocks, source_trips):
+            captured["greedy_called"] += 1
+            duty = Duty(id=1)
+            duty.add_task(blocks[0])
+            return CSPSolution(duties=[duty], algorithm="greedy_csp")
+
+        def fake_ilp_solve(self, blocks, source_trips):
+            captured["ilp_called"] += 1
+            return CSPSolution(duties=[], algorithm="set_partitioning")
+
+        def fake_joint_swap(csp_sol, vsp_result, source_trips, vehicle_types, cct_params, kwargs):
+            return csp_sol, vsp_result
+
+        monkeypatch.setattr("src.algorithms.csp.greedy.GreedyCSP.solve", fake_greedy_solve)
+        monkeypatch.setattr("src.algorithms.csp.set_partitioning.SetPartitioningCSP.solve", fake_ilp_solve)
+        monkeypatch.setattr("src.algorithms.joint_opt.joint_duty_vehicle_swap", fake_joint_swap)
+
+        result = pipeline._finalize(vsp_sol, trips, [])
+
+        assert result.csp.algorithm == "greedy_csp"
+        assert captured["greedy_called"] == 1
+        assert captured["ilp_called"] == 0
 
 
 # ─── BlockOutput ─────────────────────────────────────────

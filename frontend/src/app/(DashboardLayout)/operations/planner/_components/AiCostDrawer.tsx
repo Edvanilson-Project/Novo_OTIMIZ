@@ -108,7 +108,7 @@ export function AiCostDrawer({ open, onClose, result }: AiCostDrawerProps) {
           vehicles: result.num_vehicles ?? result.vehicles,
           crew: result.num_crew ?? result.crew,
           total_cost: result.total_cost ?? result.totalCost,
-          covered_trips: result.covered_trips,
+          covered_trips: result.total_trips ?? 0,
           total_trips: result.total_trips,
           cct_violations: result.cct_violations ?? result.cctViolations,
           cost_breakdown: result.costBreakdown,

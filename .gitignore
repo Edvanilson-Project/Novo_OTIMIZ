@@ -12,6 +12,11 @@
 **/*.tsbuildinfo
 frontend/next-env.d.ts
 
+# Playwright
+**/test-results/
+**/playwright-report/
+**/playwright/.cache/
+
 # Python
 **/.venv/
 **/venv/
@@ -59,3 +64,10 @@ Thumbs.db
 .vscode/
 .idea/
 .aider*
+.agents/
+skills-lock.json
+
+# Scripts de geração de token com segredos hardcoded
+generate_token*.js
+gen_token*.py
+optimizer/data/gtfs/

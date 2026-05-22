@@ -21,24 +21,33 @@ export class TenantMiddleware implements NestMiddleware {
 
     if (token) {
       try {
-        const payload = this.jwtService.decode(token) as any;
+        // verify() valida a assinatura — decode() não valida e permitiria forjar companyId
+        const secret = process.env.JWT_SECRET;
+        const payload = secret
+          ? this.jwtService.verify(token, { secret })
+          : null;
         if (payload && payload.companyId) {
           companyId = payload.companyId;
         }
-      } catch (err) {
-        // Token inválido, mas o middleware segue para que o AuthGuard trate as permissões
+      } catch {
+        // Token inválido/expirado — JwtAuthGuard rejeitará na camada de autorização
       }
     }
 
-    // 2. Fallback para Header (Útil para testes de integração e dev tools)
-    if (!companyId) {
-      const companyIdStr = req.headers['x-company-id'] as string;
-      companyId = companyIdStr ? parseInt(companyIdStr, 10) : undefined;
-    }
-
-    // 3. Bypass de Desenvolvedor: injeta companyId=1 quando NODE_ENV=development e não há token
-    if (!companyId && process.env.NODE_ENV === 'development') {
-      companyId = 1;
+    // 3. Bypass dev: SOMENTE quando NODE_ENV=development, request veio de loopback (localhost)
+    //    e variável ALLOW_DEV_TENANT_FALLBACK=true. Reduz risco de bypass acidental
+    //    se ambiente de dev for exposto na rede ou via reverse proxy mal configurado.
+    if (
+      !companyId &&
+      process.env.NODE_ENV === 'development' &&
+      process.env.ALLOW_DEV_TENANT_FALLBACK === 'true'
+    ) {
+      const ip = req.ip || (req.socket && req.socket.remoteAddress) || '';
+      const isLoopback =
+        ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+      if (isLoopback) {
+        companyId = 1;
+      }
     }
 
     if (companyId) {

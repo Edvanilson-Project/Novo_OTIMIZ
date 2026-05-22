@@ -47,7 +47,7 @@ interface GanttChartProps {
     end: string;
     title: string;
     color?: string;
-    extendedProps?: any;
+    extendedProps?: Record<string, unknown>;
   }[];
   onEventDrop?: (tripId: number, targetBlockId: number) => void;
 }

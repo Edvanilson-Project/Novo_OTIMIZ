@@ -1,0 +1,250 @@
+{
+  "backend_url": "http://localhost:3001/api/v1",
+  "company_id": 22,
+  "source_company_id": 16,
+  "source_real_trips": 298,
+  "matrix": [
+    [
+      "assignment_vsp",
+      298
+    ]
+  ],
+  "results": [
+    {
+      "algorithm": "assignment_vsp",
+      "volume": 298,
+      "direct_python": {
+        "volume": 298,
+        "algorithm": "assignment_vsp",
+        "status": "error",
+        "error": "OptimizerError: Algorithm 'assignment_vsp' is not allowed with strict_hard_constraints=true when trip_group_id is present because it does not guarantee mandatory group preservation.",
+        "wall_time_s": 0.004,
+        "cpu_time_s": 0.004,
+        "rss_before_mb": 158.5,
+        "rss_after_mb": 158.9,
+        "rss_delta_mb": 0.4,
+        "input_duplicate_trips": 0
+      },
+      "e2e": {
+        "status": "failed",
+        "submit_http_status": 201,
+        "schedule_id": 353,
+        "task_id": "36fc6368-466c-4d42-adf5-90e3f148f709",
+        "submit_time_ms": 194.87,
+        "backend_total_time_ms": 6459.55,
+        "schedule_created_to_updated_ms": 5183.47,
+        "frontend_read_time_ms": 21.59,
+        "optimizer_solver_ms": null,
+        "optimizer_total_elapsed_ms": null,
+        "redis_before": {
+          "used_memory_bytes": 12750080,
+          "optimizer_queue_len": 0
+        },
+        "redis_after": {
+          "used_memory_bytes": 13020912,
+          "optimizer_queue_len": 0,
+          "memory_usage:celery-task-meta-36fc6368-466c-4d42-adf5-90e3f148f709": 262240,
+          "memory_usage:optimizer:task_timestamp:36fc6368-466c-4d42-adf5-90e3f148f709": 96
+        },
+        "backend_process_before": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 117.8,
+          "cpu_s": 2.72,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "backend_process_after": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            384722
+          ],
+          "rss_mb": 118.5,
+          "cpu_s": 2.91,
+          "cmdlines": [
+            "/home/edvanilson/.nvm/versions/node/v20.19.5/bin/node dist/main"
+          ]
+        },
+        "celery_process_before": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 170.2,
+          "cpu_s": 3.18,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "celery_process_after": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            385404
+          ],
+          "rss_mb": 172.4,
+          "cpu_s": 3.23,
+          "cmdlines": [
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --pool=solo"
+          ]
+        },
+        "vehicles": 0,
+        "duties": 0,
+        "total_cost": 0.0,
+        "input_trips": 298,
+        "covered_trips": 0,
+        "missing_trips": 298,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "soft_violations": 0,
+        "cct_violations": 0,
+        "error_type": "business",
+        "error_code": "ALGORITHM_UNSUPPORTED_STRICT_GROUPS",
+        "error_message": "Algorithm 'assignment_vsp' is not allowed with strict_hard_constraints=true when trip_group_id is present because it does not guarantee mandatory group preservation.",
+        "error_details": {
+          "issues": [],
+          "run_id": 353,
+          "line_id": null,
+          "algorithm": "assignment_vsp",
+          "company_id": 22,
+          "grouped_trips": 294,
+          "recommendation": "Use an algorithm with group repair/audit, or disable strict_hard_constraints for exploratory runs.",
+          "strict_hard_constraints": true
+        },
+        "latest_schedule_status": "failed",
+        "latest_has_hard_constraint_report": false,
+        "latest_has_performance": true,
+        "metadata_has_hard_constraint_report": false,
+        "metadata_has_performance": true,
+        "resolved_params": {
+          "cct_params": {
+            "apply_cct": true,
+            "goal_weights": {},
+            "dynamic_rules": [],
+            "max_work_minutes": 240,
+            "max_shift_minutes": 840,
+            "min_break_minutes": 15,
+            "meal_break_minutes": 15,
+            "strict_union_rules": true,
+            "allow_relief_points": false,
+            "max_driving_minutes": 240,
+            "min_layover_minutes": 10,
+            "enforce_min_interval": false,
+            "operator_pairing_hard": true,
+            "strict_gps_validation": false,
+            "terminal_location_ids": [],
+            "trip_group_keep_bonus": 240,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "enforce_single_line_duty": false,
+            "enforce_trip_groups_hard": true,
+            "strict_zero_gap_validation": true,
+            "connection_tolerance_minutes": 0,
+            "enforce_same_depot_start_end": false,
+            "operator_single_vehicle_only": true,
+            "mandatory_break_after_minutes": 240,
+            "operator_change_terminals_only": true,
+            "strict_terminal_sync_validation": false
+          },
+          "vsp_params": {
+            "random_seed": 42,
+            "goal_weights": {},
+            "time_budget_s": 120,
+            "force_round_trip": true,
+            "min_break_minutes": 15,
+            "paired_trip_bonus": 240,
+            "allow_vehicle_swap": false,
+            "ilp_timeout_seconds": 120,
+            "min_layover_minutes": 10,
+            "same_depot_required": false,
+            "enforce_min_interval": false,
+            "idle_cost_per_minute": 2,
+            "allow_multi_line_block": true,
+            "strict_hard_validation": true,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "deadhead_cost_per_minute": 10,
+            "preserve_preferred_pairs": true,
+            "max_vehicle_shift_minutes": 960,
+            "vehicle_idle_gap_behavior": "solver_decides",
+            "strict_zero_gap_validation": true,
+            "connection_tolerance_minutes": 0,
+            "fixed_vehicle_activation_cost": 950,
+            "preferred_pair_window_minutes": 30,
+            "max_candidate_successors_per_task": 64
+          },
+          "optimization_params": {
+            "cost_km": 1,
+            "cost_duty": 500,
+            "cost_vehicle": 950,
+            "force_round_trip": true,
+            "min_break_minutes": 15,
+            "allow_vehicle_swap": false,
+            "meal_break_minutes": 15,
+            "ilp_timeout_seconds": 120,
+            "min_layover_minutes": 10,
+            "enforce_min_interval": false,
+            "cct_violation_penalty": 500,
+            "driver_cost_per_minute": 0.5,
+            "strict_hard_constraints": true,
+            "strict_operational_mode": true,
+            "collector_cost_per_minute": 0.4,
+            "strict_zero_gap_validation": true,
+            "connection_tolerance_minutes": 0,
+            "mandatory_break_after_minutes": 240
+          }
+        },
+        "sample_missing_trip_ids": [
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "setup": {
+          "company_id": 22,
+          "trip_rows": 298
+        }
+      },
+      "comparison": {
+        "direct_status": "error",
+        "direct_time_ms": 55.12,
+        "cost_delta": 0.0,
+        "vehicle_delta": 0,
+        "duty_delta": 0,
+        "time_delta_ms": 6404.43,
+        "hard_violation_delta": 0
+      },
+      "bugs": []
+    }
+  ],
+  "logs": [
+    "/tmp/otimiz-e2e-celery.log",
+    "backend stdout session",
+    "optimizer uvicorn stdout session"
+  ]
+}

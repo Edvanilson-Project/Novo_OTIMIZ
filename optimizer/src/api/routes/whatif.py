@@ -1,6 +1,7 @@
 """
 POST /api/v1/evaluate-delta — Recálculo what-if após rearranjo de trips no Gantt.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ from ...algorithms.csp.greedy import GreedyCSP
 
 class BaselineRequest(BaseModel):
     """Payload do endpoint /evaluate-baseline: avalia custo do arranjo atual sem mover nada."""
+
     blocks: List[Dict[str, Any]] = Field(..., description="Estado atual dos blocos (como vieram do resultado)")
     vehicle_types: Optional[List[Dict[str, Any]]] = Field(default=None, description="Tipos de veículos")
     optimization_params: Optional[OptimizationParametersDTO] = None
@@ -47,6 +49,8 @@ def _recompute_idle_minutes(blocks: List[Block]) -> None:
 def _evaluate_arrangement(
     blocks_data: List[Dict[str, Any]],
     vehicle_types: List[VehicleType],
+    evaluator: "CostEvaluator",
+    optimization_params: Optional[OptimizationParametersDTO] = None,
     extra_meta: Optional[Dict[str, Any]] = None,
     algorithm_label: str = "arrangement",
 ) -> "WhatIfResponse":
@@ -83,15 +87,21 @@ def _evaluate_arrangement(
     fast_csp: Optional[CSPSolution] = None
     if all_trips and vehicle_types:
         try:
+            params = optimization_params.model_dump(exclude_none=True) if optimization_params else {}
+            # Fallbacks para manter o comportamento se params for vazio
             vsp_params = {
-                "min_work_minutes": 0,
-                "max_work_minutes": 600,
-                "max_shift_minutes": 720,
-                "min_layover_minutes": 8,
-                "allow_relief_points": True,
-                "operator_change_terminals_only": True,
+                "min_work_minutes": params.get("min_work_minutes", 0),
+                "max_work_minutes": params.get("max_work_minutes", 600),
+                "max_shift_minutes": params.get("max_shift_minutes", 720),
+                "min_layover_minutes": params.get("min_layover_minutes", 8),
+                "min_break_minutes": params.get("min_break_minutes", 30),
+                "enforce_min_interval": params.get("enforce_min_interval", False),
+                "connection_tolerance_minutes": params.get("connection_tolerance_minutes", 0),
+                "allow_relief_points": params.get("allow_relief_points", True),
+                "operator_change_terminals_only": params.get("operator_change_terminals_only", True),
             }
-            greedy_csp = GreedyCSP(vsp_params=vsp_params)
+            # Injetar o restante dos parâmetros como kwargs (CCT)
+            greedy_csp = GreedyCSP(vsp_params=vsp_params, **params)
             fast_csp = greedy_csp.solve(block_objects, all_trips)
             logger.debug("GreedyCSP: %d duties (%s)", len(fast_csp.duties), algorithm_label)
         except Exception as csp_error:
@@ -102,7 +112,7 @@ def _evaluate_arrangement(
 
     result = OptimizationResult(vsp=mock_vsp, csp=fast_csp)
     cost_breakdown = evaluator.total_cost_breakdown(result, vehicle_types)
-    block_responses = [_block_to_response(b, vehicle_types) for b in block_objects]
+    block_responses = [_block_to_response(b, vehicle_types, evaluator) for b in block_objects]
 
     return WhatIfResponse(
         status="ok",
@@ -113,7 +123,6 @@ def _evaluate_arrangement(
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-evaluator = CostEvaluator()
 
 
 class WhatIfRequest(BaseModel):
@@ -157,10 +166,7 @@ def _dict_to_trip(data: Dict[str, Any]) -> Trip:
         depot_id=data.get("depot_id"),
         relief_point_id=data.get("relief_point_id"),
         is_relief_point=bool(data.get("is_relief_point", False)),
-        deadhead_times={
-            int(k): int(v)
-            for k, v in (data.get("deadhead_times") or {}).items()
-        },
+        deadhead_times={int(k): int(v) for k, v in (data.get("deadhead_times") or {}).items()},
         idle_before_minutes=int(data.get("idle_before_minutes") or 0),
         idle_after_minutes=int(data.get("idle_after_minutes") or 0),
     )
@@ -179,6 +185,7 @@ def _dict_to_vehicle_type(data: Dict[str, Any]) -> VehicleType:
         minimum_soc=data.get("minimum_soc", 0.15),
         charge_rate_kw=data.get("charge_rate_kw", 0.0),
         energy_cost_per_kwh=data.get("energy_cost_per_kwh", 0.0),
+        charger_location_ids=list(data.get("charger_location_ids") or []),
         depot_id=data.get("depot_id"),
     )
 
@@ -191,21 +198,23 @@ def _block_from_dict(data: Dict[str, Any]) -> Block:
     return block
 
 
-def _block_to_response(block: Block, vehicle_types: List[VehicleType]) -> BlockResponse:
+def _block_to_response(block: Block, vehicle_types: List[VehicleType], evaluator: "CostEvaluator") -> BlockResponse:
     trip_data = []
     for t in block.trips:
-        trip_data.append({
-            "id": t.id,
-            "line_id": t.line_id,
-            "start_time": t.start_time,
-            "end_time": t.end_time,
-            "origin_id": t.origin_id,
-            "destination_id": t.destination_id,
-            "trip_group_id": t.trip_group_id,
-            "direction": t.direction,
-            "duration": t.duration or 0,
-            "distance_km": t.distance_km or 0.0,
-        })
+        trip_data.append(
+            {
+                "id": t.id,
+                "line_id": t.line_id,
+                "start_time": t.start_time,
+                "end_time": t.end_time,
+                "origin_id": t.origin_id,
+                "destination_id": t.destination_id,
+                "trip_group_id": t.trip_group_id,
+                "direction": t.direction,
+                "duration": t.duration or 0,
+                "distance_km": t.distance_km or 0.0,
+            }
+        )
     start_time = int(block.trips[0].start_time or 0) if block.trips else 0
     end_time = int(block.trips[-1].end_time or 0) if block.trips else 0
     try:
@@ -236,8 +245,10 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
         request.trip_ids,
         len(request.blocks),
     )
-    
-    # Sincronização de custos dinâmicos
+
+    # Sincronização de custos dinâmicos: usar instância LOCAL para evitar race condition
+    # com outras requisições rodando em paralelo (thread pool do Uvicorn).
+    local_evaluator = CostEvaluator()
     if request.optimization_params:
         logger.debug(
             "evaluate-delta: Usando pesos customizados: veiculo=%.2f, km=%.2f, jornada=%.2f",
@@ -245,7 +256,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             request.optimization_params.cost_km,
             request.optimization_params.cost_duty,
         )
-        evaluator.set_costs(
+        local_evaluator.set_costs(
             cost_vehicle=request.optimization_params.cost_vehicle,
             cost_km=request.optimization_params.cost_km,
             cost_duty=request.optimization_params.cost_duty,
@@ -253,11 +264,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
 
     try:
         blocks = deepcopy(request.blocks)
-        vehicle_types = (
-            [_dict_to_vehicle_type(v) for v in request.vehicle_types]
-            if request.vehicle_types
-            else []
-        )
+        vehicle_types = [_dict_to_vehicle_type(v) for v in request.vehicle_types] if request.vehicle_types else []
 
         trip_ids = list(request.trip_ids) if request.trip_ids else ([request.trip_id] if request.trip_id else [])
         source_block_id = request.source_block_id
@@ -287,12 +294,10 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
                     trips_actual_location[t_id] = b_id
 
         trips_in_source = source_block_data is not None and any(
-            tid in trips_actual_location and trips_actual_location[tid] == source_block_id
-            for tid in initial_ids_set
+            tid in trips_actual_location and trips_actual_location[tid] == source_block_id for tid in initial_ids_set
         )
         trips_in_target = target_block_data is not None and any(
-            tid in trips_actual_location and trips_actual_location[tid] == target_block_id
-            for tid in initial_ids_set
+            tid in trips_actual_location and trips_actual_location[tid] == target_block_id for tid in initial_ids_set
         )
 
         if source_block_data is None:
@@ -301,8 +306,10 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             # Avaliamos o estado atual graceful ao invés de quebrar com 404.
             if trips_in_target:
                 logger.info(
-                    "Source block %s ausente mas trips %s já em target %s → avaliando estado atual (stale-state gracioso).",
-                    source_block_id, trip_ids, target_block_id,
+                    "Source block %s ausente mas trips %s já em target %s → avaliando estado atual (stale-state gracioso).",  # noqa: E501
+                    source_block_id,
+                    trip_ids,
+                    target_block_id,
                 )
                 source_block_data = {"id": source_block_id, "trips": [], "vehicle_type_id": None}
             else:
@@ -314,7 +321,8 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             logger.info(
                 "Frontend pré-aplicou o move (trips %s ausentes no source_block=%s). "
                 "Avaliando blocks recebidos diretamente.",
-                trip_ids, source_block_id,
+                trip_ids,
+                source_block_id,
             )
         else:
             # ─── REGRA "IDA E VOLTA JUNTO" ────────────────────────────────────────
@@ -329,7 +337,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             for t in source_block_data.get("trips", []):
                 if t.get("id") in trip_ids_set and t.get("trip_group_id"):
                     group_ids_to_expand.add(t["trip_group_id"])
-            
+
             if group_ids_to_expand:
                 for t in source_block_data.get("trips", []):
                     if t.get("trip_group_id") in group_ids_to_expand and t.get("id") not in trip_ids_set:
@@ -344,7 +352,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
                 )
                 trip_to_time = {int(t.get("id")): int(t.get("start_time") or 0) for t in src_sorted}
                 target_start = trip_to_time.get(trip_ids[0], -1)
-                
+
                 if target_start >= 0:
                     # Escolhe a trip com menor gap de tempo
                     best_tid = None
@@ -356,7 +364,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
                         if 0 < gap < best_gap:
                             best_gap = gap
                             best_tid = tid
-                    
+
                     if best_tid:
                         trip_ids.append(best_tid)
                         trip_ids_set.add(best_tid)
@@ -377,10 +385,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
             # ──────────────────────────────────────────────────────────────────
 
             # Coleta trips a mover (ordem cronológica do source)
-            trip_data_list = [
-                t for t in source_block_data.get("trips", [])
-                if t.get("id") in trip_ids_set
-            ]
+            trip_data_list = [t for t in source_block_data.get("trips", []) if t.get("id") in trip_ids_set]
             if not trip_data_list:
                 raise HTTPException(
                     status_code=404,
@@ -389,8 +394,7 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
 
             # Remove trips do bloco de origem
             source_block_data["trips"] = [
-                t for t in source_block_data.get("trips", [])
-                if t.get("id") not in trip_ids_set
+                t for t in source_block_data.get("trips", []) if t.get("id") not in trip_ids_set
             ]
 
             # Insere trips no bloco de destino (cria se necessário)
@@ -406,7 +410,10 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
 
             logger.info(
                 "Move aplicado server-side: %d trips de bloco %s → %s (pos=%d)",
-                len(trip_data_list), source_block_id, target_block_id, ins,
+                len(trip_data_list),
+                source_block_id,
+                target_block_id,
+                ins,
             )
         # ────────────────────────────────────────────────────────────────────────
 
@@ -416,6 +423,8 @@ async def evaluate_delta(request: WhatIfRequest) -> WhatIfResponse:
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            evaluator=local_evaluator,
+            optimization_params=request.optimization_params,
             extra_meta={
                 "what_if_source_block": source_block_id,
                 "what_if_target_block": target_block_id,
@@ -444,8 +453,9 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
     pipeline (_evaluate_arrangement), então a comparação é apples-to-apples.
     """
     logger.info("evaluate-baseline recebido: blocks=%d", len(request.blocks))
-    
-    # Sincronização de custos dinâmicos
+
+    # Sincronização de custos dinâmicos: usar instância LOCAL para evitar race condition
+    local_evaluator = CostEvaluator()
     if request.optimization_params:
         logger.debug(
             "evaluate-baseline: Usando pesos customizados: veiculo=%.2f, km=%.2f, jornada=%.2f",
@@ -453,22 +463,20 @@ async def evaluate_baseline(request: BaselineRequest) -> WhatIfResponse:
             request.optimization_params.cost_km,
             request.optimization_params.cost_duty,
         )
-        evaluator.set_costs(
+        local_evaluator.set_costs(
             cost_vehicle=request.optimization_params.cost_vehicle,
             cost_km=request.optimization_params.cost_km,
             cost_duty=request.optimization_params.cost_duty,
         )
 
     try:
-        vehicle_types = (
-            [_dict_to_vehicle_type(v) for v in request.vehicle_types]
-            if request.vehicle_types
-            else []
-        )
+        vehicle_types = [_dict_to_vehicle_type(v) for v in request.vehicle_types] if request.vehicle_types else []
         blocks = [b for b in deepcopy(request.blocks) if b.get("trips")]
         return _evaluate_arrangement(
             blocks_data=blocks,
             vehicle_types=vehicle_types,
+            evaluator=local_evaluator,
+            optimization_params=request.optimization_params,
             algorithm_label="baseline",
         )
     except Exception as exc:

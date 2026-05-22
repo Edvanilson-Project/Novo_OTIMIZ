@@ -1,14 +1,20 @@
 """Configuração central via variáveis de ambiente (Pydantic BaseSettings)."""
+
 from functools import lru_cache
+from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+OPTIMIZER_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="allow"
+        env_file=str(OPTIMIZER_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="allow",
     )
 
     # ── App ───────────────────────────────────────────────────────────────────
@@ -32,16 +38,14 @@ class Settings(BaseSettings):
     )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    cors_origins: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:3001"]
-    )
+    cors_origins: List[str] = Field(default=["http://localhost:3000", "http://localhost:3001"])
 
     # ── Database (PostgreSQL async) ───────────────────────────────────────────
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_database: str = "otmiz_new"
-    db_username: str = "postgres"
-    db_password: str = "postgres"
+    db_host: str = Field(default="postgres", validation_alias="DB_HOST")
+    db_port: int = Field(default=5432, validation_alias="DB_PORT")
+    db_database: str = Field(default="otimiz_db", validation_alias="DB_NAME")
+    db_username: str = Field(default="otimiz_admin", validation_alias="DB_USER")
+    db_password: str = Field(default="otimiz_password", validation_alias="DB_PASSWORD")
 
     @property
     def database_url(self) -> str:
@@ -51,8 +55,8 @@ class Settings(BaseSettings):
         )
 
     # ── Backend NestJS (notificações de status) ───────────────────────────────
-    backend_url: str = "http://localhost:3001/api/v1"
-    backend_secret: str = "optimizer-internal-secret"
+    backend_url: str = Field(default="http://backend:3001/api/v1", validation_alias="BACKEND_URL")
+    backend_secret: str = Field(default="", validation_alias="BACKEND_SECRET")
 
     # ── Estratégia (persistência + reconciliação) ────────────────────────────
     strategy_data_dir: str = "./data/strategy"
@@ -80,34 +84,38 @@ class Settings(BaseSettings):
     sa_cooling_rate: float = 0.997
     sa_min_temp: float = 0.1
     sa_iterations_per_temp: int = 50
+    sa_max_iterations: int = 10000
 
     # Tabu Search
     ts_tabu_size: int = 30
     ts_max_iterations: int = 5000
     ts_neighborhood_size: int = 40
 
-    # ILP timeout (segundos)
+    # ILP timeout (segundos) e paralelismo
     ilp_timeout_seconds: int = 120
+    ilp_threads: int = 8
 
     # Hybrid pipeline: tempo máximo total (segundos)
     hybrid_time_budget_seconds: int = 900
 
     # ── Custos padrão (quando tipo de veículo não fornece custo) ──────────────
-    default_vehicle_fixed_cost: float = 800.0   # R$ por veículo por dia
-    default_cost_per_km: float = 2.0            # R$ por km
-    default_cost_per_hour: float = 50.0         # R$ por hora de operação
+    default_vehicle_fixed_cost: float = 800.0  # R$ por veículo por dia
+    default_cost_per_km: float = 2.0  # R$ por km
+    default_cost_per_hour: float = 50.0  # R$ por hora de operação
 
     # ── Regras CCT (Convenção Coletiva de Trabalho) ───────────────────────────
-    cct_max_shift_minutes: int = 480            # 8 horas de jornada
-    cct_max_driving_minutes: int = 270          # 4h30 de direção contínua
-    cct_min_break_minutes: int = 30             # 30 min de intervalo mínimo
+    cct_max_shift_minutes: int = 480  # 8 horas de jornada
+    cct_max_driving_minutes: int = 270  # 4h30 de direção contínua
+    cct_min_break_minutes: int = 30  # 30 min de intervalo mínimo
 
     # ── AI Copilot (OpenRouter) ───────────────────────────────────────────────
-    openrouter_api_key: str = ""                # Chave de API. Vazia = recurso desativado silenciosamente.
-    openrouter_model: str = ""                  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
+    openrouter_api_key: str = ""  # Chave de API. Vazia = recurso desativado silenciosamente.
+    openrouter_model: str = ""  # Modelo preferencial (ex: deepseek/deepseek-v4-pro)
 
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
-    redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
+    redis_url: str = Field(default="redis://redis:6379/0", validation_alias="REDIS_URL")
+    celery_task_soft_time_limit: int = 1200  # 20 min
+    celery_task_time_limit: int = 1500  # 25 min
 
     # ── Roteamento OSRM ──────────────────────────────────────────────────────
     osrm_url: str = "http://localhost:5000"
@@ -115,7 +123,41 @@ class Settings(BaseSettings):
     routing_cache_ttl: int = 86400  # 24 horas
 
     # ── Segurança Interna (Security Bridge) ──────────────────────────────────
-    internal_security_key: str = Field(default="internal-key-123456", env="INTERNAL_OPTIMIZER_KEY")
+    internal_security_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("INTERNAL_OPTIMIZER_KEY", "internal_security_key"),
+    )
+
+    @field_validator("internal_security_key", mode="after")
+    @classmethod
+    def reject_known_default_key(cls, v: str) -> str:
+        if not v or v == "internal-key-123456":
+            raise ValueError("INTERNAL_OPTIMIZER_KEY must be set to a strong random value (not the default)")
+        return v
+
+    @field_validator("backend_secret", mode="after")
+    @classmethod
+    def reject_default_backend_secret(cls, v: str) -> str:
+        if not v or v == "optimizer-internal-secret":
+            raise ValueError("BACKEND_SECRET must be set to a strong random value (not the default)")
+        return v
+
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+            return False
+        return value
 
 
 @lru_cache

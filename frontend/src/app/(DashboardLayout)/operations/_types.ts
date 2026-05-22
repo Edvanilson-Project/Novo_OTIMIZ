@@ -99,11 +99,9 @@ export interface User {
 }
 
 export type OptimizationStatus =
-  | 'pending'
-  | 'running'
+  | 'processing'
   | 'completed'
-  | 'failed'
-  | 'cancelled';
+  | 'failed';
 
 export type OptimizationAlgorithm =
   | 'full_pipeline'
@@ -294,6 +292,53 @@ export interface OptimizationRunAuditResult extends OptimizationResultSummary {
   hardConstraintReport?: Record<string, unknown> | null;
 }
 
+export type OperationalQualityMode = 'strict' | 'balanced' | 'optimized';
+
+export interface OperationalQualityScenarioSummary {
+  total_cost?: number;
+  vehicles?: number;
+  duties?: number;
+  crew?: number;
+  duties_below_25_pct?: number;
+  duties_below_30_pct?: number;
+  duties_above_12h?: number;
+  avg_utilization_pct?: number;
+  avg_idle_minutes?: number;
+  overtime_minutes?: number;
+  critical_count?: number;
+  borderline_count?: number;
+  acceptable_count?: number;
+  hard_violation_count?: number;
+  labels?: string[];
+}
+
+export interface OperationalQualityScenarioOption {
+  scenario_id: string;
+  title?: string;
+  labels?: string[];
+  candidate_note?: string | null;
+  summary?: OperationalQualityScenarioSummary | null;
+}
+
+export interface OperationalQualityRejectedScenario {
+  scenario_id: string;
+  title?: string;
+  reason?: string;
+  summary?: OperationalQualityScenarioSummary | null;
+}
+
+export interface OperationalQualityDecision {
+  mode?: OperationalQualityMode;
+  chosen_scenario?: string;
+  chosen_title?: string;
+  justification?: string[];
+  trade_offs?: string[];
+  criteria?: Record<string, string>;
+  available_scenarios?: OperationalQualityScenarioOption[];
+  rejected_scenarios?: OperationalQualityRejectedScenario[];
+  selected_summary?: OperationalQualityScenarioSummary | null;
+}
+
 export interface OptimizationResultSummary {
   vehicles?: number;
   num_vehicles?: number;
@@ -324,8 +369,69 @@ export interface OptimizationResultSummary {
   reproducibility?: OptimizationReproducibility | null;
   performance?: OptimizationPerformance | null;
   hardConstraintReport?: Record<string, unknown> | null;
+  chosenScenario?: string | null;
+  chosen_scenario?: string | null;
+  rejectedScenarios?: OperationalQualityRejectedScenario[];
+  rejected_scenarios?: OperationalQualityRejectedScenario[];
+  justification?: string[];
+  tradeOffs?: string[];
+  trade_offs?: string[];
+  operationalQualityDecision?: OperationalQualityDecision | null;
+  operational_quality_decision?: OperationalQualityDecision | null;
   metadata?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
+  /** Resolved optimizer parameters (snake_case from Python API) */
+  resolved_params?: Record<string, unknown>;
+  /** Run-level fields present when a full OptimizationRun is passed as this type */
+  id?: number;
+  scheduleId?: number;
+  updatedAt?: string;
+  createdAt?: string;
+  /** Snake_case wrapper sometimes returned by the API before normalization */
+  result?: OptimizationResultSummary;
+  /** Nested summary when full run object is passed to components expecting this type */
+  resultSummary?: OptimizationResultSummary | null;
+  /** Schedule entity fields (status, error info) present when the full entity is used */
+  status?: OptimizationStatus;
+  error_code?: string;
+  error_message?: string;
+  hard_constraint_report?: Record<string, unknown> | null;
+}
+
+export interface OptimizationParameters {
+  dynamic_rules?: unknown[];
+  operational_quality_mode?: string;
+  algorithm_preference?: string;
+  preferred_algorithm?: string;
+  min_break_minutes?: number;
+  meal_break_minutes?: number;
+  min_layover_minutes?: number;
+  connection_tolerance_minutes?: number;
+  pullout_minutes?: number;
+  pullback_minutes?: number;
+  [key: string]: unknown;
+}
+
+export interface ScheduleValidationIssue {
+  detail: string;
+  suggestedFix?: string;
+}
+
+export interface ScheduleValidationStats {
+  totalTrips?: number;
+  allocatedTrips?: number;
+  totalVehicles?: number;
+  totalDuties?: number;
+  totalOperatorHours?: number;
+  allocationPercentage?: number;
+}
+
+export interface ScheduleValidationResult {
+  valid: boolean;
+  errorCount?: number;
+  stats?: ScheduleValidationStats;
+  errors?: ScheduleValidationIssue[];
+  warnings?: ScheduleValidationIssue[];
 }
 
 export interface OptimizationRunComparisonPerformance {
@@ -356,11 +462,19 @@ export interface OptimizationRunComparisonReproducibility {
 
 export interface OptimizationBlock {
   block_id: number;
+  /** camelCase fallback for block_id */
+  blockId?: number;
+  /** Legacy id alias */
+  id?: number;
   trips?: number[] | TripDetail[];
   trip_details?: TripDetail[];
   num_trips?: number;
   start_time?: number;
+  /** camelCase fallback for start_time */
+  startTime?: number;
   end_time?: number;
+  /** camelCase fallback for end_time */
+  endTime?: number;
   spread_minutes?: number;
   idle_minutes?: number;
   total_cost?: number;
@@ -370,15 +484,92 @@ export interface OptimizationBlock {
   activation_cost?: number;
   connection_cost?: number;
   deadhead_cost?: number;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
+}
+
+
+
+export interface OptimizationDutyTimeSegment {
+  type?: string;
+  event_type?: string;
+  segment_sequence?: number;
+  distance_km?: number;
+  /** Legacy single-trip id fields (some API responses include these on segments) */
+  tripId?: number;
+  trip_id?: number;
+  event_scope?: string;
+  bundle_event_type?: string;
+  start?: number;
+  end?: number;
+  duration?: number;
+  duration_minutes?: number;
+  event_label?: string;
+  is_work_time?: boolean;
+  is_driving_time?: boolean;
+  is_idle_time?: boolean;
+  is_normal_break?: boolean;
+  is_mandatory_rest?: boolean;
+  is_pullout?: boolean;
+  is_pullback?: boolean;
+  rest_valid?: boolean;
+  rule_code?: string;
+  violation_code?: string;
+  explanation?: string;
+  trip_ids?: number[];
+  trip_count?: number;
+  trip_group_ids?: number[];
+  trip_directions?: string[];
+  block_id?: number | string;
+  from_block_id?: number | string;
+  to_block_id?: number | string;
+  from_vehicle_id?: number | string;
+  to_vehicle_id?: number | string;
+  vehicle_id?: number | string;
+  location?: number | string;
+  location_start?: number | string;
+  location_end?: number | string;
+}
+
+export interface OptimizationOperationalTimeReport {
+  duty_start?: number;
+  duty_end?: number;
+  spread_time?: number;
+  window_time?: number;
+  work_time?: number;
+  driving_time?: number;
+  idle_time?: number;
+  normal_break_time?: number;
+  mandatory_rest_time?: number;
+  pullout_time?: number;
+  pullback_time?: number;
+  mandatory_rest?: {
+    mandatory_rest_required?: boolean;
+    has_valid_mandatory_rest?: boolean;
+    violations?: string[];
+  };
+  operator?: {
+    operator_not_assigned?: boolean;
+  };
+  /** Flat aliases sometimes returned directly by the API (without nesting) */
+  violations?: string[];
+  operator_not_assigned?: boolean;
+  mandatory_rest_required?: boolean;
+  has_valid_mandatory_rest?: boolean | null;
+  suggestion?: string;
+  user_explanation?: string;
 }
 
 export interface OptimizationDuty {
   duty_id: number;
+  /** Legacy id field used as fallback for duty_id in some API responses */
+  id?: number;
   blocks?: number[];
   trip_ids?: number[];
   trips?: TripDetail[];
   segments?: OptimizationDutySegment[];
+  duty_time_segments?: OptimizationDutyTimeSegment[];
+  detailed_trip_assignments?: TripDetail[];
+  operational_time_report?: OptimizationOperationalTimeReport;
   work_time: number;
   spread_time: number;
   start_time: number;
@@ -394,7 +585,7 @@ export interface OptimizationDuty {
   rest_violations?: number;
   cct_penalties_cost?: number;
   warnings?: string[];
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 }
 
 export interface OptimizationDutySegment {
@@ -406,12 +597,23 @@ export interface OptimizationDutySegment {
 
 export interface TripDetail {
   id: number;
+  source_trip_id?: number;
+  public_trip_id?: number;
   trip_id?: number;
   block_id?: number;
+  vehicle_id?: number;
   duty_id?: number;
+  driver_id?: number;
   roster_id?: number;
   operator_id?: number | null;
   operator_name?: string | null;
+  sequence_in_duty?: number;
+  sequence_in_block?: number;
+  segment_sequence?: number | null;
+  sequence_in_bundle?: number;
+  bundle_trip_count?: number;
+  bundle_event_type?: string;
+  pair_id?: string | null;
   segment_index?: number;
   segment_count?: number;
   start_time: number;
@@ -422,9 +624,21 @@ export interface TripDetail {
   destination_name?: string;
   duration?: number;
   line_id?: number | null;
+  trip_group_id?: number | null;
   is_pull_out?: boolean;
   is_pull_back?: boolean;
   is_paired?: boolean;
   direction?: 'outbound' | 'inbound';
   destination_terminal_id?: number | null;
+  /** camelCase aliases present when trip comes from the hydrated blocks */
+  tripId?: number;
+  lineId?: number | null;
+  lineCode?: string;
+  line_code?: string;
+  startTime?: number;
+  endTime?: number;
+  color?: string;
+  sentido?: string;
+  distance_km?: number;
+  [key: string]: unknown;
 }

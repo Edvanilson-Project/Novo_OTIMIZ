@@ -20,6 +20,9 @@ RUN npm ci --only=production --ignore-scripts
 
 COPY --from=builder /app/dist ./dist
 
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3001
 
 CMD ["node", "dist/main.js"]

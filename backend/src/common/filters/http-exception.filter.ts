@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { captureException } from '../telemetry/sentry.setup';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -28,10 +29,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       exception.stack,
     );
 
+    // Capture 5xx errors in Sentry (not 4xx — those are expected client errors)
+    if (status >= 500) {
+      captureException(exception, {
+        url: request.url,
+        method: request.method,
+        status,
+      });
+    }
+
     // Resposta padrão e opaca para o cliente (Segurança Anti-vazamento)
     const isErrorHttp = exception instanceof HttpException;
-    const message = isErrorHttp 
-      ? (exception as HttpException).getResponse() 
+    const message = isErrorHttp
+      ? exception.getResponse()
       : 'Erro interno do servidor';
 
     response.status(status).json({

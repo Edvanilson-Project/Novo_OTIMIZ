@@ -1,0 +1,106 @@
+{
+  "date": "2026-04-28",
+  "decision": "A",
+  "decision_description": "Backend no longer infers trip_group_id; optimizer is the single source of truth for mandatory group inference.",
+  "files_changed": [
+    "backend/src/modules/operations/optimization.service.ts",
+    "backend/src/modules/operations/optimization.service.spec.ts",
+    "optimizer/src/api/schemas.py",
+    "optimizer/src/api/routes/optimize.py",
+    "optimizer/src/services/optimizer_tasks.py",
+    "optimizer/src/services/optimizer_service.py",
+    "optimizer/tests/unit/test_solver_edge_cases.py"
+  ],
+  "before": {
+    "2000": {
+      "python_direct_groups": 998,
+      "e2e_groups": 984,
+      "status": "failed"
+    },
+    "5000": {
+      "python_direct_groups": 2497,
+      "e2e_groups": 2463,
+      "status": "failed"
+    }
+  },
+  "after": {
+    "backend_payload_raw_group_stats": {
+      "group_count": 0,
+      "grouped_trip_count": 0
+    },
+    "optimizer_effective_groups": {
+      "2000": 998,
+      "5000": 2497
+    },
+    "e2e_results": [
+      {
+        "volume": 2000,
+        "status": "failed",
+        "error_code": "SCALE_CHUNK_FAILED",
+        "backend_total_time_ms": 51629.23,
+        "schedule_created_to_updated_ms": 50242.4,
+        "frontend_read_time_ms": 32.8,
+        "optimizer_total_elapsed_ms": null,
+        "redis_payload_bytes": 1572960,
+        "celery_rss_before_mb": 264.6,
+        "celery_rss_after_mb": 384.6,
+        "latest_has_hard_constraint_report": true,
+        "latest_has_performance": true,
+        "root_cause_remaining": {
+          "primary_error": "list index out of range",
+          "fallback_error": "MANDATORY_GROUP_SPLIT",
+          "problem_trip_groups": [
+            [32039, 32048],
+            [32051, 32060],
+            [32056, 32059],
+            [32062, 32065]
+          ]
+        }
+      },
+      {
+        "volume": 5000,
+        "status": "completed",
+        "backend_total_time_ms": 136209.3,
+        "schedule_created_to_updated_ms": 135466.28,
+        "frontend_read_time_ms": 128.77,
+        "optimizer_total_elapsed_ms": 130700.52,
+        "optimizer_solver_ms": 130636.78,
+        "redis_payload_bytes": 5242976,
+        "celery_rss_before_mb": 384.6,
+        "celery_rss_after_mb": 440.9,
+        "vehicles": 183,
+        "duties": 421,
+        "total_cost": 982071.44,
+        "missing_trips": 0,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "scale_status": "partially_completed",
+        "scale_chunk_count": 9,
+        "scale_fallback_chunk_count": 1,
+        "scale_stitching": {
+          "accepted": 5,
+          "rejected": 363,
+          "attempted": 396,
+          "input_blocks": 188,
+          "output_blocks": 183,
+          "max_gap_minutes": 60
+        },
+        "latest_has_hard_constraint_report": true,
+        "latest_has_performance": true
+      }
+    ]
+  },
+  "verdict": {
+    "duplicate_inference_removed": true,
+    "backend_optimizer_group_consistency_validated": true,
+    "e2e_2000_passed": false,
+    "e2e_5000_passed": true,
+    "overall": "Root cause addressed, but one independent scale/chunk failure remains."
+  },
+  "artifacts": {
+    "before_report": "optimizer/e2e_scale_validation_report.md",
+    "after_report": "optimizer/e2e_scale_validation_after_group_sync.md",
+    "after_raw_json": "optimizer/e2e_scale_validation_after_group_sync.json",
+    "this_report": "optimizer/trip_group_unification_validation_report.md"
+  }
+}

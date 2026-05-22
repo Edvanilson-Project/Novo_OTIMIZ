@@ -17,6 +17,14 @@ export class TerminalsService {
     return this.repo.find({ where: { companyId }, order: { name: 'ASC' } });
   }
 
+  findDepots(): Promise<Terminal[]> {
+    const companyId = this.tenantContext.getCompanyId();
+    return this.repo.find({
+      where: { companyId, isDepot: true },
+      order: { name: 'ASC' },
+    });
+  }
+
   async findOne(id: number): Promise<Terminal> {
     const companyId = this.tenantContext.getCompanyId();
     const terminal = await this.repo.findOne({ where: { id, companyId } });
@@ -24,13 +32,13 @@ export class TerminalsService {
     return terminal;
   }
 
-  async create(dto: Record<string, any>): Promise<Terminal> {
+  async create(dto: Record<string, unknown>): Promise<Terminal> {
     const companyId = this.tenantContext.getCompanyId();
     const entity = this.repo.create({ ...dto, companyId });
     return this.repo.save(entity);
   }
 
-  async update(id: number, dto: Record<string, any>): Promise<Terminal> {
+  async update(id: number, dto: Record<string, unknown>): Promise<Terminal> {
     const terminal = await this.findOne(id);
     Object.assign(terminal, dto);
     return this.repo.save(terminal);

@@ -1,4 +1,5 @@
 """Logging estruturado com structlog + stdlib backend."""
+
 import logging
 import sys
 
@@ -32,7 +33,6 @@ def configure_logging(level: str = "INFO") -> None:
         processors=shared_processors + [renderer],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),   # usa stdlib como backend
+        logger_factory=structlog.stdlib.LoggerFactory(),  # usa stdlib como backend
         cache_logger_on_first_use=True,
     )
-

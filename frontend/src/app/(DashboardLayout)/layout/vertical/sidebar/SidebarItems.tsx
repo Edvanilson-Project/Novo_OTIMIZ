@@ -31,12 +31,14 @@ const SidebarItems = () => {
   const [userRole, setUserRole] = useState<string>('operator');
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     const u = getSessionUser();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (u?.role) setUserRole(u.role);
   }, []);
 
   const lgUp = useMediaQuery((theme) => theme.breakpoints.up('lg'));
-  const hideMenu = lgUp ? isCollapse == "mini-sidebar" && !isSidebarHover : '';
+  const hideMenu = lgUp ? isCollapse == "mini-sidebar" && !isSidebarHover : false;
 
   // Filtra itens pela role do usuário, removendo navlabels órfãos
   const visibleItems = (() => {

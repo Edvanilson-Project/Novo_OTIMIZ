@@ -4,7 +4,7 @@ import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Toolbar from "@mui/material/Toolbar";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import { styled } from "@mui/material/styles";
+import { styled, type Theme } from "@mui/material/styles";
 import { IconMenu2 } from "@tabler/icons-react";
 import Profile from "./Profile";
 import { CustomizerContext } from '@/app/context/customizerContext';
@@ -30,7 +30,7 @@ const ToolbarStyled = styled(Toolbar)(({ theme }) => ({
 }));
 
 const Header = () => {
-  const lgUp = useMediaQuery((theme: any) => theme.breakpoints.up("lg"));
+  const lgUp = useMediaQuery((theme: Theme) => theme.breakpoints.up("lg"));
   
   // drawer
   const { 

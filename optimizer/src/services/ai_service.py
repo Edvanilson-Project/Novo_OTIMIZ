@@ -9,6 +9,7 @@ Princípios de design:
 - ASSÍNCRONO: usa httpx.AsyncClient para não bloquear o event loop.
 - CACHE TTL: a lista de modelos é atualizada automaticamente a cada 1 hora.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +45,21 @@ _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 # Palavras-chave para estimar potência de um modelo pelo seu ID
 # (maior número de parâmetros = maior prioridade)
 _SIZE_HINTS = [
-    ("405b", 9), ("70b", 8), ("72b", 8), ("32b", 7), ("27b", 7),
-    ("30b", 7), ("26b", 6), ("13b", 5), ("12b", 5), ("9b", 4),
-    ("8b", 4), ("7b", 3), ("4b", 2), ("3b", 2), ("1b", 1),
+    ("405b", 9),
+    ("70b", 8),
+    ("72b", 8),
+    ("32b", 7),
+    ("27b", 7),
+    ("30b", 7),
+    ("26b", 6),
+    ("13b", 5),
+    ("12b", 5),
+    ("9b", 4),
+    ("8b", 4),
+    ("7b", 3),
+    ("4b", 2),
+    ("3b", 2),
+    ("1b", 1),
 ]
 
 # System prompt: instrui o LLM a agir como Diretor de Operações de Transporte
@@ -68,9 +81,8 @@ _SYSTEM_PROMPT = (
     "\n- 'vsp' -> Planejamento de Veículos (Frota)"
     "\n- 'csp' -> Planejamento de Tripulação (Motoristas)"
     "\n- 'deadhead' -> KM Morto / Viagem em Vazio"
-
     "\n\n### INSTRUÇÕES CRÍTICAS DE RESPOSTA:"
-    "\n1. PROIBIÇÃO TOTAL: Nunca use nomes com underline (ex: min_break_minutes). Se não souber o nome, invente um nome em Português que faça sentido."
+    "\n1. PROIBIÇÃO TOTAL: Nunca use nomes com underline (ex: min_break_minutes). Se não souber o nome, invente um nome em Português que faça sentido."  # noqa: E501
     "\n2. NÃO USE TABELAS: Use apenas listas com tópicos (•) e negritos."
     "\n3. FOCO EM SOLUÇÃO: Dê sugestões de como reduzir custos mudando os parâmetros acima."
 )
@@ -100,7 +112,7 @@ class AiService:
         # Cache dinâmico de modelos gratuitos disponíveis no OpenRouter
         self._dynamic_models: List[str] = []
         self._models_fetched_at: float = 0.0  # timestamp Unix da última busca
-        self._models_ttl: float = 3600.0      # atualiza a lista a cada 1 hora
+        self._models_ttl: float = 3600.0  # atualiza a lista a cada 1 hora
 
     # ── Descoberta dinâmica de modelos ────────────────────────────────────────
 
@@ -121,7 +133,10 @@ class AiService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(_OPENROUTER_MODELS_URL)
                 if response.status_code != 200:
-                    logger.warning("[AiService] Falha ao buscar lista de modelos (%d). Usando fallback estático.", response.status_code)
+                    logger.warning(
+                        "[AiService] Falha ao buscar lista de modelos (%d). Usando fallback estático.",
+                        response.status_code,
+                    )
                     return _FALLBACK_MODELS
 
                 all_models = response.json().get("data", [])
@@ -144,7 +159,7 @@ class AiService:
         """Versão assíncrona e segura para obter modelos."""
         # Se um modelo específico foi configurado, use-o com prioridade máxima
         pinned_model = getattr(self._settings, "openrouter_model", None)
-        
+
         now = time.time()
         if (now - self._models_fetched_at) < self._models_ttl and self._dynamic_models:
             models = self._dynamic_models
@@ -152,11 +167,11 @@ class AiService:
             models = await self._fetch_free_models_async()
             self._dynamic_models = models
             self._models_fetched_at = now
-        
+
         if pinned_model:
             # Garante que o modelo fixado seja o primeiro, sem duplicatas
             return [pinned_model] + [m for m in models if m != pinned_model]
-            
+
         return models
 
     # ── API pública ──────────────────────────────────────────────────────────
@@ -183,9 +198,7 @@ class AiService:
         try:
             asyncio.get_running_loop()
             with ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(
-                    asyncio.run, self.generate_insight_async(metrics)
-                ).result()
+                return pool.submit(asyncio.run, self.generate_insight_async(metrics)).result()
         except RuntimeError:
             return asyncio.run(self.generate_insight_async(metrics))
 
@@ -205,7 +218,7 @@ class AiService:
                 parsed = json.loads(clean_json)
             else:
                 parsed = {}
-            
+
             self._translation_cache[cache_key] = parsed
             return parsed
         except Exception:
@@ -223,9 +236,7 @@ class AiService:
         try:
             asyncio.get_running_loop()
             with ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(
-                    asyncio.run, self.translate_rules_async(rules)
-                ).result()
+                return pool.submit(asyncio.run, self.translate_rules_async(rules)).result()
         except RuntimeError:
             return asyncio.run(self.translate_rules_async(rules))
 
@@ -239,7 +250,6 @@ class AiService:
             logger.warning("[AiService] Erro no chat_async: %s", repr(exc))
             return self._local_fallback_answer(metrics, question)
 
-
     # ── Implementação interna ─────────────────────────────────────────────────
 
     async def _call_openrouter_chat(self, metrics: Dict[str, Any], question: str) -> str:
@@ -247,7 +257,7 @@ class AiService:
         api_key = self._settings.openrouter_api_key
         user_context = self._build_user_message(metrics)
         models = await self._get_models_async()
-        
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "HTTP-Referer": "http://localhost:3000",
@@ -256,7 +266,11 @@ class AiService:
         }
 
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT + "\nAgora, responda especificamente à pergunta do usuário usando os dados acima."},
+            {
+                "role": "system",
+                "content": _SYSTEM_PROMPT
+                + "\nAgora, responda especificamente à pergunta do usuário usando os dados acima.",
+            },
             {"role": "assistant", "content": f"Contexto da Otimização:\n{user_context}"},
             {"role": "user", "content": question},
         ]
@@ -276,14 +290,19 @@ class AiService:
                         if content:
                             logger.info("[AiService] Chat respondido pelo modelo: %s", model)
                             return content.strip()
-                    
+
                     err_body = response.text[:150]
-                    logger.warning("[AiService] Modelo %s retornou HTTP %d (%s) — tentando próximo em 0.5s.", model, response.status_code, err_body)
+                    logger.warning(
+                        "[AiService] Modelo %s retornou HTTP %d (%s) — tentando próximo em 0.5s.",
+                        model,
+                        response.status_code,
+                        err_body,
+                    )
                     await asyncio.sleep(0.5)
                 except Exception as exc:
                     logger.warning("[AiService] Modelo %s falhou (%s) — tentando próximo.", model, repr(exc))
                     await asyncio.sleep(0.3)
-        
+
         return self._local_fallback_answer(metrics, question)
 
     def _run_async(self, metrics: Dict[str, Any]) -> Optional[str]:
@@ -380,10 +399,12 @@ class AiService:
                         if content:
                             logger.info("[AiService] Insight gerado pelo modelo: %s", model)
                             return content.strip()
-                    logger.warning("[AiService] Modelo %s retornou HTTP %d — tentando próximo.", model, response.status_code)
+                    logger.warning(
+                        "[AiService] Modelo %s retornou HTTP %d — tentando próximo.", model, response.status_code
+                    )
                 except Exception as exc:
                     logger.warning("[AiService] Modelo %s falhou (%s) — tentando próximo.", model, repr(exc))
-        
+
         return None  # Insight ignorado silenciosamente (não é crítico para a operação)
 
     @staticmethod
@@ -405,9 +426,9 @@ class AiService:
             f"- Componente de custo dominante CSP: {metrics.get('dominant_csp', 'N/A')}",
             f"- Status da solucao: {metrics.get('status', 'N/A')}",
         ]
-        if metrics.get('current_parameters'):
+        if metrics.get("current_parameters"):
             lines.append("\nParametros Atuais (Regras CCT):")
-            for k, v in metrics['current_parameters'].items():
+            for k, v in metrics["current_parameters"].items():
                 lines.append(f"- {k}: {v}")
 
         return "\n".join(lines)
@@ -418,52 +439,66 @@ class AiService:
         Usada como ÚLTIMO RECURSO quando todos os modelos de IA externos estão indisponíveis.
         O usuário NUNCA verá uma mensagem de erro genérica.
         """
-        total_cost = metrics.get('total_cost', 0)
-        vehicles = metrics.get('vehicles', '?')
-        crew = metrics.get('crew', '?')
-        cct_violations = metrics.get('cct_violations', 0)
-        cb = metrics.get('cost_breakdown', {})
-        params = metrics.get('current_parameters', {})
+        total_cost = metrics.get("total_cost", 0)
+        vehicles = metrics.get("vehicles", "?")
+        crew = metrics.get("crew", "?")
+        cct_violations = metrics.get("cct_violations", 0)
+        cb = metrics.get("cost_breakdown", {})
+        params = metrics.get("current_parameters", {})
 
         # Análise local baseada nos dados reais
-        vsp_total = (cb.get('vsp') or {}).get('total', 0)
-        csp_total = (cb.get('csp') or {}).get('total', 0)
-        overtime = (cb.get('csp') or {}).get('overtime_cost', 0)
-        deadhead = (cb.get('vsp') or {}).get('connection', 0)
+        vsp_total = (cb.get("vsp") or {}).get("total", 0)
+        csp_total = (cb.get("csp") or {}).get("total", 0)
+        overtime = (cb.get("csp") or {}).get("overtime_cost", 0)
+        deadhead = (cb.get("vsp") or {}).get("connection", 0)
 
         q = question.lower()
-        response_lines = [f"📊 **Análise com base na sua otimização atual:**\n"]
+        response_lines = ["📊 **Análise com base na sua otimização atual:**\n"]
 
-        if any(w in q for w in ['custo', 'reduzir', 'economizar', 'melhorar']):
+        if any(w in q for w in ["custo", "reduzir", "economizar", "melhorar"]):
             dominante = "frota (VSP)" if vsp_total > csp_total else "tripulação (CSP)"
             response_lines.append(f"**Custo total: R$ {total_cost:,.2f}** dividido em:")
             response_lines.append(f"- Frota: R$ {vsp_total:,.2f} | Tripulação: R$ {csp_total:,.2f}")
             response_lines.append(f"\n💡 O maior gasto está em **{dominante}**.")
             if overtime > 0:
-                response_lines.append(f"- Horas extras representam R$ {overtime:,.2f}. Considere aumentar o número de turnos.")
+                response_lines.append(
+                    f"- Horas extras representam R$ {overtime:,.2f}. Considere aumentar o número de turnos."
+                )
             if deadhead > 0:
                 response_lines.append(f"- KM morto custa R$ {deadhead:,.2f}. Ative `force_round_trip` para reduzir.")
 
-        elif any(w in q for w in ['motorista', 'tripulação', 'crew', 'escala']):
+        elif any(w in q for w in ["motorista", "tripulação", "crew", "escala"]):
             response_lines.append(f"**{crew} motoristas** alocados com **{vehicles} veículos**.")
             if cct_violations > 0:
-                response_lines.append(f"⚠️ {cct_violations} violações de CCT detectadas — revise as janelas de descanso.")
-            if params.get('max_shift_minutes'):
-                response_lines.append(f"- Jornada máxima: {params['max_shift_minutes']} min ({params['max_shift_minutes']//60}h)")
-            response_lines.append("\n💡 Para reduzir motoristas: diminua `min_layover_minutes` e ative `prefer_fewer_duties`.")
+                response_lines.append(
+                    f"⚠️ {cct_violations} violações de CCT detectadas — revise as janelas de descanso."
+                )
+            if params.get("max_shift_minutes"):
+                response_lines.append(
+                    f"- Jornada máxima: {params['max_shift_minutes']} min ({params['max_shift_minutes']//60}h)"
+                )
+            response_lines.append(
+                "\n💡 Para reduzir motoristas: diminua `min_layover_minutes` e ative `prefer_fewer_duties`."
+            )
 
-        elif any(w in q for w in ['parâmetro', 'parametro', 'configuração', 'cct', 'regra']):
+        elif any(w in q for w in ["parâmetro", "parametro", "configuração", "cct", "regra"]):
             if params:
                 response_lines.append("**Parâmetros ativos na sua operação:**")
                 for k, v in list(params.items())[:10]:
                     response_lines.append(f"- `{k}`: {v}")
-                response_lines.append("\n💡 Experimente reduzir `min_layover_minutes` ou `pullout_minutes` para ganhar flexibilidade.")
+                response_lines.append(
+                    "\n💡 Experimente reduzir `min_layover_minutes` ou `pullout_minutes` para ganhar flexibilidade."
+                )
             else:
-                response_lines.append("Não foram encontrados parâmetros específicos. Configure na tela de Parâmetros da Empresa.")
+                response_lines.append(
+                    "Não foram encontrados parâmetros específicos. Configure na tela de Parâmetros da Empresa."
+                )
 
         else:
-            response_lines.append(f"Sua otimização: **{vehicles} veículos**, **{crew} motoristas**, custo total **R$ {total_cost:,.2f}**.")
-            response_lines.append(f"\n💡 Posso analisar: custos, motoristas, parâmetros CCT e sugestões de melhoria.")
+            response_lines.append(
+                f"Sua otimização: **{vehicles} veículos**, **{crew} motoristas**, custo total **R$ {total_cost:,.2f}**."
+            )
+            response_lines.append("\n💡 Posso analisar: custos, motoristas, parâmetros CCT e sugestões de melhoria.")
             response_lines.append("Reformule sua pergunta e responderei com os dados da sua programação.")
 
         return "\n".join(response_lines)

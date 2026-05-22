@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import time
+import urllib.error
+import urllib.request
 from typing import Dict, List
-
-import requests
 
 ALGORITHMS = [
     "greedy",
@@ -11,11 +13,15 @@ ALGORITHMS = [
     "simulated_annealing",
     "tabu_search",
     "set_partitioning",
+    "mcnf",
     "joint_solver",
     "hybrid_pipeline",
+    "vcsp_pulp",
+    "assignment_vsp",
 ]
 
 BASE_URLS = ["http://127.0.0.1:8001", "http://127.0.0.1:8000"]
+INTERNAL_KEY = os.environ.get("INTERNAL_OPTIMIZER_KEY", "internal-key-123456")
 
 TIMEOUT_BY_ALGO = {
     "greedy": 20,
@@ -23,8 +29,11 @@ TIMEOUT_BY_ALGO = {
     "simulated_annealing": 40,
     "tabu_search": 40,
     "set_partitioning": 35,
+    "mcnf": 25,
     "joint_solver": 45,
     "hybrid_pipeline": 45,
+    "vcsp_pulp": 45,
+    "assignment_vsp": 20,
 }
 
 TIME_BUDGET_BY_ALGO = {
@@ -33,18 +42,51 @@ TIME_BUDGET_BY_ALGO = {
     "simulated_annealing": 12,
     "tabu_search": 12,
     "set_partitioning": 12,
+    "mcnf": 10,
     "joint_solver": 14,
     "hybrid_pipeline": 16,
+    "vcsp_pulp": 14,
+    "assignment_vsp": 8,
 }
 
 MIN_LAYOVER = 8
 
 
+def _http_json(url: str, payload: Dict | None = None, timeout: float = 10.0) -> tuple[int, Dict]:
+    data = None
+    headers = {}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    if "/optimize/" in url:
+        headers["X-Internal-Key"] = INTERNAL_KEY
+
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method="POST" if payload is not None else "GET",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+            return response.status, json.loads(body)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8") or "{}"
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = {"detail": body}
+        return exc.code, parsed
+
+
 def choose_base_url() -> str:
     for base_url in BASE_URLS:
         try:
-            response = requests.get(f"{base_url}/health/", timeout=2)
-            if response.status_code == 200:
+            status, _ = _http_json(f"{base_url}/health/", timeout=2)
+            if status == 200:
                 return base_url
         except Exception:
             pass
@@ -58,7 +100,15 @@ def build_deadhead_times(destination: int) -> Dict[str, int]:
     }
 
 
-def trip(trip_id: int, line_id: int, start_time: int, duration: int, origin: int, destination: int, group_id: int | None = None) -> Dict:
+def trip(
+    trip_id: int,
+    line_id: int,
+    start_time: int,
+    duration: int,
+    origin: int,
+    destination: int,
+    group_id: int | None = None,
+) -> Dict:
     return {
         "id": trip_id,
         "line_id": line_id,
@@ -108,7 +158,16 @@ def run_once(base_url: str, algorithm: str, trips: List[Dict]) -> Dict:
         "algorithm": algorithm,
         "time_budget_s": time_budget_s,
         "trips": trips,
-        "vehicle_types": [],
+        "vehicle_types": [
+            {
+                "id": 1,
+                "name": "Padrao",
+                "passenger_capacity": 40,
+                "cost_per_km": 1.0,
+                "cost_per_hour": 10.0,
+                "fixed_cost": 800.0,
+            }
+        ],
         "cct_params": {
             "apply_cct": True,
             "max_shift_minutes": 600,
@@ -130,30 +189,30 @@ def run_once(base_url: str, algorithm: str, trips: List[Dict]) -> Dict:
             "max_pricing_iterations": 1,
             "max_pricing_additions": 32,
         },
+        "wait_for_completion": True,
     }
 
     start = time.time()
-    response = requests.post(
+    status_code, data = _http_json(
         f"{base_url}/optimize/",
-        json=payload,
+        payload=payload,
         timeout=TIMEOUT_BY_ALGO.get(algorithm, 40),
     )
     elapsed = time.time() - start
 
-    if response.status_code != 200:
+    if status_code != 200:
         return {
             "ok": False,
             "algorithm": algorithm,
-            "status": response.status_code,
+            "status": status_code,
             "elapsed": round(elapsed, 2),
-            "error": str(response.text)[:180],
+            "error": str(data)[:180],
         }
 
-    data = response.json()
     return {
         "ok": data.get("unassigned_trips", 0) == 0 and data.get("cct_violations", 0) == 0,
         "algorithm": algorithm,
-        "status": 200,
+        "status": status_code,
         "elapsed": round(elapsed, 2),
         "vehicles": data.get("vehicles", 0),
         "crew": data.get("crew", 0),

@@ -1,23 +1,20 @@
-from typing import Any, Dict, List, Tuple
-from ...domain.models import Duty, OperatorProfile, RosteringRule, RuleType
+from typing import List, Tuple
+from ...domain.models import Duty, OperatorProfile, RosteringRule
+
 
 class RosteringEvaluator:
     """
     Calcula a 'Afinidade' entre um Motorista e uma Jornada (Duty)
     baseado em regras flexíveis definidas via Metadados e Tags.
-    
-    Data-Driven: O código não conhece as regras específicas, ele interpreta 
+
+    Data-Driven: O código não conhece as regras específicas, ele interpreta
     o JSON de regras e os metadados do motorista.
     """
+
     def __init__(self, rules: List[RosteringRule]):
         self.rules = rules
 
-    def evaluate(
-        self, 
-        operator: OperatorProfile, 
-        duty: Duty, 
-        inter_shift_rest: int = 660
-    ) -> Tuple[float, List[str]]:
+    def evaluate(self, operator: OperatorProfile, duty: Duty, inter_shift_rest: int = 660) -> Tuple[float, List[str]]:
         """
         Retorna o score de utilidade e uma lista de explicações para o log.
         Se uma regra HARD for violada, retorna score negativo massivo (-1e9).
@@ -37,14 +34,14 @@ class RosteringEvaluator:
             # Regras baseadas em TAGS no Metadata
             if rule.rule_id in operator.metadata:
                 val = operator.metadata[rule.rule_id]
-                
+
                 # Se a tag for booleana ou se for um valor de pontuação direta
                 match_found = False
                 if val is True:
                     match_found = True
                 elif isinstance(val, (int, float)) and val > 0:
                     match_found = True
-                
+
                 if match_found:
                     boost = rule.weight
                     score += boost
@@ -55,7 +52,7 @@ class RosteringEvaluator:
                 preferred_lines = operator.metadata.get("preferred_line_ids", [])
                 if not isinstance(preferred_lines, list):
                     preferred_lines = []
-                
+
                 duty_lines = {t.line_id for t in duty.all_trips}
                 if any(lid in preferred_lines for lid in duty_lines):
                     boost = rule.weight

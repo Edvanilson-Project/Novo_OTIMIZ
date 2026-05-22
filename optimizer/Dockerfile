@@ -15,7 +15,11 @@ COPY . .
 ENV PORT=8000
 EXPOSE 8000
 
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh \
+    && useradd -m -u 1001 -s /bin/sh appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 # start.sh inicia Celery worker em background e uvicorn em foreground
 CMD ["/app/start.sh"]

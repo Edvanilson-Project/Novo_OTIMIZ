@@ -1,0 +1,176 @@
+{
+  "backend_url": "http://localhost:3001/api/v1",
+  "company_id": 22,
+  "source_company_id": 16,
+  "source_real_trips": 298,
+  "matrix": [
+    [
+      "hybrid_pipeline",
+      298
+    ]
+  ],
+  "results": [
+    {
+      "algorithm": "hybrid_pipeline",
+      "volume": 298,
+      "direct_python": {
+        "volume": 298,
+        "algorithm": "hybrid_pipeline",
+        "status": "error",
+        "error": "HardConstraintViolationError: Hard constraints violated: MANDATORY_GROUP_SPLIT [2295, 2296]",
+        "wall_time_s": 4.259,
+        "cpu_time_s": 3.62,
+        "rss_before_mb": 161.5,
+        "rss_after_mb": 256.8,
+        "rss_delta_mb": 95.3,
+        "input_duplicate_trips": 0
+      },
+      "e2e": {
+        "status": "failed",
+        "submit_http_status": 201,
+        "schedule_id": 342,
+        "task_id": "182e59c3-97cb-43fe-a6d2-58e5fa212027",
+        "submit_time_ms": 71.61,
+        "backend_total_time_ms": 61911.24,
+        "schedule_created_to_updated_ms": 60153.2,
+        "frontend_read_time_ms": 7.78,
+        "optimizer_solver_ms": null,
+        "optimizer_total_elapsed_ms": null,
+        "redis_before": {
+          "used_memory_bytes": 3407016,
+          "optimizer_queue_len": 0
+        },
+        "redis_after": {
+          "used_memory_bytes": 3670520,
+          "optimizer_queue_len": 0,
+          "memory_usage:celery-task-meta-182e59c3-97cb-43fe-a6d2-58e5fa212027": 262240,
+          "memory_usage:optimizer:task_timestamp:182e59c3-97cb-43fe-a6d2-58e5fa212027": 96
+        },
+        "backend_process_before": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            92755
+          ],
+          "rss_mb": 110.5,
+          "cpu_s": 2.8,
+          "cmdlines": [
+            "node dist/main"
+          ]
+        },
+        "backend_process_after": {
+          "pattern": "node dist/main",
+          "found": true,
+          "pids": [
+            92755
+          ],
+          "rss_mb": 112.2,
+          "cpu_s": 2.92,
+          "cmdlines": [
+            "node dist/main"
+          ]
+        },
+        "celery_process_before": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            90984,
+            90998,
+            91003,
+            91113,
+            92597,
+            97808
+          ],
+          "rss_mb": 556.7,
+          "cpu_s": 7.21,
+          "cmdlines": [
+            "bwrap --new-session --die-with-parent --ro-bind / / --dev /dev --bind /tmp /tmp --bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ /home/edvanilson/Área de trabalho/Novo_OTIMIZ --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex --unshare-user --unshare-pid --unshare-net --proc /proc --argv0 codex-linux-sandbox -- /home/edvanilson/.vscode/extensions/openai.chatgpt-26.5422.30944-linux-x64/bin/linux-x86_64/codex --sandbox-policy-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ --command-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer --sandbox-policy {\"type\":\"workspace-write\",\"writable_roots\":[\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"],\"network_access\":false,\"exclude_tmpdir_env_var\":false,\"exclude_slash_tmp\":false} --file-system-sandbox-policy {\"kind\":\"restricted\",\"entries\":[{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"root\"}},\"access\":\"read\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"current_working_directory\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"slash_tmp\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"tmpdir\"}},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git\"},\"access\":\"read\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex\"},\"access\":\"read\"}]} --network-sandbox-policy \"restricted\" --apply-seccomp-then-exec -- /bin/bash -lc ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid",
+            "bwrap --new-session --die-with-parent --ro-bind / / --dev /dev --bind /tmp /tmp --bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ /home/edvanilson/Área de trabalho/Novo_OTIMIZ --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex --unshare-user --unshare-pid --unshare-net --proc /proc --argv0 codex-linux-sandbox -- /home/edvanilson/.vscode/extensions/openai.chatgpt-26.5422.30944-linux-x64/bin/linux-x86_64/codex --sandbox-policy-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ --command-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer --sandbox-policy {\"type\":\"workspace-write\",\"writable_roots\":[\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"],\"network_access\":false,\"exclude_tmpdir_env_var\":false,\"exclude_slash_tmp\":false} --file-system-sandbox-policy {\"kind\":\"restricted\",\"entries\":[{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"root\"}},\"access\":\"read\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"current_working_directory\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"slash_tmp\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"tmpdir\"}},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git\"},\"access\":\"read\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex\"},\"access\":\"read\"}]} --network-sandbox-policy \"restricted\" --apply-seccomp-then-exec -- /bin/bash -lc ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid",
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid"
+          ]
+        },
+        "celery_process_after": {
+          "pattern": "celery.*src.worker|celery.*src.core.celery_app",
+          "found": true,
+          "pids": [
+            90984,
+            90998,
+            91003,
+            91113,
+            92597,
+            98600
+          ],
+          "rss_mb": 556.8,
+          "cpu_s": 7.36,
+          "cmdlines": [
+            "bwrap --new-session --die-with-parent --ro-bind / / --dev /dev --bind /tmp /tmp --bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ /home/edvanilson/Área de trabalho/Novo_OTIMIZ --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex --unshare-user --unshare-pid --unshare-net --proc /proc --argv0 codex-linux-sandbox -- /home/edvanilson/.vscode/extensions/openai.chatgpt-26.5422.30944-linux-x64/bin/linux-x86_64/codex --sandbox-policy-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ --command-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer --sandbox-policy {\"type\":\"workspace-write\",\"writable_roots\":[\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"],\"network_access\":false,\"exclude_tmpdir_env_var\":false,\"exclude_slash_tmp\":false} --file-system-sandbox-policy {\"kind\":\"restricted\",\"entries\":[{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"root\"}},\"access\":\"read\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"current_working_directory\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"slash_tmp\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"tmpdir\"}},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git\"},\"access\":\"read\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex\"},\"access\":\"read\"}]} --network-sandbox-policy \"restricted\" --apply-seccomp-then-exec -- /bin/bash -lc ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid",
+            "bwrap --new-session --die-with-parent --ro-bind / / --dev /dev --bind /tmp /tmp --bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ /home/edvanilson/Área de trabalho/Novo_OTIMIZ --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git --ro-bind /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex /home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex --unshare-user --unshare-pid --unshare-net --proc /proc --argv0 codex-linux-sandbox -- /home/edvanilson/.vscode/extensions/openai.chatgpt-26.5422.30944-linux-x64/bin/linux-x86_64/codex --sandbox-policy-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ --command-cwd /home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer --sandbox-policy {\"type\":\"workspace-write\",\"writable_roots\":[\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"],\"network_access\":false,\"exclude_tmpdir_env_var\":false,\"exclude_slash_tmp\":false} --file-system-sandbox-policy {\"kind\":\"restricted\",\"entries\":[{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"root\"}},\"access\":\"read\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"current_working_directory\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"slash_tmp\"}},\"access\":\"write\"},{\"path\":{\"type\":\"special\",\"value\":{\"kind\":\"tmpdir\"}},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ\"},\"access\":\"write\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.git\"},\"access\":\"read\"},{\"path\":{\"type\":\"path\",\"path\":\"/home/edvanilson/Área de trabalho/Novo_OTIMIZ/.codex\"},\"access\":\"read\"}]} --network-sandbox-policy \"restricted\" --apply-seccomp-then-exec -- /bin/bash -lc ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid",
+            "/home/edvanilson/Área de trabalho/Novo_OTIMIZ/optimizer/venv/bin/python ./venv/bin/celery -A src.worker worker --loglevel=info --concurrency=1 -Q optimizer --logfile=/tmp/otimiz-e2e-celery.log --pidfile=/tmp/otimiz-e2e-celery.pid"
+          ]
+        },
+        "vehicles": 0,
+        "duties": 0,
+        "total_cost": 0.0,
+        "input_trips": 298,
+        "covered_trips": 0,
+        "missing_trips": 298,
+        "duplicated_trips": 0,
+        "hard_violations": 0,
+        "soft_violations": 0,
+        "cct_violations": 0,
+        "latest_schedule_status": null,
+        "latest_has_hard_constraint_report": false,
+        "latest_has_performance": false,
+        "metadata_has_hard_constraint_report": false,
+        "metadata_has_performance": false,
+        "resolved_params": {},
+        "sample_missing_trip_ids": [
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "sample_duplicated_trip_ids": [],
+        "sample_hard_issues": [],
+        "setup": {
+          "company_id": 22,
+          "trip_rows": 298
+        }
+      },
+      "comparison": {
+        "direct_status": "error",
+        "direct_time_ms": 4295.94,
+        "cost_delta": 0.0,
+        "vehicle_delta": 0,
+        "duty_delta": 0,
+        "time_delta_ms": 57615.3,
+        "hard_violation_delta": 0
+      },
+      "bugs": [
+        "P0: viagens nao persistidas/cobertas no resultado final",
+        "P0: status final nao completou (failed)"
+      ]
+    }
+  ],
+  "logs": [
+    "/tmp/otimiz-e2e-celery.log",
+    "backend stdout session",
+    "optimizer uvicorn stdout session"
+  ]
+}

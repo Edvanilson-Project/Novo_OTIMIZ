@@ -7,7 +7,9 @@ export class DutyAssignment extends TenantBaseEntity {
   @Column()
   scheduleId: number;
 
-  @ManyToOne(() => Schedule, (schedule) => schedule.duties, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Schedule, (schedule) => schedule.duties, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'scheduleId' })
   schedule: Schedule;
 
