@@ -30,7 +30,7 @@ export class RefreshToken {
   createdAt: Date;
 
   // Optional: tag by user-agent/IP for session management UI
-  @Column({ nullable: true, length: 512 })
+  @Column({ type: 'varchar', nullable: true, length: 512 })
   userAgent: string | null;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })

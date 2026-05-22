@@ -29,10 +29,10 @@ export class User extends TenantBaseEntity {
   @Column({ nullable: true })
   lastLoginAt: Date;
 
-  @Column({ nullable: true, select: false })
+  @Column({ type: 'varchar', nullable: true, select: false })
   refreshTokenHash: string | null;
 
-  @Column({ nullable: true, select: false })
+  @Column({ type: 'timestamp', nullable: true, select: false })
   refreshTokenExpiresAt: Date | null;
 
   @ManyToOne(() => Company)

@@ -9,6 +9,7 @@
  * Requer variáveis de ambiente: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
  * (ou os valores padrão abaixo para desenvolvimento local).
  */
+import 'reflect-metadata';
 import 'dotenv/config';
 import { DataSource } from 'typeorm';
 
@@ -19,7 +20,7 @@ export default new DataSource({
   username: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_NAME || 'otimiz',
-  entities: [__dirname + '/modules/database/entities/*{.ts,.js}'],
+  entities: [__dirname + '/modules/database/entities/*.entity{.ts,.js}'],
   migrations: [__dirname + '/modules/database/migrations/*{.ts,.js}'],
   synchronize: false,
 });
