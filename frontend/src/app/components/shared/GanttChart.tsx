@@ -79,7 +79,7 @@ const GanttChart: React.FC<GanttChartProps> = ({ resources, events, onEventDrop 
         eventStartEditable={false} // Mantemos o horário original por enquanto
         eventDurationEditable={false}
         selectable={true}
-        eventDrop={(info) => {
+        eventDrop={(info: any) => {
           const tripId = parseInt(info.event.id.split("-")[1]);
           const targetBlockId = parseInt(info.newResource?.id || "0");
           if (onEventDrop) onEventDrop(tripId, targetBlockId);
