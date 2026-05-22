@@ -224,7 +224,7 @@ jobs:
 
       - name: Start optimizer
         working-directory: optimizer
-        run: uvicorn src.main:app --host 0.0.0.0 --port 8000 > optimizer.log 2>&1 &
+        run: uvicorn main:app --host 0.0.0.0 --port 8000 > optimizer.log 2>&1 &
         env:
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
           DB_HOST: localhost
