@@ -21,6 +21,7 @@
     "@mui/material": "^9.0.0",
     "@mui/system": "^9.0.0",
     "@mui/x-data-grid": "^9.0.2",
+    "@sentry/nextjs": "^7.114.0",
     "@tabler/icons-react": "^3.41.1",
     "@types/file-saver": "^2.0.7",
     "@types/react-window": "^2.0.0",
