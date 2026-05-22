@@ -292,6 +292,55 @@ services:
           memory: 128M
           cpus: '0.5'
 
+  # ── Infrastructure Exporters ───────────────────────────────────────────────
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.1
+    container_name: otimiz-v2-postgres-exporter
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${DB_USER:-otimiz_admin}:${DB_PASSWORD:?DB_PASSWORD must be set}@postgres:5432/${DB_NAME:-otimiz_db}?sslmode=disable
+    ports:
+      - "127.0.0.1:9187:9187"
+    networks:
+      - otimiz-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9187/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: otimiz-v2-redis-exporter
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_ADDR=redis://default:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379
+    ports:
+      - "127.0.0.1:9121:9121"
+    networks:
+      - otimiz-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+
   # ── Observability stack ────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.53.0
