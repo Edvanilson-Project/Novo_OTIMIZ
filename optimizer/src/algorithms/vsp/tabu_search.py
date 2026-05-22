@@ -6,6 +6,7 @@ Vizinhança: Reloc (mover 1 viagem entre blocos) + Merge.
 Lista tabu: conjunto de (trip_id, from_idx, to_idx) recentemente movidos — evita reversões.
 Critério de aspiração: aceita movimento tabu se melhora o global.
 """
+
 from __future__ import annotations
 
 import random
@@ -17,96 +18,50 @@ from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from .greedy import GreedyVSP, build_preferred_pairs
+from ..utils import is_connection_feasible, quick_cost_from_trips, preferred_pair_penalty_from_trips
 
 settings = get_settings()
 
 Move = Tuple[int, int, int, int]
 
 
-def _quick_cost(
-    state: List[List[int]],
-    trip_map: Dict[int, Trip],
-    fixed_vehicle_cost: float = 800.0,
-    idle_cost_per_minute: float = 0.5,
-    max_work_minutes: float = 480.0,
-    crew_cost_weight: float = 400.0,
-) -> float:
-    """Calcula custo rápido usando trip_map para acesso O(1)."""
-    vehicle_cost = len(state) * fixed_vehicle_cost
-    idle_time = 0
-    work_time = 0
-    
-    for block in state:
-        if not block:
-            continue
-        first_trip = trip_map[block[0]]
-        last_trip = trip_map[block[-1]]
-        block_start = first_trip.start_time
-        block_end = last_trip.end_time
-        idle_time += (block_end - block_start)
-        for tid in block:
-            work_time += trip_map[tid].duration
-    
-    idle_penalty = idle_time * idle_cost_per_minute
-    crew_penalty = max(0, work_time - max_work_minutes) * crew_cost_weight
-    
-    return vehicle_cost + idle_penalty + crew_penalty
-
-
 def _blocks_are_feasible(
     state: List[List[int]],
     trip_map: Dict[int, Trip],
     min_gap: int = 8,
+    min_break: int = 30,
+    enforce_min_interval: bool = False,
+    connection_tolerance: int = 0,
+    strict_zero_gap_validation: bool = False,
+    strict_operational_mode: bool = False,
+    strict_hard_constraints: bool = False,
+    same_depot_required: bool = False,
 ) -> bool:
     """Verifica viabilidade dos blocos usando trip_map."""
     for block in state:
         if not block:
             continue
-        
-        prev_end = None
-        for i, tid in enumerate(block):
-            trip = trip_map[tid]
-            if prev_end is not None:
-                gap = trip.start_time - prev_end
-                if gap < min_gap:
-                    return False
-                needed = trip_map[block[i-1]].deadhead_times.get(trip.origin_id, 0)
-                if gap < needed:
-                    return False
-            prev_end = trip.end_time
-    
+
+        if same_depot_required:
+            depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
+            if len(depots) > 1:
+                return False
+
+        for i in range(len(block) - 1):
+            if not is_connection_feasible(
+                trip_map[block[i]],
+                trip_map[block[i + 1]],
+                min_layover=min_gap,
+                min_break=min_break,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+                strict_zero_gap_validation=strict_zero_gap_validation,
+                strict_operational_mode=strict_operational_mode,
+                strict_hard_constraints=strict_hard_constraints,
+            ):
+                return False
+
     return True
-
-
-def _preferred_pair_penalty(
-    state: List[List[int]],
-    trip_map: Dict[int, Trip],
-    preferred_pairs: Dict[int, int],
-    pair_break_penalty: float,
-    paired_trip_bonus: float,
-    hard_pairing_penalty: float,
-) -> float:
-    """Calcula penalidade de pares usando trip_map."""
-    penalty = 0.0
-    
-    for block in state:
-        for i, tid in enumerate(block):
-            if tid not in preferred_pairs:
-                continue
-            expected_partner = preferred_pairs[tid]
-            next_trip = trip_map[block[i+1]] if i + 1 < len(block) else None
-            
-            if next_trip is None:
-                penalty += pair_break_penalty
-            elif next_trip.id != expected_partner:
-                if hard_pairing_penalty > 0:
-                    penalty += hard_pairing_penalty
-                else:
-                    penalty += pair_break_penalty
-            else:
-                penalty -= paired_trip_bonus
-    
-    return penalty
 
 
 def _copy_state(state: List[List[int]]) -> List[List[int]]:
@@ -119,11 +74,12 @@ def _generate_reloc_neighbours(
     trip_map: Dict[int, Trip],
     sample_n: int = 30,
     min_gap: int = 8,
+    **kwargs,
 ) -> List[Tuple[Move, List[List[int]]]]:
     """Gera até `sample_n` vizinhos via Relocation e Merge."""
     if len(state) < 2:
         return []
-    
+
     neighbours = []
     attempts = min(sample_n * 3, len(state) * max((len(b) for b in state if b), default=1))
     seen: set = set()
@@ -131,7 +87,7 @@ def _generate_reloc_neighbours(
     for _ in range(attempts):
         if len(neighbours) >= sample_n:
             break
-        
+
         src_idx = random.randint(0, len(state) - 1)
         if not state[src_idx]:
             continue
@@ -147,11 +103,21 @@ def _generate_reloc_neighbours(
         trip_id = new_state[src_idx].pop(trip_pos)
         new_state[dst_idx].append(trip_id)
         new_state = [b for b in new_state if b]
-        
+
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
-        
-        if not _blocks_are_feasible(new_state, trip_map, min_gap):
+
+        if not _blocks_are_feasible(
+            new_state,
+            trip_map,
+            min_gap,
+            kwargs.get("min_break", 30),
+            kwargs.get("enforce_min_interval", False),
+            kwargs.get("connection_tolerance", 0),
+            kwargs.get("strict_zero_gap_validation", False),
+            kwargs.get("strict_operational_mode", False),
+            kwargs.get("strict_hard_constraints", False),
+        ):
             continue
 
         move: Move = (trip_id, src_idx, dst_idx, insert_pos)
@@ -166,17 +132,27 @@ def _generate_reloc_neighbours(
         if merge_key in seen:
             continue
         seen.add(merge_key)
-        
+
         new_state = _copy_state(state)
         new_state[i].extend(new_state[j])
         del new_state[j]
-        
+
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
-        
-        if not _blocks_are_feasible(new_state, trip_map, min_gap):
+
+        if not _blocks_are_feasible(
+            new_state,
+            trip_map,
+            min_gap,
+            kwargs.get("min_break", 30),
+            kwargs.get("enforce_min_interval", False),
+            kwargs.get("connection_tolerance", 0),
+            kwargs.get("strict_zero_gap_validation", False),
+            kwargs.get("strict_operational_mode", False),
+            kwargs.get("strict_hard_constraints", False),
+        ):
             continue
-        
+
         move: Move = (-1, j, i, -1)
         neighbours.append((move, new_state))
 
@@ -218,7 +194,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
-        
+
         random_seed = self.vsp_params.get("random_seed")
         if random_seed is not None:
             random.seed(int(random_seed))
@@ -232,6 +208,14 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
         paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
         min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        min_break = self.vsp_params.get("min_break_minutes", 30)
+        enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", False))
+        connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0))
+        strict_zgv = bool(self.vsp_params.get("strict_zero_gap_validation", False))
+        strict_som = bool(self.vsp_params.get("strict_operational_mode", False))
+        strict_shc = bool(self.vsp_params.get("strict_hard_constraints", False))
+        same_depot_req = bool(self.vsp_params.get("same_depot_required", False))
+
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
@@ -247,13 +231,29 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             else 0.0
         )
 
+        # Penalidade bidirecional: trip_ids que causaram violações CCT em rodadas anteriores
+        penalize_trip_ids: set = set(self.vsp_params.get("penalize_trip_ids", []))
+        cct_split_penalty = float(self.vsp_params.get("cct_split_penalty", fvc * 3.0))
+
         def cost_fn(state: List[List[int]]) -> float:
-            base = _quick_cost(state, trip_map, fvc, icpm, max_work, crew_cw)
-            pairs = _preferred_pair_penalty(
-                state, trip_map, preferred_pairs,
-                pair_break_penalty, paired_trip_bonus, hard_pairing_penalty,
+            sequences = [[trip_map[tid] for tid in block if tid in trip_map] for block in state]
+            base = quick_cost_from_trips(sequences, fvc, icpm, max_work, crew_cw)
+            pairs = preferred_pair_penalty_from_trips(
+                sequences,
+                preferred_pairs,
+                pair_break_penalty,
+                paired_trip_bonus,
+                hard_pairing_penalty,
             )
-            return base + pairs
+            # Penaliza blocos que agrupam ≥2 viagens que causaram violações CCT
+            # Incentiva o solver a distribuí-las em blocos menores
+            cct_penalty = 0.0
+            if penalize_trip_ids:
+                for seq in sequences:
+                    n_penalized = sum(1 for t in seq if t.id in penalize_trip_ids)
+                    if n_penalized >= 2:
+                        cct_penalty += cct_split_penalty * (n_penalized - 1)
+            return base + pairs + cct_penalty
 
         current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
         current_state = [[t.id for t in block.trips] for block in current_sol.blocks]
@@ -262,14 +262,28 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         best_state = _copy_state(current_state)
         best_cost = current_cost
 
-        tabu_list: Deque[Move] = deque(maxlen=self.tabu_size)
+        # Tabu Tenure Dinâmico: 10% do tamanho do problema (mín 10, máx settings.ts_tabu_size)
+        tabu_tenure = max(10, min(int(len(trips) * 0.1), self.tabu_size))
+        tabu_list: Deque[Move] = deque(maxlen=tabu_tenure)
         iteration = 0
         stale_count = 0
 
         while not self._check_timeout():
             iteration += 1
 
-            neighbours = _generate_reloc_neighbours(current_state, trip_map, sample_n=40, min_gap=min_gap)
+            neighbours = _generate_reloc_neighbours(
+                current_state,
+                trip_map,
+                sample_n=40,
+                min_gap=min_gap,
+                min_break=int(min_break) if min_break is not None else 30,
+                enforce_min_interval=enforce_min_interval,
+                connection_tolerance=connection_tolerance,
+                strict_zero_gap_validation=strict_zgv,
+                strict_operational_mode=strict_som,
+                strict_hard_constraints=strict_shc,
+                same_depot_required=same_depot_req,
+            )
             if not neighbours:
                 stale_count += 1
                 if stale_count > 10:
@@ -311,7 +325,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 stale_count = 0
 
         best_blocks = self._state_to_blocks(best_state, trip_map)
-        
+
         for block in best_blocks:
             block.trips.sort(key=lambda t: t.start_time)
 

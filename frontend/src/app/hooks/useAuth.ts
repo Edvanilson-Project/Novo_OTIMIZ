@@ -22,9 +22,8 @@ export function useAuth(requiredRole?: AppRole) {
 
     const checkAuth = async () => {
       const u = getSessionUser();
-      const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
 
-      if (!u || !token) {
+      if (!u) {
         if (isMounted) router.replace('/auth/login');
         return;
       }

@@ -11,6 +11,8 @@ TRATAMENTO DE ERROS (Ajuste 1):
   com {"_is_error": True, "error_payload": {...}} para preservar os diagnósticos ricos
   (hints, codes, recommendations) que o frontend exibe ao utilizador.
 """
+
+import asyncio
 import hashlib
 import json
 import logging
@@ -22,12 +24,17 @@ from celery.result import AsyncResult
 from fastapi import APIRouter, HTTPException
 
 from ...core.config import get_settings
-from ...core.exceptions import OptimizerError
 from ...domain.models import VehicleType
 from ...services.optimizer_tasks import run_optimization_task
-from ..converters import to_trip as _to_trip
+from ...algorithms.integrated.disruption_recovery import DisruptionRecoverySolver
+from ...services.demand_forecaster import DemandForecaster
 from ..schemas import (
     BlockOutput,
+    DemandForecastRequest,
+    DemandForecastResponse,
+    DemandForecastPrediction,
+    DisruptionRecoveryRequest,
+    DisruptionRecoveryResponse,
     DutyOutput,
     ErrorResponse,
     OptimizeRequest,
@@ -41,6 +48,8 @@ from ..schemas import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 settings = get_settings()
+CACHE_VERSION = "v2.0"
+
 
 def _to_vt(v) -> VehicleType:
     return VehicleType(
@@ -61,6 +70,11 @@ def _to_vt(v) -> VehicleType:
 
 def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
     """Constrói OptimizeResponse a partir do dict retornado pela task Celery."""
+    meta = dict(raw.get("meta") or {})
+    reproducibility = raw.get("reproducibility") or meta.get("reproducibility") or {}
+    performance = raw.get("performance") or meta.get("performance") or {}
+    meta.setdefault("reproducibility", reproducibility)
+    meta.setdefault("performance", performance)
     return OptimizeResponse(
         status="ok",
         vehicles=raw["vehicles"],
@@ -74,10 +88,12 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
         csp_algorithm=raw["csp_algorithm"],
         elapsed_ms=raw["elapsed_ms"],
         blocks=[
-            BlockOutput(**{
-                **b,
-                "trips": [t["id"] if isinstance(t, dict) else t for t in b.get("trips", [])],
-            })
+            BlockOutput(
+                **{
+                    **b,
+                    "trips": [t["id"] if isinstance(t, dict) else t for t in b.get("trips", [])],
+                }
+            )
             for b in raw["blocks"]
         ],
         duties=[DutyOutput(**d) for d in raw["duties"]],
@@ -86,13 +102,23 @@ def _build_optimize_response(raw: dict, trips_count: int) -> OptimizeResponse:
         solver_explanation=raw.get("solver_explanation") or {},
         phase_summary=raw.get("phase_summary") or {},
         trip_group_audit=raw.get("trip_group_audit") or {},
-        reproducibility=raw.get("reproducibility") or {},
-        performance=(raw.get("meta") or {}).get("performance") or {},
-        meta=raw.get("meta") or {},
+        operational_time_reports=raw.get("operational_time_reports") or meta.get("operational_time_reports") or {},
+        reproducibility=reproducibility,
+        performance=performance,
+        parameter_effect_report=raw.get("parameter_effect_report") or meta.get("parameter_effect_report") or {},
+        chosen_scenario=raw.get("chosen_scenario") or meta.get("chosen_scenario"),
+        rejected_scenarios=raw.get("rejected_scenarios") or meta.get("rejected_scenarios") or [],
+        justification=raw.get("justification") or meta.get("justification") or [],
+        trade_offs=raw.get("trade_offs") or meta.get("trade_offs") or [],
+        operational_quality_decision=raw.get("operational_quality_decision")
+        or meta.get("operational_quality_decision")
+        or {},
+        meta=meta,
     )
 
 
 # ── POST /optimize/ — Enfileira tarefa e retorna task_id imediatamente ─────────
+
 
 @router.post(
     "/",
@@ -112,10 +138,10 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
     # Validação básica dos parâmetros
     if not isinstance(body.trips, list) or len(body.trips) == 0:
         raise HTTPException(status_code=400, detail="Lista de viagens inválida ou vazia")
-    
+
     if not isinstance(body.vehicle_types, list) or len(body.vehicle_types) == 0:
         raise HTTPException(status_code=400, detail="Lista de tipos de veículo inválida ou vazia")
-    
+
     if body.time_budget_s is not None and (body.time_budget_s <= 0 or body.time_budget_s > 3600):
         raise HTTPException(status_code=400, detail="time_budget_s deve estar entre 1 e 3600 segundos")
 
@@ -126,78 +152,46 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             "vehicle_types": [v.model_dump(mode="json") for v in body.vehicle_types],
             "algorithm": body.algorithm.value if hasattr(body.algorithm, "value") else str(body.algorithm),
             "depot_id": body.depot_id,
+            "depot_ids": body.depot_ids,
             "time_budget_s": body.time_budget_s,
             "line_id": body.line_id,
             "company_id": body.company_id,
             "run_id": body.run_id,
-            "cct_params": body.cct_params.model_dump(mode="json", exclude_none=True) if body.cct_params else {},
-            "vsp_params": body.vsp_params.model_dump(mode="json", exclude_none=True) if body.vsp_params else {},
-            "optimization_params": body.optimization_params.model_dump(mode="json", exclude_none=True) if body.optimization_params else {},
-            "version": "v2.0",  # Adicionar versionamento explícito
-            "timestamp": int(time.time())  # Para evitar cache de execuções antigas
+            "cct_params": (
+                body.cct_params.model_dump(mode="json", exclude_none=True, exclude_unset=True)
+                if body.cct_params
+                else {}
+            ),
+            "vsp_params": (
+                body.vsp_params.model_dump(mode="json", exclude_none=True, exclude_unset=True)
+                if body.vsp_params
+                else {}
+            ),
+            "optimization_params": (
+                body.optimization_params.model_dump(mode="json", exclude_none=True, exclude_unset=True)
+                if body.optimization_params
+                else {}
+            ),
+            "request_metadata": body.request_metadata or {},
+            "algorithm_preference": body.algorithm_preference,
+            "version": CACHE_VERSION,
         }
     except Exception as e:
         logger.error(f"Erro ao construir payload: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Erro ao processar parâmetros: {str(e)}")
 
-    # Calcula Fingerprint Determinístico para o Smart Cache com versionamento
-    try:
-        # Incluir versão e timestamp no cálculo do fingerprint
-        cache_payload = {
-            **payload,
-            "cache_version": "v2.0",
-            "timestamp": int(time.time() // 3600)  # Muda a cada hora
-        }
-        payload_str = json.dumps(cache_payload, sort_keys=True)
-        fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
-        cache_key = f"optimizer:cache:v2.0:{fingerprint}"
-    except Exception as e:
-        logger.error(f"Erro ao calcular fingerprint do cache: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro interno ao processar requisição: {str(e)}"
-        )
-
-    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
-
-    try:
-        cached_task_id = await redis_client.get(cache_key)
-        if cached_task_id:
-            # Verificar estado da task com segurança (evita erro se backend estiver desabilitado)
-            task_state = "UNKNOWN"
-            try:
-                task_state = AsyncResult(cached_task_id).state
-            except Exception as e:
-                logger.warning(f"Não foi possível verificar estado da task {cached_task_id}: {str(e)}")
-
-            task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
-            
-            # Validação adicional: garantir que a task não é muito antiga
-            if task_timestamp and int(time.time()) - int(task_timestamp) > 43200:  # 12 horas
-                logger.info(f"Cache expirado para task {cached_task_id}")
-                await redis_client.delete(cache_key)
-            elif task_state in ("PENDING", "STARTED", "SUCCESS"):
-                logger.info(
-                    "optimization_cache_hit: task_id=%s fingerprint=%s state=%s",
-                    cached_task_id, fingerprint, task_state
-                )
-                await redis_client.aclose()
-                return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
-    except Exception as exc:
-        logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
-        # Continuar sem cache em caso de erro
-
     if body.wait_for_completion:
         try:
-            # Execução síncrona direta (ignora fila Celery para resposta imediata)
-            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos
-            result_raw = run_optimization_task(payload)
-            
+            # Execução síncrona direta (ignora fila Celery/Redis para resposta imediata)
+            # Útil para testes, depuração e cenários de 'what-if' ultra-rápidos.
+            # asyncio.to_thread evita bloquear o event loop (rota é async). O CBC/PuLP
+            # libera GIL durante solve, então thread pool é seguro e correto.
+            result_raw = await asyncio.to_thread(run_optimization_task, payload)
+
             if isinstance(result_raw, dict) and result_raw.get("_is_error"):
-                 err = result_raw.get("error_payload", {})
-                 raise HTTPException(status_code=400, detail=err.get("message", "Erro na execução da otimização"))
-            
-            # Ajuste: A task retorna {"_is_error": False, "result": {...}}
+                err = result_raw.get("error_payload", {})
+                raise HTTPException(status_code=400, detail=err.get("message", "Erro na execução da otimização"))
+
             final_result = result_raw.get("result", result_raw)
             return _build_optimize_response(final_result, len(body.trips))
         except HTTPException:
@@ -206,39 +200,89 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
             logger.error(f"Erro na execução síncrona: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Erro ao processar otimização síncrona: {str(e)}")
 
+    # Calcula Fingerprint Determinístico para o Smart Cache com versionamento.
+    # IMPORTANTE: fingerprint depende SÓ do problema de entrada (não do tempo).
+    # Antes incluía cache_bucket_hour=time//3600, o que invalidava o cache a cada
+    # hora apesar do TTL de 12h. Expiração temporal já é controlada por
+    # task_timestamp + setex TTL — não precisa também na chave.
     try:
-        task = run_optimization_task.delay(payload)
-        try:
-            # Retenção do cache por 12 horas (43200s) com timestamp
-            await redis_client.setex(cache_key, 43200, task.id)
-            await redis_client.setex(
-                f"optimizer:task_timestamp:{task.id}", 
-                43200, 
-                int(time.time())
-            )
-        except Exception as exc:
-            logger.error(f"Falha ao salvar cache no Redis: {str(exc)}", exc_info=True)
-            # Continuar sem cache em caso de erro
-    except Exception as exc:
-        logger.exception("Falha ao enfileirar tarefa no Celery")
-        await redis_client.aclose()
-        raise HTTPException(
-            status_code=503,
-            detail=f"Fila de tarefas indisponível (Redis/Celery): {exc}",
-        ) from exc
+        cache_payload = {
+            **payload,
+            "cache_version": CACHE_VERSION,
+        }
+        payload_str = json.dumps(cache_payload, sort_keys=True)
+        fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+        cache_key = f"optimizer:cache:{CACHE_VERSION}:{fingerprint}"
+    except Exception as e:
+        logger.error(f"Erro ao calcular fingerprint do cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno ao processar requisição: {str(e)}")
 
-    await redis_client.aclose()
-    
-    logger.info(
-        "optimization_queued: task_id=%s run_id=%s trips=%d",
-        task.id,
-        body.run_id,
-        len(body.trips),
-    )
-    return TaskSubmittedResponse(status="processing", task_id=task.id)
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    try:
+        try:
+            cached_task_id = await redis_client.get(cache_key)
+            if cached_task_id:
+                # Verificar estado da task com segurança (evita erro se backend estiver desabilitado)
+                task_state = "UNKNOWN"
+                try:
+                    task_state = AsyncResult(cached_task_id).state
+                except Exception as e:
+                    logger.warning(f"Não foi possível verificar estado da task {cached_task_id}: {str(e)}")
+
+                task_timestamp = await redis_client.get(f"optimizer:task_timestamp:{cached_task_id}")
+
+                # Validação adicional: garantir que a task não é muito antiga
+                if task_timestamp and int(time.time()) - int(task_timestamp) > 43200:  # 12 horas
+                    logger.info(f"Cache expirado para task {cached_task_id}")
+                    await redis_client.delete(cache_key)
+                elif task_state in ("PENDING", "STARTED", "SUCCESS"):
+                    logger.info(
+                        "optimization_cache_hit: task_id=%s fingerprint=%s state=%s",
+                        cached_task_id,
+                        fingerprint,
+                        task_state,
+                    )
+                    return TaskSubmittedResponse(status="processing", task_id=cached_task_id)
+        except Exception as exc:
+            logger.error(f"Falha ao ler cache do Redis: {str(exc)}", exc_info=True)
+            # Continuar sem cache em caso de erro
+
+        try:
+            task = run_optimization_task.delay(payload)
+            try:
+                # Retenção do cache por 12 horas (43200s) com timestamp
+                await redis_client.setex(cache_key, 43200, task.id)
+                await redis_client.setex(f"optimizer:task_timestamp:{task.id}", 43200, int(time.time()))
+            except Exception as exc:
+                logger.error(f"Falha ao salvar cache no Redis: {str(exc)}", exc_info=True)
+                # Continuar sem cache em caso de erro
+        except Exception as exc:
+            logger.exception("Falha ao enfileirar tarefa no Celery")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Fila de tarefas indisponível (Redis/Celery): {exc}",
+            ) from exc
+
+        logger.info(
+            "optimization_queued: task_id=%s run_id=%s trips=%d",
+            task.id,
+            body.run_id,
+            len(body.trips),
+        )
+        return TaskSubmittedResponse(status="processing", task_id=task.id)
+    finally:
+        # aclose() em finally garante fechamento em todos os caminhos (sucesso, exceção,
+        # cache hit, falha do Celery). Antes vazava conexão se exceção ocorresse entre
+        # cache lookup e enqueue.
+        try:
+            await redis_client.aclose()
+        except Exception:
+            pass
 
 
 # ── POST /optimize/chat — Chat interativo com a IA ────────────────────────────
+
 
 @router.post(
     "/chat",
@@ -252,17 +296,16 @@ async def chat_with_ai(body: AiChatRequest) -> AiChatResponse:
     Retorna a resposta gerada pela IA (DeepSeek/Llama/fallback).
     """
     from ...services.ai_service import AiService
+
     service = AiService()
-    
+
     answer = await service.chat_async(body.metrics, body.question)
-    
-    return AiChatResponse(
-        answer=answer,
-        status="ok" if answer else "error"
-    )
+
+    return AiChatResponse(answer=answer, status="ok" if answer else "error")
 
 
 # ── GET /optimize/status/{task_id} — Polling do resultado ──────────────────────
+
 
 @router.get(
     "/status/{task_id}",
@@ -302,22 +345,35 @@ async def get_optimization_status(task_id: str) -> TaskStatusResponse:
 
         # AJUSTE 1: A task pode ter retornado um erro estruturado em vez de fazer raise
         if isinstance(task_return, dict) and task_return.get("_is_error"):
-            http_status = int(task_return.get("http_status", 400))
             error_payload = task_return.get("error_payload") or {}
             error_code = task_return.get("error_code", "OPTIMIZER_ERROR")
-            error_message = task_return.get("error_message", "Erro no solver")
+            error_message = (
+                task_return.get("message")
+                or task_return.get("error_message")
+                or error_payload.get("message")
+                or "Erro no solver"
+            )
+            error_type = task_return.get("error_type", error_payload.get("error_type", "system"))
+            details = task_return.get("details", error_payload.get("details", error_payload))
 
             logger.warning(
-                "optimization_business_error: task_id=%s code=%s",
+                "optimization_task_failed: task_id=%s type=%s code=%s",
                 task_id,
+                error_type,
                 error_code,
             )
-            raise HTTPException(
-                status_code=http_status,
-                detail={
-                    "code": error_code,
+            return TaskStatusResponse(
+                status="failed",
+                task_id=task_id,
+                error_type=error_type,
+                error_code=error_code,
+                message=error_message,
+                details=details,
+                error={
+                    "error_type": error_type,
+                    "error_code": error_code,
                     "message": error_message,
-                    "diagnostics": error_payload,
+                    "details": details,
                 },
             )
 
@@ -368,3 +424,135 @@ async def get_optimization_status(task_id: str) -> TaskStatusResponse:
 
     # ── Estado desconhecido (REVOKED, etc.) ──────────────────────────────────
     return TaskStatusResponse(status="failed", task_id=task_id, error={"state": state})
+
+
+@router.post(
+    "/recover",
+    response_model=DisruptionRecoveryResponse,
+    tags=["optimization"],
+    summary="Re-otimização incremental após perturbação operacional",
+    description=(
+        "Dado o schedule atual e as trips perturbadas (atrasadas/canceladas/veículo avariado), "
+        "reconstrói o menor subconjunto de blocos necessário para restaurar a viabilidade "
+        "operacional. Blocos não afetados permanecem congelados. Execução síncrona (< 5s)."
+    ),
+)
+async def disruption_recovery(body: DisruptionRecoveryRequest):
+    """Endpoint de recuperação de perturbações."""
+    from ...domain.models import Trip, VehicleType as VT
+
+    try:
+        trips = [
+            Trip(
+                id=t.id, line_id=t.line_id, start_time=t.start_time, end_time=t.end_time,
+                origin_id=t.origin_id, destination_id=t.destination_id,
+                duration=t.duration, distance_km=t.distance_km, depot_id=t.depot_id,
+                deadhead_times={int(k): int(v) for k, v in t.deadhead_times.items()},
+            )
+            for t in body.trips
+        ]
+        vehicle_types = [
+            VT(
+                id=v.id, name=v.name, passenger_capacity=v.passenger_capacity,
+                cost_per_km=v.cost_per_km, cost_per_hour=v.cost_per_hour,
+                fixed_cost=v.fixed_cost,
+            )
+            for v in body.vehicle_types
+        ]
+        current_blocks = [
+            [
+                Trip(
+                    id=t.id, line_id=t.line_id, start_time=t.start_time, end_time=t.end_time,
+                    origin_id=t.origin_id, destination_id=t.destination_id,
+                    duration=t.duration, distance_km=t.distance_km, depot_id=t.depot_id,
+                    deadhead_times={int(k): int(v) for k, v in t.deadhead_times.items()},
+                )
+                for t in block
+            ]
+            for block in body.current_blocks
+        ]
+
+        solver = DisruptionRecoverySolver(vsp_params=body.vsp_params)
+        result = solver.solve(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            disrupted_trip_ids=set(body.disrupted_trip_ids),
+            current_blocks=current_blocks,
+            depot_id=body.depot_id,
+        )
+        meta = result.vsp.meta or {}
+        return DisruptionRecoveryResponse(
+            run_id=body.run_id,
+            num_vehicles=result.vsp.num_vehicles,
+            disruption_strategy=str(meta.get("disruption_strategy", "incremental")),
+            disruption_affected_blocks=int(meta.get("disruption_affected_blocks", 0)),
+            disruption_frozen_blocks=int(meta.get("disruption_frozen_blocks", 0)),
+            disruption_reoptimized_blocks=int(meta.get("disruption_reoptimized_blocks", 0)),
+            disruption_trips_reassigned=int(meta.get("disruption_trips_reassigned", 0)),
+            disruption_affected_ratio=float(meta.get("disruption_affected_ratio", 0.0)),
+            meta=meta,
+        )
+    except Exception as exc:
+        logger.exception("disruption_recovery_failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/demand-forecast",
+    response_model=DemandForecastResponse,
+    tags=["optimization"],
+    summary="Previsão de demanda por linha e período (ML)",
+    description=(
+        "Treina um modelo GradientBoosting (sklearn) com dados históricos opcionais e "
+        "prediz ridership (passageiros) por (line_id, hour, day_of_week). "
+        "Sem histórico, usa fallback de média global. "
+        "Retorna também a frequência recomendada (ônibus/hora) para cada combinação."
+    ),
+)
+async def demand_forecast(body: DemandForecastRequest):
+    """Endpoint de previsão de demanda com sklearn."""
+    try:
+        forecaster = DemandForecaster()
+        n_samples = 0
+        if body.historical_data:
+            forecaster.fit(body.historical_data)
+            n_samples = len(body.historical_data)
+
+        request_dicts = [
+            {
+                "line_id": r.line_id, "hour": r.hour, "day_of_week": r.day_of_week,
+                "month": r.month, "is_holiday": r.is_holiday, "weather_score": r.weather_score,
+                "passengers": 0,
+            }
+            for r in body.requests
+        ]
+        raw_preds = forecaster.predict(request_dicts)
+
+        predictions = []
+        for req, pred in zip(body.requests, raw_preds):
+            rec = forecaster.recommend_frequency(
+                line_id=req.line_id, hour=req.hour, day_of_week=req.day_of_week,
+                capacity_per_bus=body.capacity_per_bus,
+                target_load_factor=body.target_load_factor,
+                month=req.month, is_holiday=req.is_holiday, weather_score=req.weather_score,
+            )
+            predictions.append(DemandForecastPrediction(
+                line_id=pred.line_id,
+                hour=pred.hour,
+                day_of_week=pred.day_of_week,
+                predicted_passengers=pred.predicted_passengers,
+                confidence_low=pred.confidence_low,
+                confidence_high=pred.confidence_high,
+                model_used=pred.model_used,
+                recommended_buses_per_hour=rec.recommended_buses_per_hour,
+                headway_minutes=rec.headway_minutes,
+            ))
+
+        return DemandForecastResponse(
+            predictions=predictions,
+            model_trained_on_samples=n_samples,
+            feature_importances=forecaster.feature_importances(),
+        )
+    except Exception as exc:
+        logger.exception("demand_forecast_failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

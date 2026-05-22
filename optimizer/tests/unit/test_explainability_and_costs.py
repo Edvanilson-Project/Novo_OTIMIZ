@@ -6,13 +6,15 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from src.api.routes.optimize import router as optimize_router
+from src.api.routes.optimize import _build_optimize_response, router as optimize_router
 from fastapi import FastAPI
 from src.algorithms.csp.greedy import GreedyCSP
 from src.algorithms.evaluator import CostEvaluator
+from src.algorithms.hybrid.pipeline import HybridPipeline
 from src.core.exceptions import HardConstraintViolationError
 from src.domain.models import AlgorithmType, Block, Duty, OptimizationResult, Trip, VehicleType, VSPSolution, CSPSolution
 from src.services.optimizer_service import OptimizerService
+from src.services.optimizer_tasks import run_optimization_task
 
 
 def _trip(
@@ -164,6 +166,245 @@ def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
     assert payload["duties"][0]["total_cost"] == pytest.approx(631.25)
 
 
+def test_optimizer_result_compact_payload_avoids_trip_object_duplication():
+    trip = _trip(1, 360, 60, trip_group_id=77, direction="outbound")
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+    duty.meta["covered_original_trip_ids"] = [77]
+
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block], meta={"input": {"min_layover_minutes": 8}}),
+        csp=CSPSolution(duties=[duty], meta={"input": {"meal_break_minutes": 60}}),
+        meta={
+            "solver_version": "test",
+            "performance": {"solver_ms": 12},
+            "solver_explanation": {
+                "status": "soft_violation",
+                "issues": {
+                    "hard": [],
+                    "soft": [{"raw": "MANDATORY_GROUP_SPLIT [1,2]", "code": "MANDATORY_GROUP_SPLIT"} for _ in range(12)],
+                },
+            },
+            "trip_group_audit": {
+                "groups_total": 20,
+                "split_groups": 3,
+                "sample_splits": [{"trip_group_id": idx} for idx in range(12)],
+            },
+        },
+    )
+    breakdown = CostEvaluator().total_cost_breakdown(result, _vehicle())
+    breakdown["vsp"]["blocks"] = [{"block_id": 1, "total": 123.0}]
+    breakdown["csp"]["duties"] = [{"duty_id": 1, "total": 456.0}]
+    result.total_cost = breakdown["total"]
+    result.meta["cost_breakdown"] = breakdown
+    result.meta["hard_constraint_report"] = {"strict": True, "input": {"ok": True}}
+    result.meta["operational_kpis"] = {"vehicles": 1}
+
+    payload = result.as_compact_dict()
+
+    assert payload["blocks"][0]["trips"] == [1]
+    assert payload["blocks"][0]["trip_ids"] == [1]
+    assert payload["duties"][0]["trips"] == [77]
+    assert payload["duties"][0]["trip_ids"] == [77]
+    assert "segments" not in payload["duties"][0]
+    assert payload["meta"]["solver_version"] == "test"
+    assert payload["meta"]["performance"] == {"solver_ms": 12}
+    assert "blocks" not in payload["cost_breakdown"]["vsp"]
+    assert "duties" not in payload["cost_breakdown"]["csp"]
+    assert payload["solver_explanation"]["issues"]["soft_count"] == 12
+    assert len(payload["solver_explanation"]["issues"]["soft"]) == 10
+    assert len(payload["trip_group_audit"]["sample_splits"]) == 5
+
+
+def test_optimizer_result_compact_payload_keeps_operational_quality_decision_in_root_and_meta():
+    trip = _trip(1, 360, 60, trip_group_id=77, direction="outbound")
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+
+    decision = {
+        "mode": "balanced",
+        "chosen_scenario": "plus_one_duty",
+        "chosen_title": "Plano mais equilibrado",
+        "justification": ["Melhor equilibrio operacional."],
+        "trade_offs": ["Exige +1 duty."],
+        "rejected_scenarios": [{"scenario_id": "current_plan", "reason": "Mantem mais excecoes."}],
+    }
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block]),
+        csp=CSPSolution(duties=[duty]),
+        meta={
+            "chosen_scenario": "plus_one_duty",
+            "rejected_scenarios": decision["rejected_scenarios"],
+            "justification": decision["justification"],
+            "trade_offs": decision["trade_offs"],
+            "operational_quality_decision": decision,
+        },
+    )
+
+    payload = result.as_compact_dict()
+
+    assert payload["chosen_scenario"] == "plus_one_duty"
+    assert payload["operational_quality_decision"]["chosen_scenario"] == "plus_one_duty"
+    assert payload["meta"]["chosen_scenario"] == "plus_one_duty"
+    assert payload["meta"]["justification"] == ["Melhor equilibrio operacional."]
+    assert payload["meta"]["trade_offs"] == ["Exige +1 duty."]
+    assert payload["meta"]["operational_quality_decision"]["chosen_scenario"] == "plus_one_duty"
+
+
+def test_run_optimization_task_returns_compact_payload(monkeypatch):
+    trip = _trip(1, 360, 60)
+    block = Block(id=1, trips=[trip], vehicle_type_id=1)
+    duty = Duty(id=1)
+    duty.add_task(block)
+
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block], meta={"input": {"min_layover_minutes": 8}}),
+        csp=CSPSolution(duties=[duty], meta={"input": {"meal_break_minutes": 60}}),
+        meta={"solver_version": "test"},
+    )
+    breakdown = CostEvaluator().total_cost_breakdown(result, _vehicle())
+    result.total_cost = breakdown["total"]
+    result.meta["cost_breakdown"] = breakdown
+
+    class DummyService:
+        def run(self, *args, **kwargs):
+            return result
+
+    monkeypatch.setattr("src.services.optimizer_tasks.OptimizerService", lambda: DummyService())
+
+    response = run_optimization_task(
+        {
+            "trips": [trip.__dict__],
+            "vehicle_types": [VehicleType(
+                id=1,
+                name="Standard",
+                passenger_capacity=40,
+            ).__dict__],
+            "algorithm": "greedy",
+            "run_id": 99,
+            "line_id": 1,
+            "company_id": 1,
+        }
+    )
+
+    assert response["_is_error"] is False
+    compact = response["result"]
+    assert compact["blocks"][0]["trips"] == [1]
+    assert compact["duties"][0]["trips"] == [1]
+    assert compact["meta"]["run_id"] == 99
+
+
+def test_build_optimize_response_recovers_operational_quality_fields_from_meta():
+    raw = {
+        "vehicles": 1,
+        "crew": 1,
+        "total_trips": 1,
+        "total_cost": 10.0,
+        "cct_violations": 0,
+        "unassigned_trips": 0,
+        "uncovered_blocks": 0,
+        "vsp_algorithm": "greedy",
+        "csp_algorithm": "greedy",
+        "elapsed_ms": 1.0,
+        "blocks": [{"block_id": 1, "trips": [1], "num_trips": 1, "start_time": 360, "end_time": 420}],
+        "duties": [{"duty_id": 1, "blocks": [1], "trip_ids": [1], "work_time": 60, "spread_time": 60, "rest_violations": 0}],
+        "meta": {
+            "chosen_scenario": "current_plan",
+            "rejected_scenarios": [{"scenario_id": "plus_one_duty"}],
+            "justification": ["Plano atual atende ao criterio."],
+            "trade_offs": ["Nao adiciona duty extra."],
+            "operational_quality_decision": {"chosen_scenario": "current_plan"},
+        },
+    }
+
+    response = _build_optimize_response(raw, 1)
+
+    assert response.chosen_scenario == "current_plan"
+    assert response.rejected_scenarios == [{"scenario_id": "plus_one_duty"}]
+    assert response.justification == ["Plano atual atende ao criterio."]
+    assert response.trade_offs == ["Nao adiciona duty extra."]
+    assert response.operational_quality_decision["chosen_scenario"] == "current_plan"
+
+
+def test_hybrid_group_audit_fallback_is_skipped_for_large_instances(monkeypatch):
+    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 222)]
+    blocks = [Block(id=idx, trips=[trip]) for idx, trip in enumerate(trips, start=1)]
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=blocks, algorithm="hybrid_pipeline"),
+        csp=CSPSolution(duties=[]),
+    )
+
+    service = OptimizerService()
+    dispatch_calls: list[AlgorithmType] = []
+
+    def fake_dispatch(algorithm, *args, **kwargs):
+        dispatch_calls.append(algorithm)
+        return result
+
+    monkeypatch.setattr(service, "_dispatch", fake_dispatch)
+    monkeypatch.setattr(service, "_build_trip_group_audit", lambda *args, **kwargs: {"split_groups": 5, "same_roster_ratio": 0.4})
+    monkeypatch.setattr(service, "_ensure_deadhead_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_inject_trip_group_constraints", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_ensure_vsp_operational_warnings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service.validator, "audit_input", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.validator, "audit_result", lambda *args, **kwargs: {"ok": True, "issues": []})
+    monkeypatch.setattr(service.evaluator, "total_cost_breakdown", lambda *args, **kwargs: {"total": 0.0, "vsp": {"total": 0.0}, "csp": {"total": 0.0}})
+    monkeypatch.setattr(service, "_build_operational_kpis", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_phase_summary", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_reproducibility_snapshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "_build_solver_explanation", lambda *args, **kwargs: {})
+
+    service.run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        cct_params={"strict_hard_validation": False},
+        vsp_params={},
+        time_budget_s=30.0,
+    )
+
+    assert dispatch_calls == [AlgorithmType.HYBRID_PIPELINE]
+    assert result.meta["performance"]["group_audit_fallback_skipped"]["reason"] == "instance_scale_guard"
+
+
+def test_hybrid_pipeline_skips_vsp_metaheuristics_for_scaled_instances(monkeypatch):
+    trips = [_trip(tid, 300 + (tid * 10), 8) for tid in range(1, 510)]
+    baseline_blocks = [Block(id=idx, trips=[trip]) for idx, trip in enumerate(trips, start=1)]
+    baseline_vsp = VSPSolution(blocks=baseline_blocks, algorithm="mcnf_vsp")
+
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.MCNFVSP.solve", lambda self, *args, **kwargs: baseline_vsp)
+    # For n≥500, pipeline also runs GreedyVSP to pick the best VSP baseline.
+    # n=229 is below that threshold so GreedyVSP won't be called, but mock it
+    # defensively to prevent accidental real-execution if the threshold changes.
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.GreedyVSP.solve", lambda self, *args, **kwargs: baseline_vsp)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_cost", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline._vsp_hard_issue_count", lambda *args, **kwargs: 0)
+
+    def _should_not_run(*args, **kwargs):
+        raise AssertionError("metaheuristic should have been skipped")
+
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.SimulatedAnnealingVSP.solve", _should_not_run)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.TabuSearchVSP.solve", _should_not_run)
+    monkeypatch.setattr("src.algorithms.hybrid.pipeline.GeneticVSP.solve", _should_not_run)
+    monkeypatch.setattr(
+        "src.algorithms.hybrid.pipeline.HybridPipeline._finalize",
+        lambda self, vsp_sol, trips, vehicle_types, phase_timings_ms=None: OptimizationResult(
+            vsp=vsp_sol,
+            csp=CSPSolution(duties=[]),
+            total_elapsed_ms=1.0,
+            meta={"phase_timings_ms": phase_timings_ms or {}},
+        ),
+    )
+
+    result = HybridPipeline(time_budget_s=30.0, cct_params={}, vsp_params={}).solve(trips, _vehicle())
+
+    # Both MCNF and Greedy return the same mock (equal blocks/cost) — MCNF kept (no strict improvement).
+    assert result.vsp.algorithm == "mcnf_vsp"
+    assert baseline_vsp.meta["performance"]["vsp_metaheuristics_skipped"]["reason"] == "instance_scale_guard"
+
+
 def test_greedy_csp_computes_overtime_from_work_time_not_spread_time():
     duty = Duty(id=165, work_time=484, spread_time=560)
 
@@ -228,10 +469,37 @@ def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():
     assert payload["phase_summary"]["csp"]["crew"] >= 1
     assert result.meta["reproducibility"]["input_hash"]
     assert result.meta["reproducibility"]["params_hash"]
+    assert result.meta["run_snapshot"]["trips_hash"] == result.meta["reproducibility"]["input_hash"]
+    assert result.meta["run_snapshot"]["resolved_params"]["cct_params"]["strict_hard_validation"] is True
     assert result.meta["performance"]["phase_timings_ms"]["input_validation_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["solver_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["output_validation_ms"] >= 0
     assert result.meta["performance"]["phase_timings_ms"]["audit_enrichment_ms"] >= 0
+
+
+def test_operational_quality_defaults_to_balanced_and_sets_current_plan_when_missing():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2, trip_group_id=77, direction="outbound"),
+        _trip(2, 430, 60, origin=2, dest=1, trip_group_id=77, direction="return"),
+    ]
+
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={"strict_hard_validation": True},
+        vsp_params={"preserve_preferred_pairs": True},
+        optimization_params={},
+    )
+
+    payload = result.as_compact_dict()
+
+    assert result.meta["chosen_scenario"] == "current_plan"
+    assert result.meta["operational_quality_decision"]["mode"] == "balanced"
+    assert result.meta["operational_quality_decision"]["chosen_scenario"] == "current_plan"
+    assert payload["chosen_scenario"] == "current_plan"
+    assert payload["operational_quality_decision"]["chosen_scenario"] == "current_plan"
+    assert payload["meta"]["chosen_scenario"] == "current_plan"
 
 
 def test_greedy_csp_prefers_existing_trip_group_duty_when_feasible():
@@ -268,9 +536,11 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     payload = service.build_failure_payload(
         HardConstraintViolationError(["SPREAD_EXCEEDED D5", "CONTINUOUS_DRIVING_EXCEEDED D6"]),
         trips,
+        _vehicle(),
         AlgorithmType.HYBRID_PIPELINE,
         {"max_shift_minutes": 480},
         {"random_seed": 7, "time_budget_s": 9},
+        {},
         stage="output_validation",
     )
 
@@ -281,6 +551,7 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     assert payload["input_snapshot"]["input_hash"]
     assert payload["input_snapshot"]["params_hash"]
     assert payload["input_snapshot"]["time_budget_s"] == pytest.approx(9.0)
+    assert payload["run_snapshot"]["seed"] == 7
 
 
 def test_optimize_route_returns_structured_diagnostics_on_failure():
@@ -333,3 +604,28 @@ def test_same_random_seed_produces_same_hybrid_solution_signature():
     assert "phase_timings_ms" in result_a.meta.get("performance", {})
     assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_mcnf_ms") is not None
     assert result_a.meta["performance"]["phase_timings_ms"].get("solver_ms") is not None
+
+
+def test_missing_random_seed_is_derived_deterministically_from_input_and_params():
+    trips = [
+        _trip(1, 360, 60, origin=1, dest=2),
+        _trip(2, 450, 60, origin=2, dest=1),
+        _trip(3, 570, 60, origin=1, dest=2),
+        _trip(4, 660, 60, origin=2, dest=1),
+    ]
+    service = OptimizerService()
+    params = {"preserve_preferred_pairs": True, "min_layover_minutes": 30}
+
+    result_a = service.run(trips, _vehicle(), algorithm=AlgorithmType.HYBRID_PIPELINE, vsp_params=params, time_budget_s=4.0)
+    result_b = service.run(trips, _vehicle(), algorithm=AlgorithmType.HYBRID_PIPELINE, vsp_params=params, time_budget_s=4.0)
+
+    signature_a = [[trip.id for trip in block.trips] for block in result_a.vsp.blocks]
+    signature_b = [[trip.id for trip in block.trips] for block in result_b.vsp.blocks]
+    seed_a = result_a.meta["run_snapshot"]["seed"]
+    seed_b = result_b.meta["run_snapshot"]["seed"]
+
+    assert seed_a == seed_b
+    assert seed_a is not None
+    assert result_a.meta["run_snapshot"]["resolved_params"]["vsp_params"]["random_seed"] == seed_a
+    assert result_b.meta["run_snapshot"]["resolved_params"]["vsp_params"]["random_seed"] == seed_b
+    assert signature_a == signature_b

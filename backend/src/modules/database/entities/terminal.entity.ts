@@ -17,4 +17,8 @@ export class Terminal extends TenantBaseEntity {
 
   @Column({ type: 'float', nullable: true })
   longitude: number;
+
+  /** Indica se este terminal funciona como garagem/depósito de veículos. */
+  @Column({ default: false })
+  isDepot: boolean;
 }

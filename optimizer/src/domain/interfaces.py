@@ -2,6 +2,7 @@
 Interfaces abstratas (Protocols) do OTIMIZ Optimizer.
 Define os contratos que todos os algoritmos devem cumprir.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -35,8 +36,8 @@ class ICSPAlgorithm(ABC):
     """Contrato para qualquer algoritmo de Programação de Tripulantes."""
 
     # Parâmetros CCT (defaults seguros — podem ser sobrescritos via Settings)
-    MAX_SHIFT_MINUTES: int = 480          # 8 horas
-    MAX_DRIVING_MINUTES: int = 240        # 4h
+    MAX_SHIFT_MINUTES: int = 480  # 8 horas
+    MAX_DRIVING_MINUTES: int = 240  # 4h
     MIN_BREAK_MINUTES: int = 30
 
     @abstractmethod
@@ -66,13 +67,10 @@ class ICostEvaluator(ABC):
     """Contrato para o avaliador de custo de uma solução."""
 
     @abstractmethod
-    def vsp_cost(self, solution: VSPSolution, vehicle_types: List[VehicleType]) -> float:
-        ...
+    def vsp_cost(self, solution: VSPSolution, vehicle_types: List[VehicleType]) -> float: ...
 
     @abstractmethod
-    def csp_cost(self, solution: CSPSolution) -> float:
-        ...
+    def csp_cost(self, solution: CSPSolution) -> float: ...
 
     @abstractmethod
-    def total_cost(self, result: OptimizationResult, vehicle_types: List[VehicleType]) -> float:
-        ...
+    def total_cost(self, result: OptimizationResult, vehicle_types: List[VehicleType]) -> float: ...

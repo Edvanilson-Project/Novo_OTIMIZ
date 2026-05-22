@@ -76,6 +76,7 @@ export default function UsersPage() {
   const [showPwd, setShowPwd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notify, setNotify] = useState<{ msg: string; sev: 'success' | 'error' } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -87,7 +88,7 @@ export default function UsersPage() {
       const usersList: User[] = Array.isArray(usersData) ? usersData : usersData.data ?? [];
       const companiesList: Company[] = Array.isArray(companiesData) ? companiesData : companiesData.data ?? [];
       const companyMap = new Map(companiesList.map((c: Company) => [c.id, c.name]));
-      setRows(usersList.map((u: User) => ({ ...u, companyName: u.companyId ? companyMap.get(u.companyId) : undefined })));
+      setRows(usersList.map((u: User & { isActive?: boolean }) => ({ ...u, status: u.isActive ? 'active' : 'inactive', companyName: u.companyId ? companyMap.get(u.companyId) : undefined })));
       setCompanies(companiesList);
     } finally {
       setLoading(false);
@@ -101,21 +102,24 @@ export default function UsersPage() {
 
   if (!checked || !mounted) return null;
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowPwd(false); setOpen(true); };
+  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowPwd(false); setFormError(null); setOpen(true); };
   const openEdit = (row: User) => {
     setEditing(row);
     setForm({ name: row.name, email: row.email, password: '', role: row.role, status: row.status, companyId: row.companyId?.toString() ?? '' });
     setShowPwd(false);
+    setFormError(null);
     setOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.email) { setNotify({ msg: 'Nome e E-mail são obrigatórios.', sev: 'error' }); return; }
-    if (!editing && !form.password) { setNotify({ msg: 'Senha é obrigatória para novos usuários.', sev: 'error' }); return; }
+    if (!form.name || !form.email) { setFormError('Nome e E-mail são obrigatórios.'); return; }
+    if (!editing && !form.password) { setFormError('Senha é obrigatória para novos usuários.'); return; }
+    setFormError(null);
     setSaving(true);
     try {
       const payload = {
         ...form,
+        isActive: form.status === 'active',
         companyId: form.companyId ? Number(form.companyId) : undefined,
         ...(editing && !form.password ? { password: undefined } : {}),
       };
@@ -207,12 +211,13 @@ export default function UsersPage() {
       </DashboardCard>
 
       {/* ── Dialog: Criar / Editar ── */}
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={() => { setOpen(false); setFormError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <IconUser size={20} />
           {editing ? `Editar: ${editing.name}` : 'Novo Usuário'}
         </DialogTitle>
         <DialogContent dividers>
+          {formError && <Alert severity="error" sx={{ mx: 2, mt: 2 }}>{formError}</Alert>}
           <Grid container spacing={2} sx={{ pt: 1 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <Tooltip title="Nome completo do usuário." arrow placement="top">

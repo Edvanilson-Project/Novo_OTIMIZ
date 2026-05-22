@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+// Secondary axios instance (used by some components before api.ts was added).
+// Prefer importing apiClient from ./api.ts for new code.
 const axiosInstance = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1',
   withCredentials: true,
@@ -8,13 +10,9 @@ const axiosInstance = axios.create({
   },
 });
 
-// Interceptor para tratamento global de erros (opcional)
 axiosInstance.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // Aqui podemos tratar 401 (Unauthorized) redirecionando para login
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
 export default axiosInstance;

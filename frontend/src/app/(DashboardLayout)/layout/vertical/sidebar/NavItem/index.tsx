@@ -13,6 +13,15 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import { CustomizerContext } from "@/app/context/customizerContext";
 import { useTranslation } from "react-i18next";
+import type { MenuitemsType } from "../MenuItems";
+
+interface NavItemProps {
+  item: MenuitemsType;
+  level?: number;
+  pathDirect: string;
+  hideMenu?: boolean;
+  onClick?: () => void;
+}
 
 export default function NavItem({
   item,
@@ -20,9 +29,9 @@ export default function NavItem({
   pathDirect,
   hideMenu,
   onClick,
-}: any) {
+}: NavItemProps) {
   const lgDown = useMediaQuery((theme: Theme) => theme.breakpoints.down("lg"));
-  const { isBorderRadius } = useContext(CustomizerContext) as any;
+  const { isBorderRadius } = useContext(CustomizerContext);
   const Icon = item?.icon;
   const theme = useTheme();
   const { t } = useTranslation();

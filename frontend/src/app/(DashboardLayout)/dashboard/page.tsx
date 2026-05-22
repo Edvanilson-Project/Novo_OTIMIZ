@@ -70,6 +70,8 @@ interface ScheduleData {
   totalTrips?: number;
   computationTimeS?: number;
   createdAt?: string;
+  rosterCount?: number;
+  cctViolations?: number;
 }
 
 export default function DashboardPage() {
@@ -91,11 +93,11 @@ export default function DashboardPage() {
 
       if (tripsData.status === "fulfilled") {
         const d = tripsData.value;
-        setTrips(Array.isArray(d) ? d : (d as any).data ?? []);
+        setTrips(Array.isArray(d) ? d : (d as { data?: unknown[] }).data ?? []);
       }
       if (driversData.status === "fulfilled") {
         const d = driversData.value;
-        setDrivers(Array.isArray(d) ? d : (d as any).data ?? []);
+        setDrivers(Array.isArray(d) ? d : (d as { data?: unknown[] }).data ?? []);
       }
       if (scheduleData.status === "fulfilled") {
         setSchedule(scheduleData.value as ScheduleData);
@@ -167,11 +169,11 @@ export default function DashboardPage() {
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <KPICard
-                title="Blocos na Última Otimização"
-                value={schedule?.totalBlocks ?? "—"}
-                subtitle={schedule ? `Custo: R$ ${schedule.totalCost?.toLocaleString("pt-BR", { maximumFractionDigits: 0 }) ?? "—"}` : "Sem otimização"}
-                icon={<IconCalendarStats size={24} />}
-                color={schedule?.status === "completed" ? "success" : "warning"}
+                title="Motoristas Necessários"
+                value={schedule?.rosterCount ?? schedule?.totalBlocks ?? "—"}
+                subtitle={schedule ? `Frota: ${schedule.totalBlocks} veículos` : "escala otimizada"}
+                icon={<IconUsers size={24} />}
+                color="warning"
                 loading={loading}
               />
             </Grid>
@@ -187,7 +189,7 @@ export default function DashboardPage() {
                   </Typography>
                   <Chip
                     label={schedule.status}
-                    color={statusColor(schedule.status) as any}
+                    color={statusColor(schedule.status) as 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'}
                     size="small"
                   />
                 </Stack>
@@ -211,6 +213,15 @@ export default function DashboardPage() {
                       {schedule.totalCost != null
                         ? `R$ ${schedule.totalCost.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
                         : "—"}
+                    </Typography>
+                  </Grid>
+                  <Grid size={{ xs: 6, sm: 3 }}>
+                    <Typography variant="caption" color="text.secondary">Violações CCT</Typography>
+                    <Typography variant="body2" sx={{ 
+                      fontWeight: 700, 
+                      color: (schedule.cctViolations ?? 0) > 0 ? "error.main" : "success.main" 
+                    }}>
+                      {schedule.cctViolations ?? 0}
                     </Typography>
                   </Grid>
                   {schedule.computationTimeS != null && (

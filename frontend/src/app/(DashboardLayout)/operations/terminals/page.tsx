@@ -1,17 +1,17 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
-  IconButton, Snackbar, Alert, Stack, TextField, Tooltip,
+  Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
+  FormControlLabel, IconButton, Snackbar, Alert, Stack, Switch, TextField, Tooltip,
 } from '@mui/material';
 import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
 import { IconEdit, IconPlus, IconRefresh, IconTrash, IconMapPin } from '@tabler/icons-react';
 import DashboardCard from '@/app/components/shared/DashboardCard';
 import { terminalsApi } from '@/lib/api';
 
-interface Terminal { id: number; terminalId: string; name: string; city?: string; latitude?: number; longitude?: number; }
+interface Terminal { id: number; terminalId: string; name: string; city?: string; latitude?: number; longitude?: number; isDepot: boolean; }
 type FormState = Omit<Terminal, 'id'>;
-const EMPTY: FormState = { terminalId: '', name: '', city: '', latitude: undefined, longitude: undefined };
+const EMPTY: FormState = { terminalId: '', name: '', city: '', latitude: undefined, longitude: undefined, isDepot: false };
 
 export default function TerminalsPage() {
   const [rows, setRows] = useState<Terminal[]>([]);
@@ -21,6 +21,7 @@ export default function TerminalsPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [notify, setNotify] = useState<{ msg: string; sev: 'success' | 'error' } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -29,15 +30,17 @@ export default function TerminalsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
+  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormError(null); setOpen(true); };
   const openEdit = (row: Terminal) => {
     setEditing(row);
-    setForm({ terminalId: row.terminalId, name: row.name, city: row.city ?? '', latitude: row.latitude, longitude: row.longitude });
+    setForm({ terminalId: row.terminalId, name: row.name, city: row.city ?? '', latitude: row.latitude, longitude: row.longitude, isDepot: row.isDepot ?? false });
+    setFormError(null);
     setOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.terminalId || !form.name) { setNotify({ msg: 'Código e Nome são obrigatórios.', sev: 'error' }); return; }
+    if (!form.terminalId || !form.name) { setFormError('Código e Nome do Terminal são obrigatórios.'); return; }
+    setFormError(null);
     setSaving(true);
     try {
       const payload = { ...form, latitude: form.latitude ? Number(form.latitude) : undefined, longitude: form.longitude ? Number(form.longitude) : undefined };
@@ -57,6 +60,14 @@ export default function TerminalsPage() {
     { field: 'terminalId', headerName: 'Código', width: 120 },
     { field: 'name', headerName: 'Nome do Terminal', flex: 1.5 },
     { field: 'city', headerName: 'Cidade', flex: 1 },
+    {
+      field: 'isDepot', headerName: 'Tipo', width: 120,
+      renderCell: (p: GridRenderCellParams<Terminal>) => (
+        p.row.isDepot
+          ? <Chip label="Garagem" color="primary" size="small" />
+          : <Chip label="Terminal" variant="outlined" size="small" />
+      ),
+    },
     { field: 'latitude', headerName: 'Lat', width: 100 },
     { field: 'longitude', headerName: 'Lng', width: 100 },
     { field: 'actions', headerName: 'Ações', width: 100, sortable: false,
@@ -84,12 +95,13 @@ export default function TerminalsPage() {
         </Box>
       </DashboardCard>
 
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={() => { setOpen(false); setFormError(null); }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <IconMapPin size={20} /> {editing ? `Editar: ${editing.name}` : 'Novo Terminal'}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {formError && <Alert severity="error">{formError}</Alert>}
             <TextField label="Código do Terminal *" size="small" fullWidth value={form.terminalId}
               onChange={e => setForm(f => ({ ...f, terminalId: e.target.value }))} helperText="Ex: TER-001, GARAGEM-SP" />
             <TextField label="Nome do Terminal *" size="small" fullWidth value={form.name}
@@ -102,6 +114,12 @@ export default function TerminalsPage() {
               <TextField label="Longitude" size="small" fullWidth type="number"
                 value={form.longitude ?? ''} onChange={e => setForm(f => ({ ...f, longitude: e.target.value ? Number(e.target.value) : undefined }))} />
             </Stack>
+            <Tooltip title="Garagens são usadas como pontos de origem/destino de veículos na otimização multi-depot">
+              <FormControlLabel
+                control={<Switch checked={form.isDepot} onChange={e => setForm(f => ({ ...f, isDepot: e.target.checked }))} />}
+                label="É uma garagem/depósito de veículos"
+              />
+            </Tooltip>
           </Stack>
         </DialogContent>
         <DialogActions>

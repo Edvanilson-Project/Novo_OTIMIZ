@@ -24,10 +24,17 @@ export class Schedule extends TenantBaseEntity {
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
 
-  @OneToMany(() => BlockAssignment, (block) => block.schedule)
+  // Cascade delete + ON DELETE CASCADE no FK garante que ao remover Schedule,
+  // BlockAssignment e DutyAssignment relacionados são removidos junto. Antes,
+  // delete do schedule deixava órfãos. As FKs em block_assignment e duty_assignment
+  // já têm `ON DELETE CASCADE` no DB (constraints "FK_88f267..." e "FK_12551b...").
+  // O `cascade` aqui sincroniza o comportamento via TypeORM repository methods.
+  @OneToMany(() => BlockAssignment, (block) => block.schedule, {
+    cascade: true,
+  })
   blocks: BlockAssignment[];
 
-  @OneToMany(() => DutyAssignment, (duty) => duty.schedule)
+  @OneToMany(() => DutyAssignment, (duty) => duty.schedule, { cascade: true })
   duties: DutyAssignment[];
 
   @Column({ type: 'float', nullable: true })

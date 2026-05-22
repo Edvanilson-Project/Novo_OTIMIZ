@@ -190,6 +190,8 @@ export interface TripIntervalPolicy {
   mealBreakMinutes: number;
   minLayoverMinutes: number;
   connectionToleranceMinutes: number;
+  pulloutMinutes: number;
+  pullbackMinutes: number;
 }
 
 export function buildTripIntervalPolicy(
@@ -202,6 +204,8 @@ export function buildTripIntervalPolicy(
     mealBreakMinutes: toMinuteValue(resolved.cct.meal_break_minutes) ?? activeSettings?.cctMealBreakMinutes ?? 60,
     minLayoverMinutes: toMinuteValue(resolved.vsp.min_layover_minutes) ?? toMinuteValue(resolved.cct.min_layover_minutes) ?? activeSettings?.cctMinLayoverMinutes ?? 8,
     connectionToleranceMinutes: toMinuteValue(resolved.cct.connection_tolerance_minutes) ?? activeSettings?.connectionToleranceMinutes ?? 0,
+    pulloutMinutes: toMinuteValue(resolved.vsp.pullout_minutes) ?? toMinuteValue(resolved.cct.pullout_minutes) ?? 0,
+    pullbackMinutes: toMinuteValue(resolved.vsp.pullback_minutes) ?? toMinuteValue(resolved.cct.pullback_minutes) ?? 0,
   };
 }
 

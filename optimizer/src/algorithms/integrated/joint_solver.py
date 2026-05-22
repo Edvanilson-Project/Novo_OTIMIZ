@@ -9,6 +9,7 @@ Estratégia de iteração:
      (prefere blocos curtos que facilitem deveres viáveis).
   4. Repete até orçamento de tempo ou 0 violações.
 """
+
 from __future__ import annotations
 
 import logging
@@ -140,6 +141,35 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
             # Se sem violações, para cedo
             if csp_sol.cct_violations == 0 and not vsp_sol.unassigned_trips:
                 break
+
+            # Feedback bidirecional: extrai trip_ids violadores e propaga ao VSP
+            if csp_sol.cct_violations > 0 and round_n < self.max_rounds - 1:
+                # Feedback global: reduz duração máxima dos blocos
+                current = self.vsp_params.get("max_block_duration_minutes", 480)
+                reduced = max(120, int(current * 0.85))
+                self.vsp_params["max_block_duration_minutes"] = reduced
+
+                # Feedback granular: penaliza viagens específicas que causaram violações
+                new_violated = csp_sol.meta.get("violated_trip_ids", set())
+                if new_violated:
+                    existing = set(self.vsp_params.get("penalize_trip_ids", []))
+                    self.vsp_params["penalize_trip_ids"] = existing | new_violated
+                    logger.info(
+                        "joint_solver round=%d: %d CCT violations → max_block %d→%d min, " "penalize_trip_ids=%d trips",
+                        round_n + 1,
+                        csp_sol.cct_violations,
+                        current,
+                        reduced,
+                        len(self.vsp_params["penalize_trip_ids"]),
+                    )
+                else:
+                    logger.info(
+                        "joint_solver round=%d: %d CCT violations → max_block_duration %d→%d min",
+                        round_n + 1,
+                        csp_sol.cct_violations,
+                        current,
+                        reduced,
+                    )
 
         if best_result is None:
             raise InfeasibleProblemError("JointSolver could not find any feasible solution")

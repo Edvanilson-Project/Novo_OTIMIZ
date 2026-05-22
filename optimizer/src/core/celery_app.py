@@ -7,6 +7,7 @@ Configurações chave:
 - task_serializer/result_serializer="json": serialização segura e inspeccionável.
 - result_expires=3600: resultados são eliminados do Redis após 1 hora.
 """
+
 import os
 from celery import Celery
 
@@ -27,6 +28,16 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    # Roteamento por fila: tarefas de depot usam fila dedicada com 4 workers
+    task_routes={
+        "run_optimization": {"queue": "optimizer"},
+        "run_depot_optimization": {"queue": "optimizer_depot"},
+        "run_disruption_recovery": {"queue": "optimizer"},
+    },
+    task_queues={
+        "optimizer": {"exchange": "optimizer", "routing_key": "optimizer"},
+        "optimizer_depot": {"exchange": "optimizer_depot", "routing_key": "optimizer_depot"},
+    },
     # Serialização e Compressão (GZIP previne OOM no Redis em grandes payloads)
     task_serializer="json",
     result_serializer="json",
@@ -34,21 +45,22 @@ celery_app.conf.update(
     task_compression="gzip",
     result_compression="gzip",
     # Performance para CPU-bound
-    worker_prefetch_multiplier=1,   # 1 tarefa por worker de cada vez
-    task_acks_late=True,            # ACK apenas após conclusão (não perder tarefas em crash)
+    worker_prefetch_multiplier=1,  # 1 tarefa por worker de cada vez
+    task_acks_late=True,  # ACK apenas após conclusão (não perder tarefas em crash)
     # Timeouts de segurança: evita workers bloqueados por solvers CBC/PuLP travados.
     # soft_time_limit dispara SoftTimeLimitExceeded (capturável); time_limit envia SIGKILL.
-    task_soft_time_limit=1200,      # 20 min: orçamento 15 min + 5 min de overhead
-    task_time_limit=1500,           # 25 min: SIGKILL caso soft limit seja ignorado
-    # Limpa fragmentação de memória: reinicia o processo após N tarefas concluídas
-    worker_max_tasks_per_child=10,
+    task_soft_time_limit=settings.celery_task_soft_time_limit,
+    task_time_limit=settings.celery_task_time_limit,
+    task_reject_on_worker_lost=True,  # Evita loop infinito se worker morrer por OOM
+    # Reinicia o processo após cada otimização pesada para devolver RAM ao SO.
+    worker_max_tasks_per_child=1,
+    worker_max_memory_per_child=800000,  # ~800 MB em KB
     # Resultados e Caching
-    result_expires=43200,           # 12 horas de retenção no Redis para habilitar Smart Caching
-    result_extended=True,           # Guarda traceback e estado estendido
+    result_expires=43200,  # 12 horas de retenção no Redis para habilitar Smart Caching
+    result_extended=True,  # Guarda traceback e estado estendido
     # Timezone
     timezone="America/Sao_Paulo",
     enable_utc=True,
     # Nome da fila padrão
     task_default_queue="optimizer",
 )
-

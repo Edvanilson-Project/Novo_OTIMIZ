@@ -16,16 +16,18 @@ Todos os parâmetros recebidos são dicionários JSON-safe (nenhum objeto Pydant
 dataclass é passado pela fronteira Celery). A reconstrução dos objetos de domínio
 (Trip, VehicleType, etc.) é feita internamente nesta task.
 """
+
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.celery_app import celery_app
-from ..core.exceptions import OptimizerError
+from ..core.exceptions import OptimizerError, HardConstraintViolationError
 from ..domain.models import AlgorithmType, Trip, VehicleType
 from ..services.optimizer_service import OptimizerService
+from ..algorithms.integrated.disruption_recovery import DisruptionRecoverySolver
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,7 @@ def _reconstruct_vehicle_type(d: Dict[str, Any]) -> VehicleType:
         minimum_soc=float(d.get("minimum_soc", 0.15)),
         charge_rate_kw=float(d.get("charge_rate_kw", 0.0)),
         energy_cost_per_kwh=float(d.get("energy_cost_per_kwh", 0.0)),
+        charger_location_ids=list(d.get("charger_location_ids") or []),
         depot_id=d.get("depot_id"),
     )
 
@@ -128,10 +131,15 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
     algorithm_str: str = payload.get("algorithm", "hybrid_pipeline")
     depot_id = payload.get("depot_id")
+    depot_ids = payload.get("depot_ids") or None
     time_budget_s = payload.get("time_budget_s")
     cct_params = payload.get("cct_params") or {}
-    vsp_params = payload.get("vsp_params") or {}
+    vsp_params = dict(payload.get("vsp_params") or {})
     optimization_params = payload.get("optimization_params") or {}
+    request_metadata = payload.get("request_metadata") or {}
+    algorithm_preference = payload.get("algorithm_preference")
+    if algorithm_preference:
+        vsp_params["algorithm_preference"] = algorithm_preference
 
     # Metadados para o payload de erro (se necessário)
     run_id = payload.get("run_id")
@@ -164,12 +172,17 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             vehicle_types=vehicle_types,
             algorithm=AlgorithmType(algorithm_str),
             depot_id=depot_id,
+            depot_ids=depot_ids,
             time_budget_s=time_budget_s,
             cct_params=cct_params,
             vsp_params=vsp_params,
             optimization_params=optimization_params,
+            request_metadata=request_metadata,
         )
-        result_dict = result.as_dict()
+        # Usa uma representação compacta para reduzir o pico de memória e o
+        # tamanho do payload no Celery/Redis. O resultado completo continua
+        # disponível via `as_dict()` para testes e diagnósticos locais.
+        result_dict = result.as_compact_dict()
         result_dict.setdefault("meta", {})
         result_dict["meta"].update(
             {
@@ -178,18 +191,155 @@ def run_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "company_id": company_id,
             }
         )
+        logger.info(
+            "[OP-QUALITY] task completed run_id=%s mode=%s chosen_scenario=%s",
+            run_id,
+            ((result_dict.get("operational_quality_decision") or {}).get("mode"))
+            or ((result_dict.get("meta") or {}).get("operational_quality_decision") or {}).get("mode")
+            or (optimization_params or {}).get("operational_quality_mode")
+            or "balanced",
+            result_dict.get("chosen_scenario") or ((result_dict.get("meta") or {}).get("chosen_scenario")),
+        )
         _update_prog(1.0, "Otimização concluída")
 
         return {"_is_error": False, "result": result_dict}
+
+    except OptimizerError as e:
+        logger.exception("Erro de negocio durante a execução da otimização")
+        issues = list(getattr(e, "issues", []) or [])
+        error_code = getattr(e, "code", "OPTIMIZER_ERROR")
+        if isinstance(e, HardConstraintViolationError) and any(
+            str(issue).startswith("MANDATORY_GROUP_SPLIT") for issue in issues
+        ):
+            error_code = "MANDATORY_GROUP_SPLIT"
+        details = dict(getattr(e, "details", {}) or {})
+        details.update(
+            {
+                "issues": issues,
+                "run_id": run_id,
+                "line_id": line_id,
+                "company_id": company_id,
+                "algorithm": algorithm_str,
+            }
+        )
+        return {
+            "_is_error": True,
+            "status": "failed",
+            "error_type": "business",
+            "error_code": error_code,
+            "message": str(e),
+            "details": details,
+            "error_payload": {
+                "status": "failed",
+                "error_type": "business",
+                "error_code": error_code,
+                "message": str(e),
+                "details": details,
+            },
+            "http_status": 200,
+        }
 
     except Exception as e:
         logger.exception("Erro durante a execução da otimização")
         return {
             "_is_error": True,
-            "error_payload": {
-                "message": str(e),
-                "code": "INTERNAL_ERROR",
-                "run_id": run_id
-            },
-            "http_status": 500
+            "status": "failed",
+            "error_type": "system",
+            "error_code": "INTERNAL_ERROR",
+            "message": str(e),
+            "details": {"run_id": run_id, "algorithm": algorithm_str},
+            "error_payload": {"message": str(e), "code": "INTERNAL_ERROR", "run_id": run_id},
+            "http_status": 500,
+        }
+
+
+@celery_app.task(bind=True, name="run_depot_optimization")
+def run_depot_optimization_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Task Celery para otimização paralela por garagem (depot).
+
+    Recebe trips de UM único depot_id, executa o pipeline completo e retorna
+    o resultado parcial. O agregador no serviço principal mescla os resultados.
+
+    Fila: optimizer_depot (4 workers dedicados para paralelismo por garagem).
+    """
+    depot_id = payload.get("depot_id")
+    trips_raw: List[Dict[str, Any]] = payload.get("trips", [])
+    vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
+    algorithm_str: str = payload.get("algorithm", "hybrid_pipeline")
+    cct_params = payload.get("cct_params") or {}
+    vsp_params = dict(payload.get("vsp_params") or {})
+    optimization_params = payload.get("optimization_params") or {}
+
+    try:
+        trips = [_reconstruct_trip(t) for t in trips_raw]
+        vehicle_types = _reconstruct_vehicle_types(vehicle_types_raw)
+        service = OptimizerService()
+        result = service.run(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            algorithm=AlgorithmType(algorithm_str),
+            depot_id=depot_id,
+            time_budget_s=payload.get("time_budget_s"),
+            cct_params=cct_params,
+            vsp_params=vsp_params,
+            optimization_params=optimization_params,
+        )
+        result_dict = result.as_compact_dict()
+        result_dict.setdefault("meta", {})["depot_id"] = depot_id
+        logger.info(
+            "[depot-worker] depot=%s trips=%d vehicles=%d",
+            depot_id, len(trips), result.vsp.num_vehicles,
+        )
+        return {"_is_error": False, "depot_id": depot_id, "result": result_dict}
+    except Exception as e:
+        logger.exception("[depot-worker] depot=%s falhou: %s", depot_id, e)
+        return {
+            "_is_error": True,
+            "depot_id": depot_id,
+            "error_code": "DEPOT_OPTIMIZATION_FAILED",
+            "message": str(e),
+        }
+
+
+@celery_app.task(bind=True, name="run_disruption_recovery")
+def run_disruption_recovery_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Task Celery para re-otimização incremental após perturbação operacional.
+
+    Aceita o schedule atual (blocks como listas de trips) + trips perturbadas
+    e retorna o menor re-arranjo que restaura a viabilidade.
+    """
+    trips_raw: List[Dict[str, Any]] = payload.get("trips", [])
+    vehicle_types_raw: List[Dict[str, Any]] = payload.get("vehicle_types", [])
+    disrupted_trip_ids: List[int] = payload.get("disrupted_trip_ids", [])
+    current_blocks_raw: List[List[Dict[str, Any]]] = payload.get("current_blocks", [])
+    vsp_params = dict(payload.get("vsp_params") or {})
+    run_id = payload.get("run_id")
+
+    try:
+        trips = [_reconstruct_trip(t) for t in trips_raw]
+        vehicle_types = _reconstruct_vehicle_types(vehicle_types_raw)
+        current_blocks = [[_reconstruct_trip(t) for t in block] for block in current_blocks_raw]
+
+        solver = DisruptionRecoverySolver(vsp_params=vsp_params)
+        result = solver.solve(
+            trips=trips,
+            vehicle_types=vehicle_types,
+            disrupted_trip_ids=set(disrupted_trip_ids),
+            current_blocks=current_blocks,
+        )
+        result_dict = result.as_compact_dict() if hasattr(result, "as_compact_dict") else result.vsp.meta
+        logger.info(
+            "[disruption-recovery] run_id=%s disrupted=%d result_vehicles=%d",
+            run_id, len(disrupted_trip_ids), result.vsp.num_vehicles,
+        )
+        return {"_is_error": False, "run_id": run_id, "result": result_dict}
+    except Exception as e:
+        logger.exception("[disruption-recovery] run_id=%s falhou: %s", run_id, e)
+        return {
+            "_is_error": True,
+            "run_id": run_id,
+            "error_code": "DISRUPTION_RECOVERY_FAILED",
+            "message": str(e),
         }

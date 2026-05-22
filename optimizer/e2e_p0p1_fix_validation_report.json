@@ -1,0 +1,144 @@
+{
+  "title": "E2E P0/P1 Fix Validation",
+  "status": "298/596/1000 hybrid_pipeline strict completed; 2000 failed structured with MANDATORY_GROUP_SPLIT; assignment_vsp strict failed controlled.",
+  "changed_files": [
+    "optimizer/src/algorithms/vsp/greedy.py",
+    "optimizer/src/services/optimizer_service.py",
+    "optimizer/tests/unit/test_solver_edge_cases.py",
+    "backend/src/modules/operations/optimization.service.ts",
+    "backend/src/modules/operations/optimization.service.spec.ts",
+    "optimizer/scripts/e2e_benchmark_real_flow.py"
+  ],
+  "validations": [
+    {
+      "command": "./optimizer/venv/bin/python -m compileall -q optimizer/src",
+      "status": "passed"
+    },
+    {
+      "command": "./optimizer/venv/bin/python -m pytest optimizer/tests/unit/test_solver_edge_cases.py optimizer/tests/unit/test_vsp_tolerance_and_multiline.py optimizer/tests/unit/test_settings_parameter_effects.py -q",
+      "status": "35 passed, 1 warning"
+    },
+    {
+      "command": "npm test -- --runInBand backend/src/modules/operations/optimization.service.spec.ts",
+      "status": "4 passed"
+    },
+    {
+      "command": "npm run build",
+      "status": "passed"
+    },
+    {
+      "command": "E2E assignment_vsp 298 strict",
+      "status": "failed controlled ALGORITHM_UNSUPPORTED_STRICT_GROUPS"
+    },
+    {
+      "command": "E2E hybrid_pipeline 298/596/1000/2000 strict",
+      "status": "298/596/1000 completed; 2000 failed structured MANDATORY_GROUP_SPLIT"
+    },
+    {
+      "command": "GET /api/v1/operations/latest-schedule com JWT company_id=22 após E2E 2000",
+      "status": "failed com error_code MANDATORY_GROUP_SPLIT, error_message, hard_constraint_report e performance presentes"
+    }
+  ],
+  "results": [
+    {
+      "volume": 298,
+      "algorithm": "assignment_vsp",
+      "direct_status": "error",
+      "direct_error": "OptimizerError: Algorithm 'assignment_vsp' is not allowed with strict_hard_constraints=true when trip_group_id is present because it does not guarantee mandatory group preservation.",
+      "e2e_status": "failed",
+      "error_code": "ALGORITHM_UNSUPPORTED_STRICT_GROUPS",
+      "vehicles": 0,
+      "duties": 0,
+      "cost": 0.0,
+      "missing_trips": 298,
+      "duplicated_trips": 0,
+      "hard_violations": 0,
+      "latest_has_error_code": null,
+      "latest_has_hard_constraint_report": false,
+      "latest_has_performance": true,
+      "backend_ms": 6459.55,
+      "optimizer_ms": null,
+      "frontend_read_ms": 21.59
+    },
+    {
+      "volume": 298,
+      "algorithm": "hybrid_pipeline",
+      "direct_status": "ok",
+      "direct_error": null,
+      "e2e_status": "completed",
+      "error_code": null,
+      "vehicles": 14,
+      "duties": 21,
+      "cost": 47392.01,
+      "missing_trips": 0,
+      "duplicated_trips": 0,
+      "hard_violations": 0,
+      "latest_has_error_code": null,
+      "latest_has_hard_constraint_report": true,
+      "latest_has_performance": true,
+      "backend_ms": 6332.0,
+      "optimizer_ms": 4058.43,
+      "frontend_read_ms": 33.48
+    },
+    {
+      "volume": 596,
+      "algorithm": "hybrid_pipeline",
+      "direct_status": "ok",
+      "direct_error": null,
+      "e2e_status": "completed",
+      "error_code": null,
+      "vehicles": 22,
+      "duties": 42,
+      "cost": 94704.61,
+      "missing_trips": 0,
+      "duplicated_trips": 0,
+      "hard_violations": 0,
+      "latest_has_error_code": null,
+      "latest_has_hard_constraint_report": true,
+      "latest_has_performance": true,
+      "backend_ms": 16717.34,
+      "optimizer_ms": 12253.72,
+      "frontend_read_ms": 58.1
+    },
+    {
+      "volume": 1000,
+      "algorithm": "hybrid_pipeline",
+      "direct_status": "ok",
+      "direct_error": null,
+      "e2e_status": "completed",
+      "error_code": null,
+      "vehicles": 50,
+      "duties": 75,
+      "cost": 178761.92,
+      "missing_trips": 0,
+      "duplicated_trips": 0,
+      "hard_violations": 0,
+      "latest_has_error_code": null,
+      "latest_has_hard_constraint_report": true,
+      "latest_has_performance": true,
+      "backend_ms": 35217.01,
+      "optimizer_ms": 34038.38,
+      "frontend_read_ms": 60.39
+    },
+    {
+      "volume": 2000,
+      "algorithm": "hybrid_pipeline",
+      "direct_status": "error",
+      "direct_error": "HardConstraintViolationError: Hard constraints violated: MANDATORY_GROUP_SPLIT [2002273, 2002274]; MANDATORY_GROUP_SPLIT [2002167, 2002168]; MANDATORY_GROUP_SPLIT [2002077, 2002078]; MANDATORY_GROUP_SPLIT [2002275, 2002276]; MANDATORY_GROUP_SPLIT [2002171, 2002172] (+17 adicionais)",
+      "e2e_status": "failed",
+      "error_code": "MANDATORY_GROUP_SPLIT",
+      "vehicles": 0,
+      "duties": 0,
+      "cost": 0.0,
+      "missing_trips": 2000,
+      "duplicated_trips": 0,
+      "hard_violations": 0,
+      "latest_has_error_code": null,
+      "latest_has_hard_constraint_report": true,
+      "latest_has_performance": true,
+      "backend_ms": 115676.68,
+      "optimizer_ms": null,
+      "frontend_read_ms": 30.38
+    }
+  ]
+}

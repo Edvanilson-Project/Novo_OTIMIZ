@@ -1,3 +1,4 @@
+import type React from "react";
 import {
   IconAperture,
   IconSettings,
@@ -9,22 +10,30 @@ import {
   IconHelp,
   IconMapPin,
   IconShieldCheck,
+  IconChartBar,
+  IconWand,
+  IconTruck,
+  IconCalendarTime,
+  IconReportAnalytics,
+  IconCalendarStats,
 } from "@tabler/icons-react";
 import { uniqueId } from "lodash";
 
 export interface MenuitemsType {
-  [x: string]: any;
+  [x: string]: unknown;
   id?: string;
   navlabel?: boolean;
   subheader?: string;
   title?: string;
-  icon?: any;
+  icon?: React.ElementType;
   href?: string;
   children?: MenuitemsType[];
   chip?: string;
   chipColor?: string;
   variant?: string;
   external?: boolean;
+  disabled?: boolean;
+  subtitle?: string;
   /** Roles mínimas para ver este item. Undefined = todos os usuários autenticados. */
   allowedRoles?: string[];
 }
@@ -42,7 +51,7 @@ const Menuitems: MenuitemsType[] = [
   },
   {
     id: uniqueId(),
-    title: "Ingestão de Dados",
+    title: "Importar Viagens (CSV)",
     icon: IconUpload,
     href: "/operations/data",
   },
@@ -60,9 +69,39 @@ const Menuitems: MenuitemsType[] = [
   },
   {
     id: uniqueId(),
-    title: "Gantt Planner",
-    icon: IconRoute,
+    title: "Planejador (Gantt)",
+    icon: IconCalendarTime,
     href: "/operations/planner",
+  },
+  {
+    id: uniqueId(),
+    title: "Escala Semanal",
+    icon: IconCalendarStats,
+    href: "/operations/rostering",
+  },
+  {
+    id: uniqueId(),
+    title: "Análises What-If",
+    icon: IconWand,
+    href: "/operations/advanced-optimization",
+  },
+  {
+    id: uniqueId(),
+    title: "Mapa Operacional",
+    icon: IconMapPin,
+    href: "/operations/map",
+  },
+  {
+    id: uniqueId(),
+    title: "Analytics & Relatórios",
+    icon: IconChartBar,
+    href: "/operations/reporting",
+  },
+  {
+    id: uniqueId(),
+    title: "Relatórios Customizados",
+    icon: IconReportAnalytics,
+    href: "/operations/reporting/custom",
   },
   {
     navlabel: true,
@@ -73,6 +112,12 @@ const Menuitems: MenuitemsType[] = [
     title: "Parâmetros CCT",
     icon: IconAdjustmentsHorizontal,
     href: "/settings/parameters",
+  },
+  {
+    id: uniqueId(),
+    title: "Frota & Manutenção",
+    icon: IconTruck,
+    href: "/settings/fleet",
   },
   {
     id: uniqueId(),

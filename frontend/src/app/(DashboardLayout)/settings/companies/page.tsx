@@ -62,7 +62,8 @@ export default function CompaniesPage() {
     setLoading(true);
     try {
       const data = await companiesApi.getAll();
-      setRows(Array.isArray(data) ? data : data.data ?? []);
+      const raw = Array.isArray(data) ? data : data.data ?? [];
+      setRows(raw.map((c: Company & { isActive?: boolean }) => ({ ...c, status: c.isActive ? 'active' : 'inactive' })));
     } catch {
       setRows([]);
     } finally {
@@ -82,11 +83,12 @@ export default function CompaniesPage() {
     }
     setSaving(true);
     try {
+      const payload = { ...form, isActive: form.status === 'active' };
       if (editing) {
-        await companiesApi.update(editing.id, form);
+        await companiesApi.update(editing.id, payload);
         setNotify({ msg: 'Empresa atualizada com sucesso!', sev: 'success' });
       } else {
-        await companiesApi.create(form);
+        await companiesApi.create(payload);
         setNotify({ msg: 'Empresa criada com sucesso!', sev: 'success' });
       }
       setOpen(false);

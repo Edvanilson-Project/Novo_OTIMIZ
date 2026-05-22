@@ -1,4 +1,5 @@
 """Conversores compartilhados entre rotas da API."""
+
 from __future__ import annotations
 
 from ..domain.models import Trip

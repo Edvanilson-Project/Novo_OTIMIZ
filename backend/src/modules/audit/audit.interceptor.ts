@@ -16,9 +16,15 @@ const METHOD_ACTION: Record<string, AuditAction> = {
   DELETE: AuditAction.DELETE,
 };
 
-function extractEntityFromPath(path: string): { entity: string; entityId?: string } {
+function extractEntityFromPath(path: string): {
+  entity: string;
+  entityId?: string;
+} {
   // e.g. /api/v1/operations/trips/42 → entity=trips, entityId=42
-  const segments = path.replace(/^\/api\/v\d+\//, '').split('/').filter(Boolean);
+  const segments = path
+    .replace(/^\/api\/v\d+\//, '')
+    .split('/')
+    .filter(Boolean);
   const entity = segments.slice(0, 2).join('/');
   const lastSegment = segments[segments.length - 1];
   const entityId = /^\d+$/.test(lastSegment) ? lastSegment : undefined;
@@ -36,12 +42,14 @@ export class AuditInterceptor implements NestInterceptor {
 
     if (!action) return next.handle();
 
-    const { entity, entityId } = extractEntityFromPath(req.path || req.url || '');
+    const { entity, entityId } = extractEntityFromPath(
+      req.path || req.url || '',
+    );
     const user = req.user;
 
     return next.handle().pipe(
       tap(() => {
-        this.auditService.log({
+        void this.auditService.log({
           userId: user?.id,
           companyId: user?.companyId,
           userEmail: user?.email,

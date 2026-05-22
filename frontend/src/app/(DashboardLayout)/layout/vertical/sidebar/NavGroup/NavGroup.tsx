@@ -15,7 +15,7 @@ interface ItemType {
 }
 
 const ListSubheaderStyle = styled(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   ({ $hideMenu, ...props }: any) => <ListSubheader disableSticky {...props} />,
 )(({ theme, $hideMenu }: { theme: Theme, $hideMenu: boolean }) => ({
   ...theme.typography.overline,

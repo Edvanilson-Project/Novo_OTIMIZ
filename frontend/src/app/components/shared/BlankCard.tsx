@@ -1,5 +1,6 @@
 "use client";
 import { Card } from "@mui/material";
+import type { SxProps, Theme } from "@mui/material/styles";
 
 import React, { useContext } from "react";
 import { useTheme } from "@mui/material/styles";
@@ -8,7 +9,7 @@ import { CustomizerContext } from "@/app/context/customizerContext";
 type Props = {
   className?: string;
   children: React.ReactNode;
-  sx?: any;
+  sx?: SxProps<Theme>;
 };
 
 const BlankCard = ({ children, className, sx }: Props) => {

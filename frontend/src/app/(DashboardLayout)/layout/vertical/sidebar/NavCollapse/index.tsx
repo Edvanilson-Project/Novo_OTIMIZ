@@ -16,6 +16,7 @@ import { styled, useTheme } from '@mui/material/styles';
 
 // custom imports
 import NavItem from "../NavItem";
+import type { MenuitemsType } from "../MenuItems";
 import { isNull } from "lodash";
 
 // plugins
@@ -57,6 +58,15 @@ const ListItemStyled = styled(ListItemButton, {
 }));
 
 // FC Component For Dropdown Menu
+interface NavCollapseProps {
+  menu: MenuitemsType;
+  level: number;
+  pathWithoutLastPart: string;
+  pathDirect: string;
+  hideMenu?: boolean;
+  onClick?: () => void;
+}
+
 export default function NavCollapse({
   menu,
   level,
@@ -64,7 +74,7 @@ export default function NavCollapse({
   pathDirect,
   hideMenu,
   onClick,
-}: any) {
+}: NavCollapseProps) {
   const lgDown = useMediaQuery((theme: Theme) => theme.breakpoints.down("lg"));
 
   const { isBorderRadius } = useContext(CustomizerContext);
@@ -90,7 +100,7 @@ export default function NavCollapse({
   // menu collapse for sub-levels
   React.useEffect(() => {
     setOpen(false);
-    menu?.children?.forEach((item: any) => {
+    menu?.children?.forEach((item: MenuitemsType) => {
       if (item?.href === pathname) {
         setOpen(true);
       }
@@ -98,7 +108,7 @@ export default function NavCollapse({
   }, [pathname, menu.children]);
 
   // If Menu has Children
-  const submenus = menu.children?.map((item: any) => {
+  const submenus = menu.children?.map((item: MenuitemsType) => {
     if (item.children) {
       return (
         <NavCollapse

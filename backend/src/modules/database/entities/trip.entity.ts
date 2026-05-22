@@ -50,4 +50,25 @@ export class Trip extends TenantBaseEntity {
 
   @Column({ type: 'float', nullable: true })
   destinationLongitude: number;
+
+  @Column({ type: 'integer', nullable: true })
+  reliefPointId: number | null;
+
+  @Column({ type: 'boolean', default: false })
+  isReliefPoint: boolean;
+
+  @Column({ type: 'integer', nullable: true })
+  midTripReliefPointId: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  midTripReliefOffsetMinutes: number | null;
+
+  @Column({ type: 'float', nullable: true })
+  midTripReliefDistanceRatio: number | null;
+
+  @Column({ type: 'float', nullable: true })
+  midTripReliefElevationRatio: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  depotId: number | null;
 }

@@ -4,7 +4,17 @@ import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { DataSource } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+
+async function makeXlsxBuffer(data: Record<string, unknown>[], sheetName: string): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheetName);
+  if (data.length > 0) {
+    ws.addRow(Object.keys(data[0]));
+    data.forEach(row => ws.addRow(Object.values(row) as unknown[]));
+  }
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
 import { Company } from './../src/modules/database/entities/company.entity';
 import { Trip } from './../src/modules/database/entities/trip.entity';
 import { User } from './../src/modules/database/entities/user.entity';
@@ -57,10 +67,7 @@ describe('Operations E2E (Módulo 4)', () => {
       { tripId: 101, lineId: 1, startTime: 480, endTime: 540, originId: 1, destinationId: 2 },
       { tripId: 102, lineId: 1, startTime: 550, endTime: 610, originId: 2, destinationId: 1 },
     ];
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Trips');
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await makeXlsxBuffer(data as Record<string, unknown>[], 'Trips');
 
     // 2. Upload via Supertest
     await request(app.getHttpServer())
@@ -79,10 +86,7 @@ describe('Operations E2E (Módulo 4)', () => {
 
   it('Deve rejeitar upload se campos obrigatórios estiverem ausentes', async () => {
     const data = [{ tripId: 201, startTime: 600 }]; // Falta endTime
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Incompleto');
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await makeXlsxBuffer(data as Record<string, unknown>[], 'Incompleto');
 
     const res = await request(app.getHttpServer())
       .post('/operations/upload')
@@ -92,5 +96,15 @@ describe('Operations E2E (Módulo 4)', () => {
       .expect(400);
 
     expect(res.body.message).toContain('endTime são obrigatórios');
+  });
+
+  it('Deve bloquear otimizacao quando companyId solicitado diverge do tenant autenticado', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/operations/optimize')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ algorithm: 'hybrid_pipeline', companyId: companyA.id + 999 })
+      .expect(400);
+
+    expect(res.body.message).toContain('CompanyId divergente do tenant autenticado');
   });
 });

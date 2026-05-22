@@ -98,7 +98,7 @@ export function DynamicRulesEditor({ initialRules = [], onSaved }: Props) {
     setRules((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateCondition = (index: number, field: string, value: any) => {
+  const updateCondition = (index: number, field: string, value: unknown) => {
     setRules((prev) => {
       const next = [...prev];
       next[index] = {
@@ -109,7 +109,7 @@ export function DynamicRulesEditor({ initialRules = [], onSaved }: Props) {
     });
   };
 
-  const updateAction = (index: number, field: string, value: any) => {
+  const updateAction = (index: number, field: string, value: unknown) => {
     setRules((prev) => {
       const next = [...prev];
       next[index] = {
@@ -129,8 +129,9 @@ export function DynamicRulesEditor({ initialRules = [], onSaved }: Props) {
       setSuccess(true);
       if (onSaved) onSaved(rules);
       setTimeout(() => setSuccess(false), 3000);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Erro ao salvar regras. Tente novamente.');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message ?? 'Erro ao salvar regras. Tente novamente.');
     } finally {
       setSaving(false);
     }

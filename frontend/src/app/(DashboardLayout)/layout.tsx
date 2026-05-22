@@ -43,8 +43,7 @@ export default function DashboardLayout({ children }: Props) {
 
     const checkAuth = () => {
       const user = getSessionUser();
-      const token = localStorage.getItem('otimiz_token');
-      if (!user || !token) {
+      if (!user) {
         if (isMounted) router.replace('/auth/login');
       } else {
         if (isMounted) setAuthorized(true);
