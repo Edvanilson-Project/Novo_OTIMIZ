@@ -143,6 +143,9 @@ export const usersApi = {
   create: (data: object) => apiClient.post('/users', data).then((r) => r.data),
   update: (id: ID, data: object) => apiClient.patch(`/users/${id}`, data).then((r) => r.data),
   delete: (id: ID) => apiClient.delete(`/users/${id}`).then((r) => r.data),
+  // LGPD / Privacy actions
+  exportMyData: () => apiClient.get('/users/me/data-export').then((r) => r.data),
+  anonymizeMyAccount: () => apiClient.delete('/users/me').then((r) => r.data),
 };
 
 // ─── Operations (Trips + Drivers + Optimization) ─────────────────────────────
