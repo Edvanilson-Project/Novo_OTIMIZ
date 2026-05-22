@@ -240,14 +240,94 @@ jobs:
       # ── Wait for all services ─────────────────────────────────────────────────
       - name: Wait for services
         run: |
-          echo "Waiting for backend..."
-          until curl -sf http://localhost:3001/api/v1/health > /dev/null 2>&1; do sleep 2; done
-          echo "Waiting for optimizer..."
-          until curl -sf http://localhost:8000/health > /dev/null 2>&1; do sleep 2; done
-          echo "Waiting for frontend..."
-          until curl -sf http://localhost:3000 > /dev/null 2>&1; do sleep 2; done
-          echo "All services ready"
-        timeout-minutes: 3
+          set -e
+
+          TIMEOUT_SECONDS=300
+          START_TIME=$(date +%s)
+
+          check_elapsed() {
+            local elapsed=$(($(date +%s) - START_TIME))
+            if [ $elapsed -gt $TIMEOUT_SECONDS ]; then
+              echo "❌ Timeout waiting for services after ${elapsed}s"
+              echo ""
+              echo "=== Service Status ==="
+              ps aux | grep -E 'npm|uvicorn|node' | grep -v grep || true
+              echo ""
+              echo "=== Network Connections ==="
+              netstat -tlnp 2>/dev/null | grep -E ':(3001|8000|3000|5432)' || true
+              exit 1
+            fi
+          }
+
+          # Wait for Postgres
+          echo "⏳ Waiting for Postgres..."
+          until psql -h localhost -U postgres -d postgres -c "SELECT 1" > /dev/null 2>&1; do
+            check_elapsed
+            echo "   ... retrying ($(( $(date +%s) - START_TIME ))s elapsed)"
+            sleep 2
+          done
+          echo "✓ Postgres ready"
+
+          # Wait for backend
+          echo "⏳ Waiting for backend (http://localhost:3001/api/v1/health)..."
+          until curl -sf http://localhost:3001/api/v1/health > /dev/null 2>&1; do
+            check_elapsed
+            echo "   ... retrying ($(( $(date +%s) - START_TIME ))s elapsed)"
+            sleep 2
+          done
+          echo "✓ Backend ready"
+
+          # Wait for optimizer
+          echo "⏳ Waiting for optimizer (http://localhost:8000/health)..."
+          until curl -sf http://localhost:8000/health > /dev/null 2>&1; do
+            check_elapsed
+            echo "   ... retrying ($(( $(date +%s) - START_TIME ))s elapsed)"
+            sleep 2
+          done
+          echo "✓ Optimizer ready"
+
+          # Wait for frontend
+          echo "⏳ Waiting for frontend (http://localhost:3000)..."
+          until curl -sf -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200"; do
+            check_elapsed
+            echo "   ... retrying ($(( $(date +%s) - START_TIME ))s elapsed)"
+            sleep 2
+          done
+          echo "✓ Frontend ready"
+
+          echo ""
+          echo "✅ All services ready in $(( $(date +%s) - START_TIME ))s"
+        timeout-minutes: 6
+
+      - name: Diagnose failed services
+        if: failure()
+        run: |
+          echo "=== Running Processes ==="
+          ps aux | grep -E 'npm|uvicorn|node|postgres' | grep -v grep || echo "No processes found"
+
+          echo ""
+          echo "=== Open Ports ==="
+          netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || echo "netstat/ss not available"
+
+          echo ""
+          echo "=== Backend Process Log ==="
+          ps aux | grep "npm run start" | grep -v grep || echo "Backend not running"
+
+          echo ""
+          echo "=== Optimizer Process Log ==="
+          ps aux | grep "uvicorn" | grep -v grep || echo "Optimizer not running"
+
+          echo ""
+          echo "=== Backend Connection Test ==="
+          curl -v http://localhost:3001/api/v1/health 2>&1 | head -20 || echo "Backend unreachable"
+
+          echo ""
+          echo "=== Optimizer Connection Test ==="
+          curl -v http://localhost:8000/health 2>&1 | head -20 || echo "Optimizer unreachable"
+
+          echo ""
+          echo "=== Postgres Connection Test ==="
+          psql -h localhost -U postgres -d postgres -c "SELECT version();" 2>&1 || echo "Postgres unreachable"
 
       # ── Seed admin + demo data ────────────────────────────────────────────────
       - name: Seed E2E data
