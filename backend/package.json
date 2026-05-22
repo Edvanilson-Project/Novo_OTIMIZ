@@ -33,6 +33,7 @@
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.1",
     "@nestjs/websockets": "^11.1.19",
+    "@sentry/node": "^7.114.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/ioredis": "^4.28.10",
     "@types/multer": "^2.1.0",
