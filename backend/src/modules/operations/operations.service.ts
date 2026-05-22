@@ -3,10 +3,13 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, MoreThanOrEqual } from 'typeorm';
 import ExcelJS from 'exceljs';
 import { TripRepository } from '../database/repositories/operations.repository';
 import { DriverRepository } from '../database/repositories/operations.repository';
 import { TenantContext } from '../../common/context/tenant-context';
+import { Schedule } from '../database/entities/schedule.entity';
 import type { Trip } from '../database/entities/trip.entity';
 import type { Driver } from '../database/entities/driver.entity';
 
@@ -144,6 +147,8 @@ export class OperationsService {
     private readonly tripRepository: TripRepository,
     private readonly driverRepository: DriverRepository,
     private readonly tenantContext: TenantContext,
+    @InjectRepository(Schedule)
+    private readonly scheduleRepository: Repository<Schedule>,
   ) {}
 
   private parseCsvBuffer(buffer: Buffer): RawRow[] {
@@ -637,5 +642,39 @@ export class OperationsService {
     const trips = await this.tripRepository.find({ where: { companyId } });
     await this.tripRepository.remove(trips);
     return { deleted: trips.length };
+  }
+
+  async getScheduleHistory(
+    companyId: number,
+    days = 30,
+    page = 1,
+    limit = 50,
+  ) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const [schedules, total] = await this.scheduleRepository.findAndCount({
+      where: { companyId, createdAt: MoreThanOrEqual(since) },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: (page - 1) * limit,
+    });
+
+    const items = schedules.map((s) => {
+      const meta = s.metadata as Record<string, unknown> | null;
+      return {
+        id: s.id,
+        status: s.status,
+        referenceDate: s.referenceDate,
+        createdAt: s.createdAt,
+        totalCost: s.totalCost,
+        cctViolations: s.cctViolations,
+        vehicles: meta?.num_vehicles ?? meta?.vehicles ?? null,
+        crew: meta?.num_crew ?? meta?.crew ?? null,
+        algorithm: meta?.algorithm ?? null,
+        elapsedMs: meta?.elapsed_ms ?? null,
+      };
+    });
+
+    return { items, total, page, limit, pages: Math.ceil(total / limit) };
   }
 }

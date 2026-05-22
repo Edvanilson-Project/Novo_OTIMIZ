@@ -164,6 +164,8 @@ export const operationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
   getLatestSchedule: () => apiClient.get('/operations/latest-schedule').then((r) => r.data),
+  getScheduleHistory: (params?: { days?: number; page?: number; limit?: number }) =>
+    apiClient.get('/operations/schedules', { params }).then((r) => r.data),
   getOptimalityCertificate: (scheduleId: ID) =>
     apiClient.get<{
       scheduleId: number;

@@ -162,6 +162,34 @@ export class OperationsController {
     return this.optimizationService.getLatestSchedule(companyId);
   }
 
+  @Get('schedules')
+  @ApiOperation({
+    summary: 'Listar histórico de escalas',
+    description: 'Paginado, últimos N dias, com data, status, algoritmo, custo, veículos e gap/certificado se disponível.',
+  })
+  @ApiQuery({ name: 'days', required: false, example: 30 })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiResponse({
+    status: 200,
+    description: 'Página de histórico de escalas com metadados.',
+  })
+  async getScheduleHistory(
+    @Query('days') days?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId)
+      throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.getScheduleHistory(
+      companyId,
+      days ? +days : 30,
+      page ? +page : 1,
+      limit ? +limit : 50,
+    );
+  }
+
   @Get('schedules/:id/optimality')
   @ApiOperation({
     summary: 'Certificado de otimalidade do schedule',
