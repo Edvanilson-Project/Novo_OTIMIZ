@@ -13,6 +13,7 @@ describe('RequestLoggingInterceptor', () => {
     path: '/test',
     ip: '127.0.0.1',
     user: undefined,
+    requestId: undefined as string | undefined,
     get: (name: string) => headers[name.toLowerCase()] || null,
   });
 
