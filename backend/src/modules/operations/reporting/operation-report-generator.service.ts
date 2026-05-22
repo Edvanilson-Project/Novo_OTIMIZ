@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, Repository, In } from 'typeorm';
 import PDFDocument from 'pdfkit';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../../database/entities/duty-assignment.entity';
+import { Trip } from '../../database/entities/trip.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
@@ -41,6 +42,16 @@ export interface DutyStatsReport {
   };
 }
 
+export interface UtilizationMetadata {
+  isAvailable: boolean;
+  isDerived?: boolean;
+  isEstimated?: boolean;
+  source?: string; // e.g., "persisted_trip_duration_data"
+  method?: string; // e.g., "scheduled_trip_minutes_over_vehicle_horizon"
+  description?: string;
+  unavailableReason?: string;
+}
+
 export interface ReportMetrics {
   totalTrips: number;
   assignedTrips: number;
@@ -48,7 +59,8 @@ export interface ReportMetrics {
   totalCost: number;
   costPerTrip: number;
   vehiclesUsed: number;
-  averageUtilization: number;
+  averageUtilization: number | null;
+  averageUtilizationMetadata: UtilizationMetadata;
   maintenanceIssues: number;
 }
 
@@ -88,7 +100,116 @@ export class OperationReportGeneratorService {
     private runRepo: Repository<OptimizationRun>,
     @InjectRepository(DutyAssignment)
     private dutyRepo: Repository<DutyAssignment>,
+    @InjectRepository(Trip)
+    private tripRepo: Repository<Trip>,
   ) {}
+
+  /**
+   * Compute active trip time and planning horizon from a set of trip IDs.
+   * Returns { totalMinutes, horizonMinutes } or null if no trips found.
+   *
+   * totalMinutes = sum of all trip durations (or endTime - startTime)
+   * horizonMinutes = max(endTime) - min(startTime) across all trips
+   */
+  private async computeTripActiveTime(
+    tripIds: number[],
+    companyId: number,
+  ): Promise<{ totalMinutes: number; horizonMinutes: number } | null> {
+    if (!tripIds.length) return null;
+
+    const trips = await this.tripRepo.find({
+      where: { id: In(tripIds), companyId },
+      select: ['startTime', 'endTime', 'duration'],
+    });
+
+    if (!trips.length) return null;
+
+    // Sum all trip durations (or compute as endTime - startTime if duration is 0)
+    const totalMinutes = trips.reduce((sum, t) => {
+      const duration = t.duration || (t.endTime - t.startTime);
+      return sum + duration;
+    }, 0);
+
+    // Compute planning horizon: max end - min start
+    const minStart = Math.min(...trips.map(t => t.startTime));
+    const maxEnd = Math.max(...trips.map(t => t.endTime));
+    const horizonMinutes = maxEnd - minStart;
+
+    return { totalMinutes, horizonMinutes };
+  }
+
+  /**
+   * Compute scheduled fleet utilization from trip data.
+   * Formula: total_active_minutes / (vehicle_count * planning_horizon_minutes) * 100
+   *
+   * Returns { value: percentage | null, metadata: UtilizationMetadata }
+   */
+  private async computeScheduledUtilization(
+    blocks: BlockAssignment[],
+    numVehicles: number,
+    companyId: number,
+  ): Promise<{ value: number | null; metadata: UtilizationMetadata }> {
+    // Collect all unique trip IDs from blocks
+    const allTripIds = Array.from(
+      new Set(
+        blocks
+          .filter(b => b.tripIds?.length)
+          .flatMap(b => b.tripIds),
+      ),
+    );
+
+    // No trips or no vehicles
+    if (!allTripIds.length || numVehicles === 0) {
+      return {
+        value: null,
+        metadata: {
+          isAvailable: false,
+          unavailableReason: 'No trips or vehicles in schedule',
+        },
+      };
+    }
+
+    // Compute trip active time and horizon
+    const tripData = await this.computeTripActiveTime(allTripIds, companyId);
+
+    if (!tripData) {
+      return {
+        value: null,
+        metadata: {
+          isAvailable: false,
+          unavailableReason: 'Could not load trip duration data',
+        },
+      };
+    }
+
+    const { totalMinutes, horizonMinutes } = tripData;
+
+    // Validate planning horizon
+    if (horizonMinutes <= 0) {
+      return {
+        value: null,
+        metadata: {
+          isAvailable: false,
+          unavailableReason: 'Planning horizon is invalid (start >= end)',
+        },
+      };
+    }
+
+    // Formula: active_minutes / (vehicles * horizon_minutes) * 100
+    const utilization = (totalMinutes / (numVehicles * horizonMinutes)) * 100;
+
+    return {
+      value: Math.round(utilization * 10) / 10, // 1 decimal place
+      metadata: {
+        isAvailable: true,
+        isDerived: true,
+        source: 'persisted_trip_duration_data',
+        method: 'scheduled_trip_minutes_over_vehicle_horizon',
+        description:
+          'Scheduled fleet utilization = total active trip minutes / (vehicle count × planning horizon). Does not include deadhead or idle time.',
+      },
+    };
+  }
 
   /**
    * Gera relatório para o schedule baseline + melhor run completed para esse baseline
@@ -106,7 +227,11 @@ export class OperationReportGeneratorService {
       throw new NotFoundException(`Schedule ${scheduleId} not found`);
 
     const blocks = schedule.blocks || [];
-    const currentMetrics = this.metricsFromSchedule(schedule, blocks);
+    const currentMetrics = await this.metricsFromSchedule(
+      schedule,
+      blocks,
+      companyId,
+    );
 
     // Melhor run COMPLETED para esse baseline (qualquer cenário), critério: menor totalCost factível.
     const bestRun = await this.runRepo
@@ -123,7 +248,7 @@ export class OperationReportGeneratorService {
     let optimizedRunId: number | null = null;
     let algorithm: string | null = null;
     if (bestRun) {
-      optimizedMetrics = this.metricsFromRun(bestRun);
+      optimizedMetrics = await this.metricsFromRun(bestRun, companyId);
       optimizedRunId = bestRun.id;
       algorithm = bestRun.algorithm;
     }
@@ -196,9 +321,10 @@ export class OperationReportGeneratorService {
 
     if (runs.length === 0) return [];
 
-    const currentMetrics = this.metricsFromSchedule(
+    const currentMetrics = await this.metricsFromSchedule(
       schedule,
       schedule.blocks || [],
+      companyId,
     );
 
     // Agrupa por dia, melhor run/dia (menor totalCost)
@@ -214,35 +340,39 @@ export class OperationReportGeneratorService {
       if (!existing || cost < existingCost) byDay.set(dayKey, run);
     }
 
-    return Array.from(byDay.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([dayKey, run]) => {
-        const m = this.metricsFromRun(run);
-        const savings = currentMetrics.totalCost - m.totalCost;
-        const savingsPercent =
-          currentMetrics.totalCost > 0
-            ? (savings / currentMetrics.totalCost) * 100
-            : 0;
-        const startDay = new Date(`${dayKey}T00:00:00Z`);
-        const endDay = new Date(`${dayKey}T23:59:59Z`);
-        return {
-          id: `report_${scheduleId}_${run.id}`,
-          scheduleId,
-          generatedAt: run.completedAt!,
-          period: { startDate: startDay, endDate: endDay },
-          metrics: m,
-          scenarioComparison: {
-            current: currentMetrics,
-            optimized: m,
-            savings,
-            savingsPercent,
-          },
-          recommendations: [],
-          issues: this.generateIssues(m),
-          sourceOptimizationRunId: run.id,
-          algorithm: run.algorithm,
-        } as OperationReport;
-      });
+    const historicalReports = await Promise.all(
+      Array.from(byDay.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(async ([dayKey, run]) => {
+          const m = await this.metricsFromRun(run, companyId);
+          const savings = currentMetrics.totalCost - m.totalCost;
+          const savingsPercent =
+            currentMetrics.totalCost > 0
+              ? (savings / currentMetrics.totalCost) * 100
+              : 0;
+          const startDay = new Date(`${dayKey}T00:00:00Z`);
+          const endDay = new Date(`${dayKey}T23:59:59Z`);
+          return {
+            id: `report_${scheduleId}_${run.id}`,
+            scheduleId,
+            generatedAt: run.completedAt!,
+            period: { startDate: startDay, endDate: endDay },
+            metrics: m,
+            scenarioComparison: {
+              current: currentMetrics,
+              optimized: m,
+              savings,
+              savingsPercent,
+            },
+            recommendations: [],
+            issues: this.generateIssues(m),
+            sourceOptimizationRunId: run.id,
+            algorithm: run.algorithm,
+          } as OperationReport;
+        }),
+    );
+
+    return historicalReports;
   }
 
   /**
@@ -268,13 +398,14 @@ export class OperationReportGeneratorService {
     const costs = runs.map((r) => Number(r.metrics?.totalCost ?? 0));
     const vehicles = runs.map((r) => Number(r.metrics?.numVehicles ?? 0));
     const violations = runs.map((r) => Number(r.metrics?.cctViolations ?? 0));
-    const utilizations = runs.map((r) => {
-      const total = Number(r.metrics?.totalTrips ?? 0);
-      const unassigned = Number(r.metrics?.unassignedTrips ?? 0);
-      const assigned = total - unassigned;
-      const v = Number(r.metrics?.numVehicles ?? 0);
-      return v > 0 ? Math.min(100, (assigned / v) * 20) : 0;
-    });
+
+    // Compute utilizations from real metrics instead of heuristic formula
+    const utilizations = await Promise.all(
+      runs.map(async (r) => {
+        const m = await this.metricsFromRun(r, companyId);
+        return m.averageUtilization ?? 0;
+      }),
+    );
 
     const avgCost = costs.reduce((a, b) => a + b, 0) / costs.length;
     const avgVehicles = vehicles.reduce((a, b) => a + b, 0) / vehicles.length;
@@ -290,6 +421,9 @@ export class OperationReportGeneratorService {
     const bestRun = runs[bestRunIdx];
     const worstRun = runs[worstRunIdx];
 
+    const bestMetrics = await this.metricsFromRun(bestRun, companyId);
+    const worstMetrics = await this.metricsFromRun(worstRun, companyId);
+
     return {
       period: { startDate, endDate },
       reportCount: runs.length,
@@ -302,13 +436,13 @@ export class OperationReportGeneratorService {
         runId: bestRun.id,
         algorithm: bestRun.algorithm,
         completedAt: bestRun.completedAt,
-        metrics: this.metricsFromRun(bestRun),
+        metrics: bestMetrics,
       },
       worstDay: {
         runId: worstRun.id,
         algorithm: worstRun.algorithm,
         completedAt: worstRun.completedAt,
-        metrics: this.metricsFromRun(worstRun),
+        metrics: worstMetrics,
       },
     };
   }
@@ -418,7 +552,12 @@ export class OperationReportGeneratorService {
         ['Custo Total', `R$ ${m.totalCost.toFixed(2)}`],
         ['Custo por Viagem', `R$ ${m.costPerTrip.toFixed(2)}`],
         ['Veículos Utilizados', m.vehiclesUsed],
-        ['Utilização Média', `${m.averageUtilization.toFixed(1)}%`],
+        [
+          'Utilização Média',
+          m.averageUtilization !== null
+            ? `${m.averageUtilization.toFixed(1)}%`
+            : 'Indisponível',
+        ],
       ];
       for (const [label, value] of rows) {
         doc.text(`${label}: ${value}`);
@@ -483,7 +622,12 @@ export class OperationReportGeneratorService {
       ['Custo Total (R$)', m.totalCost],
       ['Custo por Viagem (R$)', m.costPerTrip],
       ['Veículos Utilizados', m.vehiclesUsed],
-      ['Utilização Média (%)', m.averageUtilization],
+      [
+        'Utilização Média (%)',
+        m.averageUtilization !== null
+          ? m.averageUtilization
+          : 'Indisponível',
+      ],
     ]);
 
     // Sheet 2 — Alertas
@@ -503,10 +647,11 @@ export class OperationReportGeneratorService {
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  private metricsFromSchedule(
+  private async metricsFromSchedule(
     schedule: Schedule,
     blocks: BlockAssignment[],
-  ): ReportMetrics {
+    companyId: number,
+  ): Promise<ReportMetrics> {
     // Compat: tripIds[] (schema real) ou fallback 1/block (mocks legados)
     const tripsFor = (b: BlockAssignment) => b.tripIds?.length ?? 1;
     const totalTrips = blocks.reduce((sum, b) => sum + tripsFor(b), 0);
@@ -524,10 +669,11 @@ export class OperationReportGeneratorService {
         .size || assignedBlocks.length;
     const costPerTrip =
       assignedTrips > 0 && totalCost > 0 ? totalCost / assignedTrips : 0;
-    const averageUtilization =
-      actualVehicles > 0
-        ? Math.min(100, (assignedTrips / actualVehicles) * 20)
-        : 0;
+
+    // NEW: Compute real utilization from persisted trip data
+    const { value: utilization, metadata: utilizationMetadata } =
+      await this.computeScheduledUtilization(blocks, actualVehicles, companyId);
+
     return {
       totalTrips,
       assignedTrips,
@@ -535,12 +681,16 @@ export class OperationReportGeneratorService {
       totalCost,
       costPerTrip,
       vehiclesUsed: actualVehicles,
-      averageUtilization,
+      averageUtilization: utilization,
+      averageUtilizationMetadata: utilizationMetadata,
       maintenanceIssues: 0,
     };
   }
 
-  private metricsFromRun(run: OptimizationRun): ReportMetrics {
+  private async metricsFromRun(
+    run: OptimizationRun,
+    companyId: number,
+  ): Promise<ReportMetrics> {
     const m = run.metrics ?? {};
     const totalTrips = Number(m.totalTrips ?? 0);
     const unassignedTrips = Number(m.unassignedTrips ?? 0);
@@ -548,8 +698,30 @@ export class OperationReportGeneratorService {
     const totalCost = Number(m.totalCost ?? 0);
     const vehiclesUsed = Number(m.numVehicles ?? 0);
     const costPerTrip = assignedTrips > 0 ? totalCost / assignedTrips : 0;
-    const averageUtilization =
-      vehiclesUsed > 0 ? Math.min(100, (assignedTrips / vehiclesUsed) * 20) : 0;
+
+    // NEW: Compute real utilization if result schedule is available
+    let utilizationValue: number | null = null;
+    let utilizationMetadata: UtilizationMetadata = {
+      isAvailable: false,
+      unavailableReason: 'Result schedule not loaded',
+    };
+
+    if (run.resultScheduleId) {
+      const resultSchedule = await this.scheduleRepo.findOne({
+        where: { id: run.resultScheduleId, companyId },
+        relations: ['blocks'],
+      });
+      if (resultSchedule?.blocks) {
+        const result = await this.computeScheduledUtilization(
+          resultSchedule.blocks,
+          vehiclesUsed,
+          companyId,
+        );
+        utilizationValue = result.value;
+        utilizationMetadata = result.metadata;
+      }
+    }
+
     return {
       totalTrips,
       assignedTrips,
@@ -557,7 +729,8 @@ export class OperationReportGeneratorService {
       totalCost,
       costPerTrip,
       vehiclesUsed,
-      averageUtilization,
+      averageUtilization: utilizationValue,
+      averageUtilizationMetadata: utilizationMetadata,
       maintenanceIssues: 0,
     };
   }
@@ -575,7 +748,10 @@ export class OperationReportGeneratorService {
         message: `${metrics.unassignedTrips} viagens não foram atribuídas. Replanejamento necessário.`,
       });
     }
-    if (metrics.averageUtilization < 50) {
+    if (
+      metrics.averageUtilization !== null &&
+      metrics.averageUtilization < 50
+    ) {
       issues.push({
         severity: 'warning',
         message: `Utilização baixa (${metrics.averageUtilization.toFixed(1)}%). Considere consolidar viagens.`,
@@ -607,7 +783,10 @@ export class OperationReportGeneratorService {
         'Executar otimização imediatamente para reduzir viagens não atribuídas.',
       );
     }
-    if (metrics.averageUtilization < 50) {
+    if (
+      metrics.averageUtilization !== null &&
+      metrics.averageUtilization < 50
+    ) {
       recommendations.push(
         'Consolidar viagens em menos veículos para melhorar utilização.',
       );
