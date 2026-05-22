@@ -227,6 +227,7 @@ jobs:
         run: uvicorn main:app --host 0.0.0.0 --port 8000 > optimizer.log 2>&1 &
         env:
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
+          BACKEND_SECRET: ci-e2e-backend-secret-strong-value-min32
           DB_HOST: localhost
           DB_PORT: 5432
           DB_USER: postgres
