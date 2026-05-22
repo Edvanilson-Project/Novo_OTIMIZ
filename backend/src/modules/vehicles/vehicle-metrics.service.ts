@@ -11,7 +11,6 @@ export interface VehicleMetrics {
   healthScore: number;
   lastMaintenanceDate?: Date;
   odometer: number;
-  utilizationRate: number;
   maintenanceStatus: 'good' | 'warning' | 'critical';
   estimatedCostPerDay: number;
   issues: string[];
@@ -60,7 +59,6 @@ export class VehicleMetricsService {
       healthScore,
       lastMaintenanceDate: lastMaintenance?.maintenanceDate,
       odometer: vehicle.odometer || 0,
-      utilizationRate: this.estimateUtilizationRate(vehicle),
       maintenanceStatus,
       estimatedCostPerDay: vehicle.type?.costPerDay || 800,
       issues,
@@ -188,16 +186,4 @@ export class VehicleMetricsService {
     return { issues, recommendations };
   }
 
-  private estimateUtilizationRate(vehicle: Vehicle): number {
-    // Placeholder: would integrate with actual operation data
-    // For now, estimate based on odometer and assumed daily km
-    if (!vehicle.odometer || vehicle.odometer === 0) return 0;
-
-    // Assume average 300 km/day
-    const estimatedDays = vehicle.odometer / 300;
-    const maxDays = 365 * 10; // 10 years typical vehicle life
-    const utilizationRate = (estimatedDays / maxDays) * 100;
-
-    return Math.min(100, Math.round(utilizationRate));
-  }
 }
