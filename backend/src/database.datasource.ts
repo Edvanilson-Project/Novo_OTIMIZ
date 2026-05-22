@@ -20,7 +20,7 @@ export default new DataSource({
   username: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_NAME || 'otimiz',
-  entities: [__dirname + '/modules/database/entities/*.entity{.ts,.js}'],
+  entities: [__dirname + '/modules/database/entities/*.entity.ts', '!' + __dirname + '/modules/database/entities/*.spec.ts'],
   migrations: [__dirname + '/modules/database/migrations/*{.ts,.js}'],
   synchronize: false,
 });
