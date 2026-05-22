@@ -4,6 +4,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -2015,6 +2016,36 @@ export class OptimizationService implements OnModuleInit {
       startedAt: schedule.createdAt,
       totalCost: schedule.totalCost ?? null,
       cctViolations: schedule.cctViolations ?? 0,
+    };
+  }
+
+  /**
+   * Certificado de otimalidade — lê o resultado persistido em
+   * schedule.metadata.cost_breakdown.optimality. Retorna 404 se não houver
+   * (otimização antiga, anterior ao certifier). Multi-tenant via companyId.
+   */
+  async getOptimalityCertificate(companyId: number, scheduleId: number) {
+    const schedule = await this.scheduleRepo.findOne({
+      where: { id: scheduleId, companyId },
+    });
+    if (!schedule) {
+      throw new NotFoundException(`Schedule ${scheduleId} não encontrado.`);
+    }
+    const meta: Record<string, unknown> =
+      (schedule.metadata as Record<string, unknown>) ?? {};
+    const costBreakdown = (meta.cost_breakdown ?? {}) as Record<string, unknown>;
+    const optimality = costBreakdown.optimality as
+      | Record<string, unknown>
+      | undefined;
+    if (!optimality) {
+      throw new NotFoundException(
+        `Certificado de otimalidade indisponível para schedule ${scheduleId}.`,
+      );
+    }
+    return {
+      scheduleId,
+      totalCost: schedule.totalCost ?? null,
+      ...optimality,
     };
   }
 

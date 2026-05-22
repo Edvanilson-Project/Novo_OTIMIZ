@@ -77,9 +77,9 @@ export class ReportsService {
       sumCost = 0,
       countWithData = 0;
     for (const r of recentRuns) {
-      const meta = r.metadata as Record<string, any> | null;
-      const v = meta?.num_vehicles ?? meta?.vehicles;
-      const c = meta?.num_crew ?? meta?.crew;
+      const meta = r.metadata as Record<string, unknown> | null;
+      const v = (meta?.num_vehicles ?? meta?.vehicles) as number | undefined;
+      const c = (meta?.num_crew ?? meta?.crew) as number | undefined;
       if (v != null || c != null) {
         sumVehicles += v ?? 0;
         sumCrew += c ?? 0;
@@ -88,7 +88,7 @@ export class ReportsService {
       }
     }
 
-    const meta = lastCompleted?.metadata as Record<string, any> | null;
+    const meta = lastCompleted?.metadata as Record<string, unknown> | null;
 
     return {
       totalRuns,
@@ -137,7 +137,7 @@ export class ReportsService {
     });
 
     const items = runs.map((r) => {
-      const meta = r.metadata as Record<string, any> | null;
+      const meta = r.metadata as Record<string, unknown> | null;
       return {
         id: r.id,
         status: r.status,
@@ -170,13 +170,13 @@ export class ReportsService {
     if (!run2)
       throw new NotFoundException(`Schedule #${runId2} não encontrado`);
 
-    const meta1 = run1.metadata as Record<string, any> | null;
-    const meta2 = run2.metadata as Record<string, any> | null;
+    const meta1 = run1.metadata as Record<string, unknown> | null;
+    const meta2 = run2.metadata as Record<string, unknown> | null;
 
-    const v1 = meta1?.num_vehicles ?? meta1?.vehicles ?? 0;
-    const v2 = meta2?.num_vehicles ?? meta2?.vehicles ?? 0;
-    const c1 = meta1?.num_crew ?? meta1?.crew ?? 0;
-    const c2 = meta2?.num_crew ?? meta2?.crew ?? 0;
+    const v1 = Number(meta1?.num_vehicles ?? meta1?.vehicles ?? 0);
+    const v2 = Number(meta2?.num_vehicles ?? meta2?.vehicles ?? 0);
+    const c1 = Number(meta1?.num_crew ?? meta1?.crew ?? 0);
+    const c2 = Number(meta2?.num_crew ?? meta2?.crew ?? 0);
 
     return {
       run1: {

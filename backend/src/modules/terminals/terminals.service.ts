@@ -32,13 +32,13 @@ export class TerminalsService {
     return terminal;
   }
 
-  async create(dto: Record<string, any>): Promise<Terminal> {
+  async create(dto: Record<string, unknown>): Promise<Terminal> {
     const companyId = this.tenantContext.getCompanyId();
     const entity = this.repo.create({ ...dto, companyId });
     return this.repo.save(entity);
   }
 
-  async update(id: number, dto: Record<string, any>): Promise<Terminal> {
+  async update(id: number, dto: Record<string, unknown>): Promise<Terminal> {
     const terminal = await this.findOne(id);
     Object.assign(terminal, dto);
     return this.repo.save(terminal);

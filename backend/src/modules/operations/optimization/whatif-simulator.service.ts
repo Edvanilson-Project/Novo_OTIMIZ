@@ -193,15 +193,17 @@ export class WhatIfSimulatorService {
   simulateParameterChange(
     originalCost: number,
     parameter: string,
-    oldValue: any,
-    newValue: any,
+    oldValue: unknown,
+    newValue: unknown,
   ): WhatIfResult {
     // Generic parameter change impact estimation
     let costMultiplier = 1.0;
 
     if (parameter === 'min_break_minutes') {
       // Longer breaks reduce efficiency
-      costMultiplier = newValue > oldValue ? 1.02 : 0.98;
+      const oldNum = Number(oldValue);
+      const newNum = Number(newValue);
+      costMultiplier = newNum > oldNum ? 1.02 : 0.98;
     } else if (parameter === 'vehicle_preference') {
       // Preference changes can shift costs
       costMultiplier = 1.01;
@@ -247,7 +249,7 @@ export class WhatIfSimulatorService {
    */
   async runParameterChangeReal(
     baselineScheduleId: number,
-    paramsOverride: Record<string, any>,
+    paramsOverride: Record<string, unknown>,
     label?: string,
     algorithm?: string,
   ): Promise<WhatIfRunResult> {
@@ -262,7 +264,7 @@ export class WhatIfSimulatorService {
       );
 
     const scenarioId = `whatif-${label || 'param-change'}-${Date.now()}`;
-    const submission: any = await this.optimizationService.runOptimization(
+    const submission = (await this.optimizationService.runOptimization(
       companyId,
       algorithm,
       undefined,
@@ -272,7 +274,12 @@ export class WhatIfSimulatorService {
         optimizationParamsOverride: paramsOverride,
         skipTenantLock: true,
       },
-    );
+    )) as {
+      optimizationRunId: number;
+      scheduleId: number;
+      scenarioId?: string;
+      inputFingerprint: string;
+    };
 
     return {
       optimizationRunId: submission.optimizationRunId,

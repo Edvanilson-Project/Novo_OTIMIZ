@@ -35,8 +35,17 @@ const pulseError = keyframes`
   100% { box-shadow: 0 0 0 0 rgba(211, 47, 47, 0); }
 `;
 
+/**
+ * Schedule é polimórfico por design — vem de múltiplas fontes (latest-schedule,
+ * resultSummary, metadata) com aliases camelCase e snake_case e estrutura
+ * aninhada que muda entre versões do solver. Tipá-lo exaustivamente quebra
+ * mais do que protege. Os tipos concretos vivem nos loops internos abaixo.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ScheduleLike = any;
+
 interface KPIProps {
-  schedule: any;
+  schedule: ScheduleLike;
 }
 
 /**
@@ -124,6 +133,19 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
   const fairnessGini = fairness?.work_time?.gini ?? null;
   const dutiesBelow50 = fairness?.imbalance?.duties_below_50pct_avg ?? 0;
 
+  // Gap de otimalidade: melhor lower bound disponível (Bodin & Golden, Lagrangian ou Bundle).
+  // Mesmos caminhos do fairness — depende de onde o schedule foi hidratado.
+  const optimality =
+    schedule?.resultSummary?.costBreakdown?.optimality ??
+    schedule?.metadata?.cost_breakdown?.optimality ??
+    schedule?.cost_breakdown?.optimality ??
+    null;
+  const optimalityGapPct = optimality?.vsp_gap_pct ?? null;
+  const optimalityLbMethod = optimality?.lb_method ?? null;
+  const optimalityLb = optimality?.vsp_lower_bound ?? null;
+  const optimalityUb = optimality?.vsp_actual ?? null;
+  const optimalityCertified = optimality?.is_optimal_certified ?? false;
+
   // Rendições de motoristas (ReliefVehicleEstimator)
   const reliefEst =
     schedule?.metadata?.relief_vehicle_estimate ??
@@ -141,17 +163,21 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
   const evEnergyKwh = evSoc?.total_energy_kwh ?? null;
   const evBlocksMidCharge = evSoc?.blocks_needing_mid_charge ?? null;
 
+  type BlockLike = {
+    trips?: Array<Record<string, unknown>>;
+    metadata?: { trips?: Array<Record<string, unknown>> };
+  };
   let totalMinutes = 0;
-  let totalTrips = schedule?.totalTrips ?? schedule?.resultSummary?.total_trips ?? 0;
-  schedule?.blocks?.forEach((b: any) => {
+  let totalTrips = Number(schedule?.totalTrips ?? schedule?.resultSummary?.total_trips ?? 0);
+  schedule?.blocks?.forEach((b: BlockLike) => {
     // Suporta tanto b.trips (hidratado) quanto b.metadata?.trips (legado)
-    const trips = b.trips || b.metadata?.trips || [];
+    const trips = (b.trips || b.metadata?.trips || []) as Array<Record<string, unknown>>;
     if (!schedule?.totalTrips && !schedule?.resultSummary?.total_trips) {
       totalTrips += trips.length;
     }
-    trips.forEach((t: any) => {
-      const start = t.start_time ?? t.startTime ?? 0;
-      const end = t.end_time ?? t.endTime ?? 0;
+    trips.forEach((t) => {
+      const start = Number(t.start_time ?? t.startTime ?? 0);
+      const end = Number(t.end_time ?? t.endTime ?? 0);
       totalMinutes += end - start;
     });
   });
@@ -265,6 +291,53 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                     : theme.palette.success.main
                 }
                 isError={Number(fairnessGini) > 0.3}
+              />
+            </Box>
+          </Tooltip>
+        </Grid>
+      )}
+      {optimalityGapPct !== null && (
+        <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+          <Tooltip
+            arrow
+            title={
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  <strong>Gap de Otimalidade</strong> = (UB − LB) / LB × 100.
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  LB = {optimalityLb} (método: {optimalityLbMethod}) · UB = {optimalityUb} veículos.
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                  Calculado usando o melhor lower bound disponível entre Bodin &amp; Golden,
+                  Lagrangian e Bundle — quanto menor, mais próximo do ótimo provado.
+                </Typography>
+                {optimalityCertified && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 'bold' }}>
+                    ✓ Ótimo certificado (gap = 0).
+                  </Typography>
+                )}
+              </Box>
+            }
+          >
+            <Box>
+              <KPICard
+                title="Gap de Otimalidade"
+                value={
+                  optimalityCertified
+                    ? '0% (Ótimo)'
+                    : `${Number(optimalityGapPct).toFixed(1)}%`
+                }
+                changeKey={`opt-gap-${optimalityGapPct}-${scheduleVersion}`}
+                icon={<IconScale size="24" />}
+                color={
+                  optimalityCertified || Number(optimalityGapPct) < 5
+                    ? theme.palette.success.main
+                    : Number(optimalityGapPct) < 15
+                      ? theme.palette.warning.main
+                      : theme.palette.error.main
+                }
+                isError={Number(optimalityGapPct) >= 15}
               />
             </Box>
           </Tooltip>

@@ -18,6 +18,11 @@ import {
   CustomReportsService,
   SUPPORTED_METRICS,
 } from './custom-reports.service';
+import {
+  CreateCustomReportDto,
+  PreviewCustomReportDto,
+  UpdateCustomReportDto,
+} from './custom-reports.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('custom-reports')
@@ -41,14 +46,14 @@ export class CustomReportsController {
   }
 
   @Post()
-  create(@Body() body: Record<string, any>) {
+  create(@Body() body: CreateCustomReportDto) {
     return this.service.create(body);
   }
 
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+    @Body() body: UpdateCustomReportDto,
   ) {
     return this.service.update(id, body);
   }
@@ -60,7 +65,7 @@ export class CustomReportsController {
   }
 
   @Post('preview')
-  preview(@Body() body: Record<string, any>) {
+  preview(@Body() body: PreviewCustomReportDto) {
     return this.service.preview(body.metrics, body.filters ?? {});
   }
 

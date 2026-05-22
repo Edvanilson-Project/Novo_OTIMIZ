@@ -25,10 +25,22 @@ import {
   ApiQuery,
   ApiConsumes,
 } from '@nestjs/swagger';
-import { OperationsService } from './operations.service';
+import { OperationsService, type RawRow } from './operations.service';
 import { OptimizationService } from './optimization.service';
 import { TenantContext } from '../../common/context/tenant-context';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import {
+  RunOptimizationDto,
+  ReassignTripDto,
+  AiChatDto,
+  CreateTripDto,
+  UpdateTripDto,
+  CreateDriverDto,
+  UpdateDriverDto,
+  RosteringWeeklyDto,
+  EvaluateBaselineDto,
+  EvaluateDeltaPayloadDto,
+} from './dto/operations.dto';
 
 @ApiTags('operations')
 @ApiBearerAuth('JWT')
@@ -47,80 +59,44 @@ export class OperationsController {
   @Throttle({ medium: { ttl: 300_000, limit: 5 } })
   @ApiOperation({
     summary: 'Iniciar otimização de escala',
-    description:
-      'Envia job assíncrono ao optimizer. Retorna taskId para polling de status.',
+    description: 'Envia job assíncrono ao optimizer. Retorna taskId para polling de status.',
   })
-  @ApiBody({
-    schema: {
-      example: {
-        algorithm: 'hybrid_pipeline',
-        operational_quality_mode: 'balanced',
-        depot_ids: [1, 2],
-      },
-    },
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Otimização iniciada — retorna { taskId }.',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'CompanyId divergente ou payload inválido.',
-  })
-  @ApiResponse({
-    status: 429,
-    description: 'Rate limit: máximo 5 otimizações por 5 minutos.',
-  })
-  async runOptimization(
-    @Body() body: Record<string, any>,
-    @Body('algorithm') algorithm?: string,
-    @Body('companyId') requestedCompanyId?: number,
-    @Body('operational_quality_mode') operationalQualityMode?: string,
-    @Body('depot_ids') depotIds?: number[],
-  ) {
+  @ApiResponse({ status: 201, description: 'Otimização iniciada — retorna { taskId }.' })
+  @ApiResponse({ status: 400, description: 'CompanyId divergente ou payload inválido.' })
+  @ApiResponse({ status: 429, description: 'Rate limit: máximo 5 otimizações por 5 minutos.' })
+  async runOptimization(@Body() body: RunOptimizationDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
 
     if (
-      requestedCompanyId !== undefined &&
-      requestedCompanyId !== null &&
-      Number(requestedCompanyId) !== Number(companyId)
+      body.companyId !== undefined &&
+      body.companyId !== null &&
+      Number(body.companyId) !== Number(companyId)
     ) {
       this.logger.warn(
-        `optimization_tenant_mismatch_blocked requested=${requestedCompanyId} tenant=${companyId}`,
+        `optimization_tenant_mismatch_blocked requested=${body.companyId} tenant=${companyId}`,
       );
       throw new BadRequestException(
-        `CompanyId divergente do tenant autenticado. requested=${requestedCompanyId} tenant=${companyId}`,
+        `CompanyId divergente do tenant autenticado. requested=${body.companyId} tenant=${companyId}`,
       );
     }
 
-    const requestedOperationalQualityMode =
-      body?.operational_quality_mode ??
-      body?.operationalQualityMode ??
-      operationalQualityMode;
-
-    this.logger.log(
-      `optimization_request_received company_id=${companyId} algorithm=${algorithm ?? 'default'} requested_operational_quality_mode=${requestedOperationalQualityMode ?? 'null'}`,
-    );
-
-    const rawDepotIds = depotIds ?? body?.depot_ids;
-    const resolvedDepotIds = Array.isArray(rawDepotIds)
-      ? rawDepotIds.map(Number).filter(Boolean)
+    const resolvedDepotIds = Array.isArray(body.depot_ids)
+      ? body.depot_ids.map(Number).filter(Boolean)
       : undefined;
 
     return this.optimizationService.runOptimization(
       companyId,
-      algorithm,
-      requestedOperationalQualityMode,
-      {
-        depotIds: resolvedDepotIds,
-      },
+      body.algorithm,
+      body.operational_quality_mode,
+      { depotIds: resolvedDepotIds },
     );
   }
 
   @Post('chat')
-  async aiChat(@Body() body: { metrics: any; question: string }) {
+  @ApiOperation({ summary: 'Chat com IA sobre métricas de otimização' })
+  async aiChat(@Body() body: AiChatDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
@@ -128,29 +104,28 @@ export class OperationsController {
   }
 
   @Post('rostering/weekly')
-  async rosteringWeekly(@Body() body: any) {
+  @ApiOperation({ summary: 'Rostering semanal de motoristas' })
+  async rosteringWeekly(@Body() body: RosteringWeeklyDto) {
     return this.optimizationService.rosteringWeekly(body);
   }
 
   @Patch('reassign-trip')
-  async reassignTrip(
-    @Body('scheduleId') scheduleId: number,
-    @Body('tripId') tripId: number,
-    @Body('targetBlockId') targetBlockId: number,
-  ) {
+  @ApiOperation({ summary: 'Reatribuir viagem para outro bloco' })
+  async reassignTrip(@Body() body: ReassignTripDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
     return this.optimizationService.reassignTrip(
       companyId,
-      scheduleId,
-      tripId,
-      targetBlockId,
+      body.scheduleId,
+      body.tripId,
+      body.targetBlockId,
     );
   }
 
   @Post('evaluate-delta')
-  async evaluateDelta(@Body() body: Record<string, any>) {
+  @ApiOperation({ summary: 'Avaliar delta de custo de reatribuição de viagem' })
+  async evaluateDelta(@Body() body: EvaluateDeltaPayloadDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
@@ -158,7 +133,8 @@ export class OperationsController {
   }
 
   @Post('evaluate-baseline')
-  async evaluateBaseline(@Body() body: Record<string, any>) {
+  @ApiOperation({ summary: 'Avaliar custo baseline do schedule atual' })
+  async evaluateBaseline(@Body() body: EvaluateBaselineDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
@@ -168,13 +144,7 @@ export class OperationsController {
   @Get('optimize/status')
   @ApiOperation({
     summary: 'Status da última otimização',
-    description:
-      'Retorna status (processing|completed|failed|idle), scheduleId e totalCost da otimização mais recente.',
-  })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Status da otimização: idle | processing | completed | failed.',
+    description: 'Retorna status (processing|completed|failed|idle), scheduleId e totalCost.',
   })
   async getOptimizeStatus() {
     const companyId = this.tenantContext.getCompanyId();
@@ -184,19 +154,25 @@ export class OperationsController {
   }
 
   @Get('latest-schedule')
-  @ApiOperation({
-    summary: 'Buscar última escala otimizada',
-    description: 'Retorna o schedule mais recente com blocks, duties e trips.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Schedule completo com blocos e jornadas.',
-  })
+  @ApiOperation({ summary: 'Buscar última escala otimizada' })
   async getLatestSchedule() {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
     return this.optimizationService.getLatestSchedule(companyId);
+  }
+
+  @Get('schedules/:id/optimality')
+  @ApiOperation({
+    summary: 'Certificado de otimalidade do schedule',
+    description:
+      'Retorna LB (best-of Bodin & Golden + Lagrangian + Bundle), UB (veículos usados) e gap percentual.',
+  })
+  async getOptimalityCertificate(@Param('id', ParseIntPipe) id: number) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId)
+      throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.optimizationService.getOptimalityCertificate(companyId, id);
   }
 
   @Post('upload')
@@ -212,55 +188,64 @@ export class OperationsController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Arquivo processado com sucesso.' })
   async uploadFile(
     @UploadedFile()
     file: { buffer: Buffer; originalname: string; mimetype: string },
-    @Body('type') type: 'trips' | 'drivers',
+    @Body('type') type: string,
   ) {
     if (!file) throw new BadRequestException('Nenhum arquivo enviado');
     if (!['trips', 'drivers'].includes(type))
-      throw new BadRequestException('Tipo de dado inválido');
-
-    return this.operationsService.processUpload(file.buffer, type);
+      throw new BadRequestException('Tipo de dado inválido: deve ser "trips" ou "drivers"');
+    return this.operationsService.processUpload(file.buffer, type as 'trips' | 'drivers');
   }
 
   @Get('trips')
   @ApiOperation({ summary: 'Listar viagens do tenant' })
   @ApiQuery({ name: 'page', required: false, example: 1 })
   @ApiQuery({ name: 'limit', required: false, example: 500 })
-  @ApiResponse({ status: 200, description: 'Lista paginada de viagens.' })
-  async getTrips(@Query('page') page: string, @Query('limit') limit: string) {
-    const companyId = this.tenantContext.getCompanyId();
-    if (!companyId)
-      throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.operationsService.getTrips(
-      parseInt(page || '1'),
-      parseInt(limit || '500'),
-      companyId,
-    );
-  }
-
-  @Post('trips')
-  async createTrip(@Body() body: Record<string, any>) {
-    const companyId = this.tenantContext.getCompanyId();
-    if (!companyId)
-      throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.operationsService.createTrip(body, companyId);
-  }
-
-  @Patch('trips/:id')
-  async updateTrip(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+  async getTrips(
+    @Query('page') page: string,
+    @Query('limit') limit: string,
   ) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.operationsService.updateTrip(id, body, companyId);
+    const pageNum = Math.max(1, parseInt(page || '1', 10) || 1);
+    const limitNum = Math.min(1000, Math.max(1, parseInt(limit || '500', 10) || 500));
+    return this.operationsService.getTrips(pageNum, limitNum, companyId);
+  }
+
+  @Post('trips')
+  @ApiOperation({ summary: 'Criar viagem' })
+  async createTrip(@Body() body: CreateTripDto) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId)
+      throw new BadRequestException('Empresa não identificada no contexto.');
+    // DTO já validado pelo ValidationPipe; service normaliza shape via RawRow.
+    return this.operationsService.createTrip(
+      body as unknown as RawRow,
+      companyId,
+    );
+  }
+
+  @Patch('trips/:id')
+  @ApiOperation({ summary: 'Atualizar viagem' })
+  async updateTrip(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: UpdateTripDto,
+  ) {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId)
+      throw new BadRequestException('Empresa não identificada no contexto.');
+    return this.operationsService.updateTrip(
+      id,
+      body as unknown as RawRow,
+      companyId,
+    );
   }
 
   @Delete('trips/:id')
+  @ApiOperation({ summary: 'Remover viagem' })
   async deleteTrip(@Param('id', ParseIntPipe) id: number) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
@@ -269,6 +254,7 @@ export class OperationsController {
   }
 
   @Delete('trips')
+  @ApiOperation({ summary: 'Limpar todas as viagens do tenant' })
   async clearAllTrips() {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
@@ -277,6 +263,7 @@ export class OperationsController {
   }
 
   @Get('drivers')
+  @ApiOperation({ summary: 'Listar motoristas do tenant' })
   async getDrivers() {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
@@ -285,25 +272,35 @@ export class OperationsController {
   }
 
   @Post('drivers')
-  async createDriver(@Body() body: Record<string, any>) {
+  @ApiOperation({ summary: 'Criar motorista' })
+  async createDriver(@Body() body: CreateDriverDto) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.operationsService.createDriver(body, companyId);
+    return this.operationsService.createDriver(
+      body as unknown as RawRow,
+      companyId,
+    );
   }
 
   @Patch('drivers/:id')
+  @ApiOperation({ summary: 'Atualizar motorista' })
   async updateDriver(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+    @Body() body: UpdateDriverDto,
   ) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)
       throw new BadRequestException('Empresa não identificada no contexto.');
-    return this.operationsService.updateDriver(id, body, companyId);
+    return this.operationsService.updateDriver(
+      id,
+      body as unknown as RawRow,
+      companyId,
+    );
   }
 
   @Delete('drivers/:id')
+  @ApiOperation({ summary: 'Remover motorista' })
   async deleteDriver(@Param('id', ParseIntPipe) id: number) {
     const companyId = this.tenantContext.getCompanyId();
     if (!companyId)

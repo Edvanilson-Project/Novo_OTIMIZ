@@ -18,6 +18,22 @@ export interface PerformanceThreshold {
   critical: number; // ms
 }
 
+export interface MetricStats {
+  count: number;
+  average: number;
+  min: number;
+  max: number;
+  p95: number;
+  p99: number;
+}
+
+export interface ThresholdViolation {
+  operation: string;
+  average: number;
+  threshold: number;
+  status: 'CRITICAL' | 'WARNING';
+}
+
 @Injectable()
 export class PerformanceMonitorService {
   private logger = new Logger('PerformanceMonitor');
@@ -145,7 +161,7 @@ export class PerformanceMonitorService {
     return Math.round(total / metrics.length);
   }
 
-  getMetricStats(name: string) {
+  getMetricStats(name: string): MetricStats {
     const metrics = this.getMetrics(name);
     if (metrics.length === 0) {
       return {
@@ -203,13 +219,13 @@ export class PerformanceMonitorService {
 
   generateReport(): {
     totalMetrics: number;
-    metricsPerOperation: Record<string, any>;
-    averageMemory: any;
-    thresholdViolations: any[];
+    metricsPerOperation: Record<string, MetricStats>;
+    averageMemory: { heapUsed: number; heapTotal: number; external: number };
+    thresholdViolations: ThresholdViolation[];
   } {
     const operations = [...new Set(this.metrics.map((m) => m.name))];
-    const metricsPerOperation: Record<string, any> = {};
-    const violations: any[] = [];
+    const metricsPerOperation: Record<string, MetricStats> = {};
+    const violations: ThresholdViolation[] = [];
 
     for (const op of operations) {
       const stats = this.getMetricStats(op);

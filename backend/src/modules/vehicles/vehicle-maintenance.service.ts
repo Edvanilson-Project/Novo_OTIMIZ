@@ -24,11 +24,11 @@ export class VehicleMaintenanceService {
 
   async scheduleMaintenance(
     vehicleId: number,
-    data: any,
+    data: Record<string, unknown>,
   ): Promise<VehicleMaintenance> {
     const companyId = this.tenantContext.getCompanyId();
 
-    const maintenanceDate = new Date(data.maintenanceDate);
+    const maintenanceDate = new Date(String(data.maintenanceDate));
     if (maintenanceDate < new Date()) {
       throw new BadRequestException('Cannot schedule maintenance in the past');
     }
@@ -48,17 +48,20 @@ export class VehicleMaintenanceService {
       );
     }
 
-    const maintenance = this.maintenanceRepo.create({
+    const maintenanceData: Partial<VehicleMaintenance> = {
       vehicleId,
       maintenanceDate,
-      maintenanceType: data.maintenanceType || 'preventive',
-      estimatedDurationHours: data.estimatedDurationHours || 4,
-      cost: data.cost || 0,
-      description: data.description,
-      notes: data.notes,
+      maintenanceType:
+        (data.maintenanceType as VehicleMaintenance['maintenanceType']) ||
+        'preventive',
+      estimatedDurationHours: Number(data.estimatedDurationHours ?? 4),
+      cost: Number(data.cost ?? 0),
+      description: data.description as string | undefined,
+      notes: data.notes as string | undefined,
       status: MaintenanceStatus.SCHEDULED,
       companyId,
-    });
+    };
+    const maintenance = this.maintenanceRepo.create(maintenanceData);
 
     return this.maintenanceRepo.save(maintenance);
   }
@@ -148,20 +151,22 @@ export class VehicleMaintenanceService {
 
   async createAvailabilityWindow(
     vehicleId: number,
-    data: any,
+    data: Record<string, unknown>,
   ): Promise<VehicleAvailabilityWindow> {
     const companyId = this.tenantContext.getCompanyId();
 
-    const window = this.availabilityRepo.create({
+    const windowData: Partial<VehicleAvailabilityWindow> = {
       vehicleId,
-      startTime: new Date(data.startTime),
-      endTime: new Date(data.endTime),
-      reason: data.reason || 'other',
-      description: data.description,
-      isRecurring: data.isRecurring || false,
-      recurringPattern: data.recurringPattern,
+      startTime: new Date(String(data.startTime)),
+      endTime: new Date(String(data.endTime)),
+      reason:
+        (data.reason as VehicleAvailabilityWindow['reason']) ?? undefined,
+      description: data.description as string | undefined,
+      isRecurring: Boolean(data.isRecurring),
+      recurringPattern: data.recurringPattern as string | undefined,
       companyId,
-    });
+    };
+    const window = this.availabilityRepo.create(windowData);
 
     return this.availabilityRepo.save(window);
   }

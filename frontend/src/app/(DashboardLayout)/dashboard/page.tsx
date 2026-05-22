@@ -71,6 +71,7 @@ interface ScheduleData {
   computationTimeS?: number;
   createdAt?: string;
   rosterCount?: number;
+  cctViolations?: number;
 }
 
 export default function DashboardPage() {
@@ -92,11 +93,11 @@ export default function DashboardPage() {
 
       if (tripsData.status === "fulfilled") {
         const d = tripsData.value;
-        setTrips(Array.isArray(d) ? d : (d as any).data ?? []);
+        setTrips(Array.isArray(d) ? d : (d as { data?: unknown[] }).data ?? []);
       }
       if (driversData.status === "fulfilled") {
         const d = driversData.value;
-        setDrivers(Array.isArray(d) ? d : (d as any).data ?? []);
+        setDrivers(Array.isArray(d) ? d : (d as { data?: unknown[] }).data ?? []);
       }
       if (scheduleData.status === "fulfilled") {
         setSchedule(scheduleData.value as ScheduleData);
@@ -188,7 +189,7 @@ export default function DashboardPage() {
                   </Typography>
                   <Chip
                     label={schedule.status}
-                    color={statusColor(schedule.status) as any}
+                    color={statusColor(schedule.status) as 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'}
                     size="small"
                   />
                 </Stack>
@@ -218,9 +219,9 @@ export default function DashboardPage() {
                     <Typography variant="caption" color="text.secondary">Violações CCT</Typography>
                     <Typography variant="body2" sx={{ 
                       fontWeight: 700, 
-                      color: (schedule as any).cctViolations > 0 ? "error.main" : "success.main" 
+                      color: (schedule.cctViolations ?? 0) > 0 ? "error.main" : "success.main" 
                     }}>
-                      {(schedule as any).cctViolations ?? 0}
+                      {schedule.cctViolations ?? 0}
                     </Typography>
                   </Grid>
                   {schedule.computationTimeS != null && (

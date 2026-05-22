@@ -149,7 +149,7 @@ interface CompanyParameters {
   operational_quality_mode: string | null;
   terminal_location_ids: number[];
   goal_weights: Record<string, number> | null;
-  dynamic_rules: any[] | null;
+  dynamic_rules: unknown[] | null;
 }
 
 const DEFAULTS: CompanyParameters = {
@@ -286,7 +286,7 @@ const BOOLEAN_DEFAULTS: Partial<Record<keyof CompanyParameters, boolean>> = {
   strict_union_rules: true,
 };
 const EMPTY_GOAL_WEIGHTS: Record<string, number> = {};
-const EMPTY_DYNAMIC_RULES: any[] = [];
+const EMPTY_DYNAMIC_RULES: unknown[] = [];
 
 function normalizeParameters(data: Partial<CompanyParameters>): CompanyParameters {
   const merged = { ...DEFAULTS, ...data } as CompanyParameters;
@@ -304,7 +304,7 @@ function normalizeParameters(data: Partial<CompanyParameters>): CompanyParameter
 
   for (const [key, fallback] of Object.entries(BOOLEAN_DEFAULTS) as [keyof CompanyParameters, boolean][]) {
     if (merged[key] === null || merged[key] === undefined) {
-      (merged as any)[key] = fallback;
+      (merged as unknown as Record<string, unknown>)[key] = fallback;
     }
   }
   return merged;
@@ -396,7 +396,7 @@ function JsonField({
   label: string;
   tooltip: string;
   value: unknown;
-  onChange: (value: any) => void;
+  onChange: (value: unknown) => void;
   fallback: unknown;
   fieldName: string;
   onErrorChange: (field: string, error: string) => void;
@@ -909,7 +909,7 @@ export default function ParametersPage() {
                     fallback={EMPTY_GOAL_WEIGHTS}
                     fieldName="goal_weights"
                     onErrorChange={setJsonFieldError}
-                    onChange={(value) => setParams((prev) => ({ ...prev, goal_weights: value }))}
+                    onChange={(value) => setParams((prev) => ({ ...prev, goal_weights: value as Record<string, number> | null }))}
                   />
                 </Grid>
                  <Grid size={{ xs: 12, md: 6 }}>
@@ -920,7 +920,7 @@ export default function ParametersPage() {
                       fallback={EMPTY_DYNAMIC_RULES}
                       fieldName="dynamic_rules"
                       onErrorChange={setJsonFieldError}
-                      onChange={(value) => setParams((prev) => ({ ...prev, dynamic_rules: value }))}
+                      onChange={(value) => setParams((prev) => ({ ...prev, dynamic_rules: value as unknown[] | null }))}
                     />
                    <Button
                      size="small"

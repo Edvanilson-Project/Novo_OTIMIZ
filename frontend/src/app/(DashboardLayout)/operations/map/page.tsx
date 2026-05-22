@@ -113,8 +113,9 @@ export default function OperationsMapPage() {
       await operationsApi.reassignTrip({ scheduleId: Number(selectedScheduleId), tripId, targetBlockId });
       setSnack({ open: true, message: `Viagem #${tripId} reatribuída ao bloco ${targetBlockId}.`, severity: 'success' });
       setSelectedTrip(null);
-    } catch (e: any) {
-      setSnack({ open: true, message: e?.response?.data?.message || 'Erro ao reatribuir viagem.', severity: 'error' });
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setSnack({ open: true, message: err?.response?.data?.message ?? 'Erro ao reatribuir viagem.', severity: 'error' });
     } finally {
       setReassigning(false);
     }
@@ -144,8 +145,9 @@ export default function OperationsMapPage() {
           setSelectedScheduleId(String(latest.id));
           setScheduleBlocks(Array.isArray(latest.blocks) ? latest.blocks : []);
         }
-      } catch (e: any) {
-        setError(e?.response?.data?.message || e?.message || 'Falha ao carregar dados do mapa.');
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { message?: string } }; message?: string };
+        setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao carregar dados do mapa.');
       } finally {
         setLoading(false);
       }
@@ -161,10 +163,17 @@ export default function OperationsMapPage() {
       setTripsLoading(true);
       try {
         const result = await operationsApi.getTrips({ scheduleId: Number(selectedScheduleId) });
-        const items: any[] = Array.isArray(result) ? result : result?.items ?? [];
+        const rawItems: unknown[] = Array.isArray(result) ? result : (result as { items?: unknown[] })?.items ?? [];
         setTrips(
-          items.map((t) => ({
-            id: t.id,
+          rawItems.map((item) => {
+            const t = item as {
+              id?: number; originLatitude?: number | null; originLongitude?: number | null;
+              destinationLatitude?: number | null; destinationLongitude?: number | null;
+              lineCode?: string | null; originId?: number | null; destinationId?: number | null;
+              startTime?: number | null; endTime?: number | null; duration?: number | null; distanceKm?: number | null;
+            };
+            return ({
+            id: t.id ?? 0,
             originLatitude: t.originLatitude ?? null,
             originLongitude: t.originLongitude ?? null,
             destinationLatitude: t.destinationLatitude ?? null,
@@ -176,10 +185,12 @@ export default function OperationsMapPage() {
             endTime: t.endTime ?? null,
             duration: t.duration ?? null,
             distanceKm: t.distanceKm ?? null,
-          })),
+          });
+          }),
         );
-      } catch (e: any) {
-        setError(e?.response?.data?.message || e?.message || 'Falha ao carregar viagens.');
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { message?: string } }; message?: string };
+        setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao carregar viagens.');
       } finally {
         setTripsLoading(false);
       }

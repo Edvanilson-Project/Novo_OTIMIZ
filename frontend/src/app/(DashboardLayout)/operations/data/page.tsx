@@ -35,6 +35,9 @@ interface Trip {
   distanceKm: number;
   direction?: string;
   depotId?: number | null;
+  isReliefPoint?: boolean;
+  midTripReliefPointId?: number | null;
+  midTripReliefOffsetMinutes?: number | null;
 }
 
 interface Driver {
@@ -175,10 +178,10 @@ export default function OperationsDataPage() {
     try {
       if (activeTab === 0) {
         const data = await operationsApi.getTrips({ limit: 500 });
-        setTrips(Array.isArray(data) ? data : (data as any).data ?? []);
+        setTrips(Array.isArray(data) ? data : (data as { data?: unknown[] }).data ?? []);
       } else {
         const data = await operationsApi.getDrivers();
-        setDrivers(Array.isArray(data) ? data : (data as any).data ?? []);
+        setDrivers(Array.isArray(data) ? data : (data as { data?: unknown[] }).data ?? []);
       }
     } catch {
       notify("Erro ao carregar dados.", "error");
@@ -219,8 +222,9 @@ export default function OperationsDataPage() {
       if (errors.length > 0) console.warn('GTFS import errors:', errors);
       fetchData();
       fetchReferenceData();
-    } catch (error: any) {
-      const msg = error?.response?.data?.message || "Erro ao importar GTFS.";
+    } catch (error: unknown) {
+      const axErr = error as { response?: { data?: { message?: string } } };
+      const msg = axErr?.response?.data?.message ?? "Erro ao importar GTFS.";
       notify(msg, "error");
     } finally {
       setGtfsUploading(false);
@@ -238,15 +242,15 @@ export default function OperationsDataPage() {
     formData.append("type", activeTab === 0 ? "trips" : "drivers");
     try {
       const result = await operationsApi.upload(formData);
-      const r = result as any;
+      const r = result as { inserted?: number; skipped?: number };
       const msg = r?.inserted !== undefined
         ? `Importados: ${r.inserted} registros${r.skipped ? `, ignorados: ${r.skipped}` : ""}`
         : "Upload concluído!";
       notify(msg);
       fetchData();
-    } catch (error: any) {
-      const errData = error?.response?.data;
-      const msg = errData?.errors?.slice(0, 3).join(" | ") || errData?.message || "Erro no upload.";
+    } catch (error: unknown) {
+      const errData = (error as { response?: { data?: { errors?: string[]; message?: string } } })?.response?.data;
+      const msg = errData?.errors?.slice(0, 3).join(" | ") ?? errData?.message ?? "Erro no upload.";
       notify(msg, "error");
     } finally {
       setUploading(false);
@@ -288,9 +292,9 @@ export default function OperationsDataPage() {
       returnOriginId: pairTrip?.originId ?? row.destinationId,
       returnDestinationId: pairTrip?.destinationId ?? row.originId,
       returnDistanceKm: pairTrip?.distanceKm ?? row.distanceKm,
-      isReliefPoint: !!(row as any).isReliefPoint,
-      midTripReliefPointId: (row as any).midTripReliefPointId ?? null,
-      midTripReliefOffsetMinutes: (row as any).midTripReliefOffsetMinutes ?? null,
+      isReliefPoint: !!row.isReliefPoint,
+      midTripReliefPointId: row.midTripReliefPointId ?? null,
+      midTripReliefOffsetMinutes: row.midTripReliefOffsetMinutes ?? null,
       depotId: row.depotId ?? null,
     });
     setTripDialog(true);
@@ -344,7 +348,7 @@ export default function OperationsDataPage() {
       if (voltaErr) { notify(voltaErr, "error"); return; }
     }
     try {
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         lineCode: tripForm.lineCode || undefined,
         startTime: tripForm.startTime,
         endTime: tripForm.endTime,
@@ -371,7 +375,7 @@ export default function OperationsDataPage() {
         await operationsApi.updateTrip(editingTrip.id, payload);
         // Se existe viagem par e roundTrip está ativo, atualiza a par também
         if (editingPairTrip && tripForm.roundTrip) {
-          const returnPayload: Record<string, any> = {
+          const returnPayload: Record<string, unknown> = {
             lineCode: tripForm.lineCode || undefined,
             startTime: tripForm.returnStartTime,
             endTime: tripForm.returnEndTime,
@@ -387,14 +391,15 @@ export default function OperationsDataPage() {
           notify("Viagem atualizada!");
         }
       } else {
-        const result = await operationsApi.createTrip(payload) as any;
+        const result = await operationsApi.createTrip(payload) as { trips?: unknown[] };
         const count = result?.trips ? result.trips.length : 1;
         notify(count > 1 ? `${count} viagens criadas (IDA + VOLTA com mesmo pairId)!` : "Viagem criada!");
       }
       setTripDialog(false);
       fetchData();
-    } catch (e: any) {
-      notify(e?.response?.data?.message || "Erro ao salvar viagem.", "error");
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      notify(err?.response?.data?.message ?? "Erro ao salvar viagem.", "error");
     }
   };
 
@@ -451,8 +456,9 @@ export default function OperationsDataPage() {
       }
       setDriverDialog(false);
       fetchData();
-    } catch (e: any) {
-      notify(e?.response?.data?.message || "Erro ao salvar motorista.", "error");
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      notify(err?.response?.data?.message ?? "Erro ao salvar motorista.", "error");
     }
   };
 

@@ -177,7 +177,7 @@ export class OptimizationAdvancedController {
     @Param('scheduleId', ParseIntPipe) scheduleId: number,
     @Body()
     body: {
-      paramsOverride: Record<string, any>;
+      paramsOverride: Record<string, unknown>;
       label?: string;
       algorithm?: string;
     },

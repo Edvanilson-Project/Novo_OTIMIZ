@@ -27,17 +27,59 @@ export interface ValidationResult {
   warningCount: number;
   errors: ValidationError[];
   warnings: ValidationError[];
-  stats: {
-    totalTrips: number;
-    allocatedTrips: number;
-    unallocatedTrips: number;
-    allocationPercentage: number;
-    totalVehicles: number;
-    totalDuties: number;
-    totalOperatorHours: number;
-    avgDutyHours: number;
-  };
+  stats: ValidationStats;
 }
+
+export interface ValidationStats {
+  totalTrips: number;
+  allocatedTrips: number;
+  unallocatedTrips: number;
+  allocationPercentage: number;
+  totalVehicles: number;
+  totalDuties: number;
+  totalOperatorHours: number;
+  avgDutyHours: number;
+}
+
+/**
+ * Shapes flexíveis: blocos/jornadas/viagens chegam ao validator com aliases
+ * camelCase (frontend) e snake_case (solver Python), e às vezes campos
+ * inflated via `...metadata`. Por isso usamos shape permissivo + narrowing.
+ */
+export interface BlockInput {
+  blockId?: number;
+  vehicleId?: number;
+  items?: TripInBlock[];
+  trips?: TripInBlock[];
+  [key: string]: unknown;
+}
+
+export interface TripInBlock {
+  tripId?: number;
+  id?: number;
+  startTime?: number;
+  endTime?: number;
+  [key: string]: unknown;
+}
+
+export interface DutyInput {
+  dutyId?: number;
+  duty_id?: number;
+  id?: number;
+  startTime?: number;
+  endTime?: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface TripInput {
+  id?: number;
+  startTime?: number;
+  endTime?: number;
+  [key: string]: unknown;
+}
+
+export type ValidationParams = Record<string, unknown>;
 
 @Injectable()
 export class SolutionValidatorService {
@@ -57,10 +99,10 @@ export class SolutionValidatorService {
    * Valida uma solução completa (blocos + jornadas)
    */
   validate(
-    blocks: any[],
-    duties: any[],
-    trips: any[],
-    params: Record<string, any> = {},
+    blocks: BlockInput[],
+    duties: DutyInput[],
+    trips: TripInput[],
+    params: ValidationParams = {},
   ): ValidationResult {
     const errors: ValidationError[] = [];
     const warnings: ValidationError[] = [];
@@ -95,7 +137,7 @@ export class SolutionValidatorService {
   /**
    * Detecta sobreposição: duas viagens no mesmo veículo ao mesmo tempo
    */
-  private checkTimeOverlaps(blocks: any[]): ValidationError[] {
+  private checkTimeOverlaps(blocks: BlockInput[]): ValidationError[] {
     const errors: ValidationError[] = [];
 
     for (const block of blocks) {
@@ -120,7 +162,7 @@ export class SolutionValidatorService {
             type: 'TIME_OVERLAP',
             severity: 'CRITICAL',
             vehicleId,
-            tripIds: [trip1.tripId, trip2.tripId],
+            tripIds: [trip1.tripId ?? 0, trip2.tripId ?? 0],
             detail: `Trip ${trip1.tripId} ends at ${end1}, Trip ${trip2.tripId} starts at ${start2}`,
             suggestedFix: 'Reorder trips or assign to different vehicle',
           });
@@ -134,7 +176,7 @@ export class SolutionValidatorService {
   /**
    * Valida gaps entre viagens (deadhead time)
    */
-  private checkDeadheadGaps(blocks: any[]): ValidationError[] {
+  private checkDeadheadGaps(blocks: BlockInput[]): ValidationError[] {
     const errors: ValidationError[] = [];
 
     for (const block of blocks) {
@@ -159,7 +201,7 @@ export class SolutionValidatorService {
               type: 'INSUFFICIENT_DEADHEAD',
               severity: 'HIGH',
               vehicleId,
-              tripIds: [trip1.tripId, trip2.tripId],
+              tripIds: [trip1.tripId ?? 0, trip2.tripId ?? 0],
               detail: `Gap ${gap}min < required ${this.toleranceMinutes}min`,
               suggestedFix:
                 'Increase gap between trips or assign to different vehicle',
@@ -176,11 +218,11 @@ export class SolutionValidatorService {
    * Valida jornada máxima do operador
    */
   private checkMaxShift(
-    duties: any[],
-    params: Record<string, any>,
+    duties: DutyInput[],
+    params: ValidationParams,
   ): ValidationError[] {
     const errors: ValidationError[] = [];
-    const maxShift = params.maxShiftMinutes || 600;
+    const maxShift = (params.maxShiftMinutes as number | undefined) ?? 600;
 
     for (const duty of duties) {
       const start = duty.startTime;
@@ -208,18 +250,21 @@ export class SolutionValidatorService {
    * Usa metadata.work_time e metadata.spread_time armazenados na DutyAssignment.
    */
   private checkMealBreakPosition(
-    duties: any[],
-    params: Record<string, any>,
+    duties: DutyInput[],
+    params: ValidationParams,
   ): ValidationError[] {
     const warnings: ValidationError[] = [];
     const mealBreakMinutes =
-      params.meal_break_minutes ?? params.mealBreakMinutes ?? 30;
-    const mealBreakThreshold = params.meal_break_threshold ?? 360; // 6h
+      (params.meal_break_minutes as number | undefined) ??
+      (params.mealBreakMinutes as number | undefined) ??
+      30;
+    const mealBreakThreshold =
+      (params.meal_break_threshold as number | undefined) ?? 360; // 6h
 
     for (const duty of duties) {
-      const meta = duty.metadata ?? duty;
-      const workTime: number = meta.work_time ?? meta.workTime ?? 0;
-      const spreadTime: number = meta.spread_time ?? meta.spreadTime ?? 0;
+      const meta = (duty.metadata ?? (duty as Record<string, unknown>)) as Record<string, unknown>;
+      const workTime = Number(meta.work_time ?? meta.workTime ?? 0);
+      const spreadTime = Number(meta.spread_time ?? meta.spreadTime ?? 0);
 
       if (workTime <= mealBreakThreshold) continue;
 
@@ -321,7 +366,11 @@ export class SolutionValidatorService {
   /**
    * Calcula estatísticas da solução
    */
-  private calculateStats(blocks: any[], duties: any[], trips: any[]): any {
+  private calculateStats(
+    blocks: BlockInput[],
+    duties: DutyInput[],
+    trips: TripInput[],
+  ): ValidationStats {
     const allocated = new Set();
     for (const block of blocks) {
       const items = block.items || block.trips || [];

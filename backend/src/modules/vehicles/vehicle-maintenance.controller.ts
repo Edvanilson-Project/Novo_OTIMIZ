@@ -13,6 +13,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { VehicleMaintenanceService } from './vehicle-maintenance.service';
+import { MaintenanceStatus } from '../database/entities/vehicle-maintenance.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('vehicles/:vehicleId/maintenance')
@@ -23,7 +24,7 @@ export class VehicleMaintenanceController {
   @Post()
   scheduleMaintenance(
     @Param('vehicleId', ParseIntPipe) vehicleId: number,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.service.scheduleMaintenance(vehicleId, body);
   }
@@ -42,7 +43,7 @@ export class VehicleMaintenanceController {
     return this.service.updateMaintenanceStatus(
       vehicleId,
       maintenanceId,
-      status as any,
+      status as MaintenanceStatus,
     );
   }
 
@@ -84,7 +85,7 @@ export class VehicleMaintenanceController {
   @Post('availability-windows')
   createAvailabilityWindow(
     @Param('vehicleId', ParseIntPipe) vehicleId: number,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.service.createAvailabilityWindow(vehicleId, body);
   }

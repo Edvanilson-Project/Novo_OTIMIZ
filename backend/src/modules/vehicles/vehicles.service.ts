@@ -34,7 +34,7 @@ export class VehiclesService {
     return type;
   }
 
-  async createVehicleType(dto: Record<string, any>): Promise<VehicleType> {
+  async createVehicleType(dto: Record<string, unknown>): Promise<VehicleType> {
     const companyId = this.tenantContext.getCompanyId();
     const entity = this.vehicleTypeRepo.create({ ...dto, companyId });
     return this.vehicleTypeRepo.save(entity);
@@ -42,7 +42,7 @@ export class VehiclesService {
 
   async updateVehicleType(
     id: number,
-    dto: Record<string, any>,
+    dto: Record<string, unknown>,
   ): Promise<VehicleType> {
     const type = await this.findOneVehicleType(id);
     Object.assign(type, dto);
@@ -74,13 +74,13 @@ export class VehiclesService {
     return vehicle;
   }
 
-  async createVehicle(dto: Record<string, any>): Promise<Vehicle> {
+  async createVehicle(dto: Record<string, unknown>): Promise<Vehicle> {
     const companyId = this.tenantContext.getCompanyId();
     const entity = this.vehicleRepo.create({ ...dto, companyId });
     return this.vehicleRepo.save(entity);
   }
 
-  async updateVehicle(id: number, dto: Record<string, any>): Promise<Vehicle> {
+  async updateVehicle(id: number, dto: Record<string, unknown>): Promise<Vehicle> {
     const vehicle = await this.findOneVehicle(id);
     Object.assign(vehicle, dto);
     return this.vehicleRepo.save(vehicle);

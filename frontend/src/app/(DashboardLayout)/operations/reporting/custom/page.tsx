@@ -77,8 +77,9 @@ export default function CustomReportsPage() {
       ]);
       setTemplates(list);
       setSupportedMetrics(metricsResp.metrics);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Falha ao carregar.');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao carregar.');
     } finally {
       setLoading(false);
     }
@@ -130,8 +131,9 @@ export default function CustomReportsPage() {
       setDialogOpen(false);
       setForm(EMPTY_FORM);
       await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Falha ao salvar.');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao salvar.');
     } finally {
       setSubmitting(false);
     }
@@ -143,8 +145,9 @@ export default function CustomReportsPage() {
     try {
       const data = await customReportsApi.run(id);
       setResults((prev) => ({ ...prev, [id]: data }));
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Falha ao executar.');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao executar.');
     } finally {
       setRunningId(null);
     }
@@ -163,8 +166,9 @@ export default function CustomReportsPage() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || `Falha ao exportar ${format.toUpperCase()}.`);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      setError(err?.response?.data?.message ?? err?.message ?? `Falha ao exportar ${format.toUpperCase()}.`);
     }
   }
 
@@ -173,8 +177,9 @@ export default function CustomReportsPage() {
     try {
       await customReportsApi.remove(id);
       await load();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Falha ao remover.');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } }; message?: string };
+      setError(err?.response?.data?.message ?? err?.message ?? 'Falha ao remover.');
     }
   }
 

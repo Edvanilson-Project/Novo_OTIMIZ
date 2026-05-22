@@ -38,7 +38,7 @@ interface ScenarioConfig {
   name: string;
   description: string;
   algorithm: string;
-  optimizationParamsOverride: Record<string, any>;
+  optimizationParamsOverride: Record<string, unknown>;
   // Vidaútil de uma run completed antes de re-otimizar (idempotência). Default 30min.
   reuseTtlMs?: number;
 }

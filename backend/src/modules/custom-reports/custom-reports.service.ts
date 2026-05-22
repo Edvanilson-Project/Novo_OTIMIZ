@@ -14,6 +14,13 @@ import { Schedule, ScheduleStatus } from '../database/entities/schedule.entity';
 import { Trip } from '../database/entities/trip.entity';
 import { Line } from '../database/entities/line.entity';
 import { TenantContext } from '../../common/context/tenant-context';
+import type {
+  CreateCustomReportDto,
+  CustomReportFilters,
+  CustomReportPayload,
+  RecentRunSummary,
+  UpdateCustomReportDto,
+} from './custom-reports.dto';
 
 export const SUPPORTED_METRICS = [
   'totalRuns',
@@ -67,7 +74,12 @@ export class CustomReportsService {
     return report;
   }
 
-  async create(dto: Record<string, any>): Promise<CustomReport> {
+  /**
+   * Aceita `Partial` porque a validação primária do shape vem do ValidationPipe
+   * (decorators no DTO). O service ainda valida runtime (metrics não-vazia) para
+   * suportar chamadas internas que bypassam o pipe.
+   */
+  async create(dto: Partial<CreateCustomReportDto>): Promise<CustomReport> {
     this.validateMetrics(dto.metrics);
     const entity = this.reportRepo.create({
       companyId: this.companyId(),
@@ -81,7 +93,7 @@ export class CustomReportsService {
     return this.reportRepo.save(entity);
   }
 
-  async update(id: number, dto: Record<string, any>): Promise<CustomReport> {
+  async update(id: number, dto: UpdateCustomReportDto): Promise<CustomReport> {
     const report = await this.findOne(id);
     if (dto.metrics !== undefined) this.validateMetrics(dto.metrics);
     Object.assign(report, {
@@ -99,15 +111,18 @@ export class CustomReportsService {
     await this.reportRepo.remove(report);
   }
 
-  async run(id: number): Promise<Record<string, any>> {
+  async run(id: number): Promise<CustomReportPayload> {
     const report = await this.findOne(id);
-    return this.execute(report.metrics as SupportedMetric[], report.filters);
+    return this.execute(
+      report.metrics as SupportedMetric[],
+      report.filters as CustomReportFilters,
+    );
   }
 
   async preview(
     metrics: string[],
-    filters: Record<string, any>,
-  ): Promise<Record<string, any>> {
+    filters: CustomReportFilters,
+  ): Promise<CustomReportPayload> {
     this.validateMetrics(metrics);
     return this.execute(metrics as SupportedMetric[], filters ?? {});
   }
@@ -127,11 +142,11 @@ export class CustomReportsService {
 
   private async execute(
     metrics: SupportedMetric[],
-    filters: Record<string, any>,
-  ): Promise<Record<string, any>> {
+    filters: CustomReportFilters,
+  ): Promise<CustomReportPayload> {
     const companyId = this.companyId();
     const dateRangeDays = Number(filters.dateRangeDays ?? 30);
-    const result: Record<string, any> = {
+    const result: CustomReportPayload = {
       generatedAt: new Date().toISOString(),
       filters: { dateRangeDays },
     };
@@ -200,9 +215,10 @@ export class CustomReportsService {
         sumCost = 0,
         n = 0;
       for (const r of recent) {
-        const meta = (r.metadata as Record<string, any>) || {};
-        const v = meta.num_vehicles ?? meta.vehicles;
-        const c = meta.num_crew ?? meta.crew;
+        const meta: Record<string, unknown> =
+          (r.metadata as Record<string, unknown>) || {};
+        const v = (meta.num_vehicles ?? meta.vehicles) as number | undefined;
+        const c = (meta.num_crew ?? meta.crew) as number | undefined;
         if (v != null || c != null) {
           sumV += v ?? 0;
           sumC += c ?? 0;
@@ -250,17 +266,19 @@ export class CustomReportsService {
         order: { createdAt: 'DESC' },
         take: 20,
       });
-      result.recentRuns = runs.map((r) => {
-        const meta = (r.metadata as Record<string, any>) || {};
+      result.recentRuns = runs.map((r): RecentRunSummary => {
+        const meta: Record<string, unknown> =
+          (r.metadata as Record<string, unknown>) || {};
         return {
           id: r.id,
           status: r.status,
           createdAt: r.createdAt,
           totalCost: r.totalCost,
           cctViolations: r.cctViolations,
-          vehicles: meta.num_vehicles ?? meta.vehicles ?? null,
-          crew: meta.num_crew ?? meta.crew ?? null,
-          algorithm: meta.algorithm ?? null,
+          vehicles:
+            ((meta.num_vehicles ?? meta.vehicles) as number | null) ?? null,
+          crew: ((meta.num_crew ?? meta.crew) as number | null) ?? null,
+          algorithm: (meta.algorithm as string | null) ?? null,
         };
       });
     }
@@ -268,12 +286,12 @@ export class CustomReportsService {
     return result;
   }
 
-  toCsv(payload: Record<string, any>): string {
+  toCsv(payload: CustomReportPayload): string {
     const flat: Array<[string, string]> = [];
     for (const [k, v] of Object.entries(payload)) {
       if (k === 'recentRuns' && Array.isArray(v)) continue;
-      if (k === 'filters' && typeof v === 'object') {
-        for (const [fk, fv] of Object.entries(v))
+      if (k === 'filters' && typeof v === 'object' && v !== null) {
+        for (const [fk, fv] of Object.entries(v as Record<string, unknown>))
           flat.push([`filter.${fk}`, String(fv)]);
       } else {
         flat.push([k, v == null ? '' : String(v)]);
@@ -284,7 +302,9 @@ export class CustomReportsService {
       csv += `${k},${this.csvEscape(v)}\n`;
     }
     if (Array.isArray(payload.recentRuns) && payload.recentRuns.length > 0) {
-      const cols = Object.keys(payload.recentRuns[0]);
+      const cols = Object.keys(payload.recentRuns[0]) as Array<
+        keyof RecentRunSummary
+      >;
       csv += `\nrecentRuns\n${cols.join(',')}\n`;
       for (const row of payload.recentRuns) {
         csv += cols.map((c) => this.csvEscape(row[c])).join(',') + '\n';
@@ -293,7 +313,7 @@ export class CustomReportsService {
     return csv;
   }
 
-  private csvEscape(value: any): string {
+  private csvEscape(value: unknown): string {
     if (value == null) return '';
     const s = typeof value === 'string' ? value : JSON.stringify(value);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -301,7 +321,7 @@ export class CustomReportsService {
 
   async toPdf(
     report: CustomReport,
-    payload: Record<string, any>,
+    payload: CustomReportPayload,
   ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 48, size: 'A4' });

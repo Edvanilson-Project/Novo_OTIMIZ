@@ -9,6 +9,16 @@ import WhatIfPanel from '../../../components/shared/WhatIfPanel';
 import OptimizationExplainer from '../../../components/shared/OptimizationExplainer';
 import RealtimeOptimizationMonitor from '../../../components/shared/RealtimeOptimizationMonitor';
 
+interface ComparisonSide {
+  totalCost?: number;
+  vehiclesUsed?: number;
+  averageUtilization?: number;
+}
+interface ReportMetrics {
+  scenarioComparison?: { savingsPercent?: number; optimized?: ComparisonSide; current?: ComparisonSide };
+  metrics?: { totalCost?: number; vehiclesUsed?: number; averageUtilization?: number; totalTrips?: number };
+}
+
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -36,19 +46,20 @@ export default function AdvancedOptimizationPage() {
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [originalCost, setOriginalCost] = useState<number>(0);
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [reportMetrics, setReportMetrics] = useState<any>(null);
+  const [reportMetrics, setReportMetrics] = useState<ReportMetrics | null>(null);
 
   useEffect(() => {
     operationsApi.getLatestSchedule()
-      .then((s: any) => {
-        if (s?.id) {
-          setScheduleId(s.id);
-          if (s?.totalCost) setOriginalCost(Number(s.totalCost));
-          return operationReportingApi.generate(s.id);
+      .then((s) => {
+        const schedule = s as { id?: number; totalCost?: number } | null;
+        if (schedule?.id) {
+          setScheduleId(schedule.id);
+          if (schedule?.totalCost) setOriginalCost(Number(schedule.totalCost));
+          return operationReportingApi.generate(schedule.id);
         }
       })
-      .then((report: any) => {
-        if (report) setReportMetrics(report);
+      .then((report) => {
+        if (report) setReportMetrics(report as ReportMetrics);
       })
       .catch((err) => {
         console.error('[AdvancedOptimization] failed to load report', err);
@@ -73,7 +84,7 @@ export default function AdvancedOptimizationPage() {
         const s = await operationsApi.getOptimizeStatus().catch(() => null);
         if (s?.status === 'completed' || s?.status === 'failed') break;
       }
-      const updated = await operationsApi.getLatestSchedule().catch(() => null) as any;
+      const updated = await operationsApi.getLatestSchedule().catch(() => null) as { id?: number; totalCost?: number } | null;
       if (updated?.id) setScheduleId(updated.id);
       if (updated?.totalCost) setOriginalCost(Number(updated.totalCost));
     } catch (err) {

@@ -31,14 +31,14 @@ export class VehiclesController {
   }
 
   @Post('types')
-  createVehicleType(@Body() body: Record<string, any>) {
+  createVehicleType(@Body() body: Record<string, unknown>) {
     return this.service.createVehicleType(body);
   }
 
   @Patch('types/:id')
   updateVehicleType(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.service.updateVehicleType(id, body);
   }
@@ -71,14 +71,14 @@ export class VehiclesController {
   }
 
   @Post()
-  createVehicle(@Body() body: Record<string, any>) {
+  createVehicle(@Body() body: Record<string, unknown>) {
     return this.service.createVehicle(body);
   }
 
   @Patch(':id')
   updateVehicle(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.service.updateVehicle(id, body);
   }

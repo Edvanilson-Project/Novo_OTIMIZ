@@ -7,6 +7,16 @@ import ExcelJS from 'exceljs';
 import { TripRepository } from '../database/repositories/operations.repository';
 import { DriverRepository } from '../database/repositories/operations.repository';
 import { TenantContext } from '../../common/context/tenant-context';
+import type { Trip } from '../database/entities/trip.entity';
+import type { Driver } from '../database/entities/driver.entity';
+
+/**
+ * Linha bruta lida de arquivo (CSV/XLSX) — chaves e valores são heterogêneos
+ * porque vêm de fontes externas sem schema garantido. Também usado pelas
+ * funções de CRUD que aceitam DTOs do controller (ValidationPipe já validou
+ * o shape antes de chegar aqui).
+ */
+export type RawRow = Record<string, unknown>;
 
 // ─── Mapa de nomes de coluna aceitos → canônico camelCase ────────────────────
 const TRIP_COL_MAP: Record<string, string> = {
@@ -73,10 +83,10 @@ const DRIVER_COL_MAP: Record<string, string> = {
 };
 
 function normalizeRow(
-  raw: Record<string, any>,
+  raw: RawRow,
   colMap: Record<string, string>,
-): Record<string, any> {
-  const result: Record<string, any> = {};
+): RawRow {
+  const result: RawRow = {};
   for (const [key, val] of Object.entries(raw)) {
     const k = key.trim().toLowerCase().replace(/\s+/g, '_');
     result[colMap[k] ?? key] = typeof val === 'string' ? val.trim() : val;
@@ -84,7 +94,7 @@ function normalizeRow(
   return result;
 }
 
-function parseMinutes(val: any): number | null {
+function parseMinutes(val: unknown): number | null {
   if (val === undefined || val === null || val === '') return null;
 
   // Se o valor for um número (comum em arquivos Excel),
@@ -118,12 +128,12 @@ function parseMinutes(val: any): number | null {
   return Math.round(n);
 }
 
-function safeInt(val: any, fallback = 0): number {
+function safeInt(val: unknown, fallback = 0): number {
   const n = Number(val);
   return isNaN(n) || !isFinite(n) ? fallback : Math.round(n);
 }
 
-function safeFloat(val: any, fallback = 0): number {
+function safeFloat(val: unknown, fallback = 0): number {
   const n = Number(String(val ?? '').replace(',', '.'));
   return isNaN(n) || !isFinite(n) ? fallback : n;
 }
@@ -136,7 +146,7 @@ export class OperationsService {
     private readonly tenantContext: TenantContext,
   ) {}
 
-  private parseCsvBuffer(buffer: Buffer): any[] {
+  private parseCsvBuffer(buffer: Buffer): RawRow[] {
     const text = buffer
       .toString('utf-8')
       .replace(/\r\n/g, '\n')
@@ -178,7 +188,7 @@ export class OperationsService {
         'Arquivo excede o tamanho máximo permitido (10 MB)',
       );
 
-    let rawData: any[];
+    let rawData: RawRow[];
     const header4 = fileBuffer.slice(0, 4).toString('hex');
     const isProbablyXlsx = header4 === '504b0304' || header4.startsWith('d0cf');
 
@@ -237,9 +247,9 @@ export class OperationsService {
     return this.processDrivers(rawData, companyId);
   }
 
-  private async processTrips(rawData: any[], companyId: number) {
+  private async processTrips(rawData: RawRow[], companyId: number) {
     const errors: string[] = [];
-    const tripsToSave: any[] = [];
+    const tripsToSave: Trip[] = [];
 
     rawData.forEach((raw, idx) => {
       const item = normalizeRow(raw, TRIP_COL_MAP);
@@ -294,9 +304,9 @@ export class OperationsService {
     };
   }
 
-  private async processDrivers(rawData: any[], companyId: number) {
+  private async processDrivers(rawData: RawRow[], companyId: number) {
     const errors: string[] = [];
-    const driversToSave: any[] = [];
+    const driversToSave: Driver[] = [];
 
     rawData.forEach((raw, idx) => {
       const item = normalizeRow(raw, DRIVER_COL_MAP);
@@ -352,7 +362,7 @@ export class OperationsService {
     });
   }
 
-  async createDriver(data: Record<string, any>, companyId: number) {
+  async createDriver(data: RawRow, companyId: number) {
     if (!data.driverId || !data.name) {
       throw new BadRequestException('driverId e name são obrigatórios');
     }
@@ -368,7 +378,7 @@ export class OperationsService {
     return this.driverRepository.save(driver);
   }
 
-  async updateDriver(id: number, data: Record<string, any>, companyId: number) {
+  async updateDriver(id: number, data: RawRow, companyId: number) {
     const driver = await this.driverRepository.findOne({
       where: { id, companyId },
     });
@@ -407,7 +417,7 @@ export class OperationsService {
     return (last?.tripId ?? 0) + 1;
   }
 
-  async createTrip(data: Record<string, any>, companyId: number) {
+  async createTrip(data: RawRow, companyId: number) {
     if (data.startTime === undefined || data.endTime === undefined) {
       throw new BadRequestException('startTime e endTime são obrigatórios');
     }
@@ -425,14 +435,18 @@ export class OperationsService {
     const duration = data.duration ? safeInt(data.duration) : calcDuration;
 
     const roundTrip = data.roundTrip === true || data.roundTrip === 'true';
-    const pairId = roundTrip ? `pair-${Date.now()}` : (data.pairId ?? null);
+    const pairId: string | undefined = roundTrip
+      ? `pair-${Date.now()}`
+      : data.pairId != null
+        ? String(data.pairId)
+        : undefined;
 
     const baseId = await this.nextTripId(companyId);
-    const trip = this.tripRepository.create({
+    const tripData: Partial<Trip> = {
       companyId,
       tripId: baseId,
       lineId: data.lineId ? safeInt(data.lineId) : undefined,
-      lineCode: data.lineCode ?? null,
+      lineCode: data.lineCode != null ? String(data.lineCode) : undefined,
       pairId,
       startTime,
       endTime,
@@ -440,7 +454,7 @@ export class OperationsService {
       destinationId: safeInt(data.destinationId),
       distanceKm: safeFloat(data.distanceKm),
       duration,
-      direction: data.direction || 'IDA',
+      direction: data.direction ? String(data.direction) : 'IDA',
       // Relief points (rendição) — opcional. Marca terminal como ponto de troca de motorista
       // (`isReliefPoint`) e/ou define ponto intermediário no meio da viagem para split em 2.
       isReliefPoint:
@@ -481,7 +495,8 @@ export class OperationsService {
         data.depotId !== ''
           ? safeInt(data.depotId)
           : null,
-    });
+    };
+    const trip = this.tripRepository.create(tripData);
     const saved = await this.tripRepository.save(trip);
 
     if (roundTrip) {
@@ -502,7 +517,7 @@ export class OperationsService {
         : retCalcDuration;
 
       const returnId = await this.nextTripId(companyId);
-      const returnTrip = this.tripRepository.create({
+      const returnData: Partial<Trip> = {
         companyId,
         tripId: returnId,
         lineId: trip.lineId,
@@ -521,7 +536,8 @@ export class OperationsService {
           : trip.distanceKm,
         duration: retDuration,
         direction: 'VOLTA',
-      });
+      };
+      const returnTrip = this.tripRepository.create(returnData);
       const returnSaved = await this.tripRepository.save(returnTrip);
       return { trips: [saved, returnSaved], pairId };
     }
@@ -529,7 +545,7 @@ export class OperationsService {
     return saved;
   }
 
-  async updateTrip(id: number, data: Record<string, any>, companyId: number) {
+  async updateTrip(id: number, data: RawRow, companyId: number) {
     const trip = await this.tripRepository.findOne({
       where: { id, companyId },
     });
@@ -550,9 +566,9 @@ export class OperationsService {
       );
     }
 
-    const numOrNull = (v: any): number | null =>
+    const numOrNull = (v: unknown): number | null =>
       v === undefined || v === null || v === '' ? null : safeInt(v);
-    const floatOrNull = (v: any): number | null =>
+    const floatOrNull = (v: unknown): number | null =>
       v === undefined || v === null || v === '' ? null : safeFloat(v);
 
     Object.assign(trip, {

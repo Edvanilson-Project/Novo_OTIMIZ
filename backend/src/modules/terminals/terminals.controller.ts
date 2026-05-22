@@ -36,14 +36,14 @@ export class TerminalsController {
   }
 
   @Post()
-  create(@Body() body: Record<string, any>) {
+  create(@Body() body: Record<string, unknown>) {
     return this.service.create(body);
   }
 
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: Record<string, any>,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.service.update(id, body);
   }

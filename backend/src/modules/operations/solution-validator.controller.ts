@@ -46,7 +46,7 @@ export class SolutionValidatorController {
       blocks: any[];
       duties: any[];
       trips: any[];
-      params?: Record<string, any>;
+      params?: Record<string, unknown>;
     },
   ) {
     const result = this.validatorService.validate(

@@ -11,17 +11,60 @@ export const apiClient = axios.create({
   withCredentials: true,
 });
 
-// Redireciona para login em 401 (exceto na própria página de login)
+// Silent token refresh on 401.
+// Access tokens expire after 15 min; before redirecting to login we try
+// POST /auth/refresh once. Concurrent 401s are queued and retried after the
+// single refresh resolves. The refresh_token httpOnly cookie is sent automatically.
+let _isRefreshing = false;
+type QueueItem = { resolve: (v: unknown) => void; reject: (e: unknown) => void };
+const _refreshQueue: QueueItem[] = [];
+
+function _flushQueue(error: unknown, value?: unknown) {
+  _refreshQueue.splice(0).forEach(({ resolve, reject }) => {
+    error ? reject(error) : resolve(value);
+  });
+}
+
 apiClient.interceptors.response.use(
   (res) => res,
-  (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      if (!window.location.pathname.includes('/auth/')) {
+  async (error) => {
+    const originalRequest = error.config as typeof error.config & { _retry?: boolean };
+
+    const is401 = error.response?.status === 401;
+    const isRefreshEndpoint = originalRequest?.url?.includes('/auth/refresh');
+    const isLoginEndpoint = originalRequest?.url?.includes('/auth/login');
+    const isOnAuthPage =
+      typeof window !== 'undefined' && window.location.pathname.includes('/auth/');
+
+    // Don't intercept auth endpoints or pages
+    if (!is401 || isRefreshEndpoint || isLoginEndpoint || originalRequest?._retry) {
+      return Promise.reject(error);
+    }
+
+    if (_isRefreshing) {
+      // Queue concurrent 401s until the ongoing refresh settles
+      return new Promise((resolve, reject) => {
+        _refreshQueue.push({ resolve, reject });
+      }).then(() => apiClient(originalRequest));
+    }
+
+    originalRequest._retry = true;
+    _isRefreshing = true;
+
+    try {
+      await apiClient.post('/auth/refresh');
+      _flushQueue(null);
+      return apiClient(originalRequest);
+    } catch (refreshError) {
+      _flushQueue(refreshError);
+      if (!isOnAuthPage) {
         clearSession();
         window.location.href = '/auth/login';
       }
+      return Promise.reject(refreshError);
+    } finally {
+      _isRefreshing = false;
     }
-    return Promise.reject(error);
   },
 );
 
@@ -121,6 +164,18 @@ export const operationsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
   getLatestSchedule: () => apiClient.get('/operations/latest-schedule').then((r) => r.data),
+  getOptimalityCertificate: (scheduleId: ID) =>
+    apiClient.get<{
+      scheduleId: number;
+      totalCost: number | null;
+      vsp_lower_bound: number;
+      vsp_actual: number;
+      vsp_gap_pct: number;
+      vsp_gap_explained: string;
+      lb_method: string;
+      lb_sources: Record<string, number>;
+      is_optimal_certified: boolean;
+    }>(`/operations/schedules/${scheduleId}/optimality`).then((r) => r.data),
   getOptimizeStatus: () => apiClient.get('/operations/optimize/status').then((r) => r.data) as Promise<{
     status: 'idle' | 'processing' | 'completed' | 'failed';
     scheduleId: number | null;
@@ -133,7 +188,7 @@ export const operationsApi = {
   reassignTrip: (data: object) => apiClient.patch('/operations/reassign-trip', data).then((r) => r.data),
   evaluateDelta: (data: object) => apiClient.post('/operations/evaluate-delta', data).then((r) => r.data),
   evaluateBaseline: (data: object) => apiClient.post('/operations/evaluate-baseline', data).then((r) => r.data),
-  aiChat: (data: { metrics: any; question: string }) => apiClient.post('/operations/chat', data).then((r) => r.data),
+  aiChat: (data: { metrics: Record<string, unknown>; question: string }) => apiClient.post('/operations/chat', data).then((r) => r.data),
 };
 
 // ─── Parameters (CCT) ────────────────────────────────────────────────────────
@@ -152,12 +207,42 @@ export const reportsApi = {
 };
 
 // ─── Custom Reports (FASE 4.2) ────────────────────────────────────────────────
+export interface CustomReportFilters {
+  dateRangeDays?: number;
+  [key: string]: unknown;
+}
+
+export interface CustomReportPayload {
+  generatedAt: string;
+  filters: { dateRangeDays: number };
+  totalRuns?: number;
+  completedRuns?: number;
+  failedRuns?: number;
+  successRate?: number;
+  totalTrips?: number;
+  totalLines?: number;
+  avgVehicles?: number | null;
+  avgCrew?: number | null;
+  avgCost?: number | null;
+  trend7d?: number | null;
+  recentRuns?: Array<{
+    id: number;
+    status: string;
+    createdAt: string | Date;
+    totalCost: string | number | null;
+    cctViolations: number | null;
+    vehicles: number | null;
+    crew: number | null;
+    algorithm: string | null;
+  }>;
+}
+
 export interface CustomReportTemplate {
   id: number;
   name: string;
   description: string | null;
   metrics: string[];
-  filters: Record<string, any>;
+  filters: CustomReportFilters;
   format: 'json' | 'csv' | 'pdf';
   ownerUserId: number | null;
   createdAt: string;
@@ -168,14 +253,14 @@ export const customReportsApi = {
   listMetrics: () => apiClient.get<{ metrics: string[] }>('/custom-reports/metrics').then((r) => r.data),
   list: () => apiClient.get<CustomReportTemplate[]>('/custom-reports').then((r) => r.data),
   get: (id: ID) => apiClient.get<CustomReportTemplate>(`/custom-reports/${id}`).then((r) => r.data),
-  create: (data: { name: string; description?: string; metrics: string[]; filters?: Record<string, any>; format?: string }) =>
+  create: (data: { name: string; description?: string; metrics: string[]; filters?: CustomReportFilters; format?: string }) =>
     apiClient.post<CustomReportTemplate>('/custom-reports', data).then((r) => r.data),
-  update: (id: ID, data: Partial<{ name: string; description: string; metrics: string[]; filters: Record<string, any>; format: string }>) =>
+  update: (id: ID, data: Partial<{ name: string; description: string; metrics: string[]; filters: CustomReportFilters; format: string }>) =>
     apiClient.patch<CustomReportTemplate>(`/custom-reports/${id}`, data).then((r) => r.data),
   remove: (id: ID) => apiClient.delete(`/custom-reports/${id}`).then((r) => r.data),
-  run: (id: ID) => apiClient.get<Record<string, any>>(`/custom-reports/${id}/run`).then((r) => r.data),
-  preview: (metrics: string[], filters: Record<string, any> = {}) =>
-    apiClient.post<Record<string, any>>('/custom-reports/preview', { metrics, filters }).then((r) => r.data),
+  run: (id: ID) => apiClient.get<CustomReportPayload>(`/custom-reports/${id}/run`).then((r) => r.data),
+  preview: (metrics: string[], filters: CustomReportFilters = {}) =>
+    apiClient.post<CustomReportPayload>('/custom-reports/preview', { metrics, filters }).then((r) => r.data),
   exportCsvUrl: (id: ID) => `${API_BASE_URL}/custom-reports/${id}/export.csv`,
   exportPdfUrl: (id: ID) => `${API_BASE_URL}/custom-reports/${id}/export.pdf`,
 };
@@ -258,7 +343,7 @@ export const scenariosApi = {
   // Frontend deve pollear getScenarioRun(scheduleId, scenarioId) até status=completed.
   whatIfRunReal: (
     scheduleId: ID,
-    body: { paramsOverride: Record<string, any>; label?: string; algorithm?: string },
+    body: { paramsOverride: Record<string, unknown>; label?: string; algorithm?: string },
   ) => apiClient.post(`/operations/optimization-advanced/whatif/run-real/${scheduleId}`, body).then((r) => r.data),
   replayByFingerprint: (fingerprint: string) =>
     apiClient.post(`/operations/optimization-advanced/replay/${fingerprint}`).then((r) => r.data),

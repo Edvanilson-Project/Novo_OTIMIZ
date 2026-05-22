@@ -54,7 +54,7 @@ export class ParametersService {
       createdAt: _createdAt,
       updatedAt: _updatedAt,
       ...validData
-    } = updateData as any;
+    } = updateData as Record<string, unknown>;
 
     const sanitizedData = this.validateAndSanitizeParameters(validData);
 
@@ -112,8 +112,9 @@ export class ParametersService {
       split_break_second_minutes: { min: 5, max: 180 },
     };
 
+    const paramsRecord = params as unknown as Record<string, unknown>;
     for (const [key, range] of Object.entries(ranges)) {
-      const value = (params as any)[key];
+      const value = paramsRecord[key] as number | null | undefined;
       if (value !== null && value !== undefined) {
         if (value < range.min || value > range.max) {
           throw new BadRequestException(
@@ -395,7 +396,7 @@ export class ParametersService {
 
     for (const [key, value] of Object.entries(data)) {
       if (value === null || value === undefined || value === '') {
-        (sanitized as any)[key] = null;
+        (sanitized as Record<string, unknown>)[key] = null;
         continue;
       }
 
@@ -415,7 +416,7 @@ export class ParametersService {
           throw new BadRequestException(`${key} deve estar entre 0 e 23`);
         }
 
-        (sanitized as any)[key] = parsed;
+        (sanitized as Record<string, unknown>)[key] = parsed;
         continue;
       }
 
@@ -426,7 +427,7 @@ export class ParametersService {
           throw new BadRequestException(`${key} deve estar entre 0 e 100`);
         }
 
-        (sanitized as any)[key] = parsed / 100;
+        (sanitized as Record<string, unknown>)[key] = parsed / 100;
         continue;
       }
 
@@ -439,7 +440,7 @@ export class ParametersService {
           );
         }
 
-        (sanitized as any)[key] = parsed;
+        (sanitized as Record<string, unknown>)[key] = parsed;
         continue;
       }
 
@@ -451,7 +452,7 @@ export class ParametersService {
         ) {
           throw new BadRequestException(`${key} deve ser um booleano`);
         }
-        (sanitized as any)[key] = value === true || value === 'true';
+        (sanitized as Record<string, unknown>)[key] = value === true || value === 'true';
         continue;
       }
 
@@ -461,7 +462,7 @@ export class ParametersService {
           throw new BadRequestException(`algorithm_preference invalido`);
         }
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
-        (sanitized as any)[key] = String(value);
+        (sanitized as Record<string, unknown>)[key] = String(value);
         continue;
       }
 
@@ -471,7 +472,7 @@ export class ParametersService {
           throw new BadRequestException(`vehicle_idle_gap_behavior invalido`);
         }
         // eslint-disable-next-line @typescript-eslint/no-base-to-string
-        (sanitized as any)[key] = String(value);
+        (sanitized as Record<string, unknown>)[key] = String(value);
         continue;
       }
 
@@ -482,7 +483,7 @@ export class ParametersService {
           throw new BadRequestException(`group_infeasibility_mode invalido`);
         }
 
-        (sanitized as any)[key] = normalized;
+        (sanitized as Record<string, unknown>)[key] = normalized;
         continue;
       }
 
@@ -493,7 +494,7 @@ export class ParametersService {
           throw new BadRequestException(`operational_quality_mode invalido`);
         }
 
-        (sanitized as any)[key] = normalized;
+        (sanitized as Record<string, unknown>)[key] = normalized;
         continue;
       }
 
@@ -512,7 +513,7 @@ export class ParametersService {
           );
         }
 
-        (sanitized as any)[key] = ids;
+        (sanitized as Record<string, unknown>)[key] = ids;
         continue;
       }
 
@@ -522,7 +523,7 @@ export class ParametersService {
         }
 
         for (const [goalKey, goalValue] of Object.entries(
-          value as Record<string, any>,
+          value as Record<string, unknown>,
         )) {
           const parsed = Number(goalValue);
 
@@ -533,7 +534,7 @@ export class ParametersService {
           }
         }
 
-        (sanitized as any)[key] = value;
+        (sanitized as Record<string, unknown>)[key] = value;
         continue;
       }
 
@@ -542,7 +543,7 @@ export class ParametersService {
           throw new BadRequestException(`dynamic_rules deve ser uma lista`);
         }
 
-        (sanitized as any)[key] = value;
+        (sanitized as Record<string, unknown>)[key] = value;
         continue;
       }
 
