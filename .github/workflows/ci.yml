@@ -157,6 +157,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -191,7 +201,7 @@ jobs:
 
       - name: Start backend
         working-directory: backend
-        run: npm run start &
+        run: npm run start > backend.log 2>&1 &
         env:
           NODE_ENV: production
           PORT: 3001
@@ -214,10 +224,14 @@ jobs:
 
       - name: Start optimizer
         working-directory: optimizer
-        run: uvicorn src.main:app --host 0.0.0.0 --port 8000 &
+        run: uvicorn src.main:app --host 0.0.0.0 --port 8000 > optimizer.log 2>&1 &
         env:
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
-          DATABASE_URL: sqlite:///./e2e.db
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: otimiz_e2e
           REDIS_URL: redis://localhost:6379/0
 
       # ── Frontend ──────────────────────────────────────────────────────────────
@@ -302,20 +316,24 @@ jobs:
       - name: Diagnose failed services
         if: failure()
         run: |
+          echo "=== Environment Variables (names only) ==="
+          env | grep -E 'DB_|NODE_ENV|PORT|INTERNAL_OPTIMIZER_KEY|REDIS_URL|DATABASE_URL' | cut -d= -f1 | sort
+
+          echo ""
+          echo "=== Backend Startup Log ==="
+          [ -f backend/backend.log ] && cat backend/backend.log || echo "No backend.log found"
+
+          echo ""
+          echo "=== Optimizer Startup Log ==="
+          [ -f optimizer/optimizer.log ] && cat optimizer/optimizer.log || echo "No optimizer.log found"
+
+          echo ""
           echo "=== Running Processes ==="
-          ps aux | grep -E 'npm|uvicorn|node|postgres' | grep -v grep || echo "No processes found"
+          ps aux | grep -E 'npm|uvicorn|node' | grep -v grep || echo "No application processes found"
 
           echo ""
           echo "=== Open Ports ==="
           netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || echo "netstat/ss not available"
-
-          echo ""
-          echo "=== Backend Process Log ==="
-          ps aux | grep "npm run start" | grep -v grep || echo "Backend not running"
-
-          echo ""
-          echo "=== Optimizer Process Log ==="
-          ps aux | grep "uvicorn" | grep -v grep || echo "Optimizer not running"
 
           echo ""
           echo "=== Backend Connection Test ==="
@@ -326,8 +344,12 @@ jobs:
           curl -v http://localhost:8000/health 2>&1 | head -20 || echo "Optimizer unreachable"
 
           echo ""
-          echo "=== Postgres Connection Test ==="
+          echo "=== Postgres Status ==="
           psql -h localhost -U postgres -d postgres -c "SELECT version();" 2>&1 || echo "Postgres unreachable"
+
+          echo ""
+          echo "=== Redis Status ==="
+          redis-cli -h localhost ping 2>&1 || echo "Redis unreachable"
 
       # ── Seed admin + demo data ────────────────────────────────────────────────
       - name: Seed E2E data
