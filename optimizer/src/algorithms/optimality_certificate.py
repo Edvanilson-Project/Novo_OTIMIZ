@@ -66,16 +66,24 @@ def certify_optimality(result: OptimizationResult) -> Dict[str, Any]:
     Computa certificado de otimalidade combinando múltiplos lower bounds.
 
     Returns dict com:
-        lb_value: int — melhor LB disponível (max das fontes)
+        lb_value: int | None — melhor LB disponível (max das fontes), or None se LB ausente
         lb_method: str — qual fonte deu o melhor LB
         lb_sources: dict — todos os LBs disponíveis {source: value}
         ub_value: int — veículos usados na solução (UB)
-        gap_pct: float — (UB - LB) / LB × 100
-        is_optimal_certified: bool — True se gap < 0.01% (ótimo provado)
+        gap_pct: float | None — (UB - LB) / LB × 100, or None se LB ausente/inválido
+        is_optimal_certified: bool — True se gap == 0.0, False se LB ausente
         gap_explained: str — explicação textual
 
     Compatibilidade: mantém as chaves legadas vsp_lower_bound,
     vsp_actual, vsp_gap_pct para não quebrar consumers existentes.
+
+    IMPORTANTE: quando o lower bound é 0 ou ausente, retorna:
+      - vsp_lower_bound: None
+      - vsp_gap_pct: None
+      - is_optimal_certified: False
+      - gap_explained: "No lower bound available — optimality unknown"
+
+    Isto evita confundir "nenhum dado" (LB=0) com "ótimo provado" (gap=0%).
     """
     try:
         all_trips = [t for b in result.vsp.blocks for t in b.trips]
@@ -98,11 +106,21 @@ def certify_optimality(result: OptimizationResult) -> Dict[str, Any]:
         lb_method, lb_value = max(lb_sources.items(), key=lambda kv: kv[1])
         lb_value_int = int(round(lb_value))
 
-        gap_pct = (
-            ((ub_value - lb_value_int) / lb_value_int * 100.0)
-            if lb_value_int > 0
-            else 0.0
-        )
+        # CHANGED: If lower bound is invalid (0 or negative), return unavailable
+        if lb_value_int <= 0:
+            return {
+                # Chaves legadas
+                "vsp_lower_bound": None,
+                "vsp_actual": ub_value,
+                "vsp_gap_pct": None,
+                "vsp_gap_explained": "No lower bound available — optimality unknown",
+                # Chaves novas
+                "lb_method": "none",
+                "lb_sources": {},
+                "is_optimal_certified": False,
+            }
+
+        gap_pct = ((ub_value - lb_value_int) / lb_value_int * 100.0)
         is_optimal = gap_pct == 0.0
 
         return {
