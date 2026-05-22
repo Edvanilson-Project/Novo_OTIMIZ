@@ -7,15 +7,16 @@ describe('RequestLoggingInterceptor', () => {
   let interceptor: RequestLoggingInterceptor;
   let loggerSpy: jest.SpyInstance;
 
-  const mockRequest = (headers: any = {}) => ({
-    headers,
-    method: 'GET',
-    path: '/test',
-    ip: '127.0.0.1',
-    user: undefined,
-    requestId: undefined as string | undefined,
-    get: (name: string) => headers[name.toLowerCase()] || null,
-  });
+  const mockRequest = (headers: any = {}) =>
+    ({
+      headers,
+      method: 'GET',
+      path: '/test',
+      ip: '127.0.0.1',
+      user: undefined,
+      requestId: undefined as string | undefined,
+      get: (name: string) => headers[name.toLowerCase()] || null,
+    } as any);
 
   const mockResponse = () => ({
     statusCode: 200,
