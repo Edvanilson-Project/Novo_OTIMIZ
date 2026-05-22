@@ -202,15 +202,6 @@ export const parametersApi = {
   update: (data: object) => apiClient.put('/parameters', data).then((r) => r.data),
 };
 
-// ─── Reports ─────────────────────────────────────────────────────────────────
-export const reportsApi = {
-  getKpis: () => apiClient.get('/reports/kpis').then((r) => r.data),
-  getHistory: (days?: number) =>
-    apiClient.get('/reports/history', { params: { days } }).then((r) => r.data),
-  compare: (run1: ID, run2: ID) =>
-    apiClient.get('/reports/compare', { params: { run1, run2 } }).then((r) => r.data),
-};
-
 // ─── Custom Reports (FASE 4.2) ────────────────────────────────────────────────
 export interface CustomReportFilters {
   dateRangeDays?: number;
