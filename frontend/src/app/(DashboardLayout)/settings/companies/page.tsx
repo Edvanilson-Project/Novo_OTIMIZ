@@ -63,7 +63,7 @@ export default function CompaniesPage() {
     try {
       const data = await companiesApi.getAll();
       const raw = Array.isArray(data) ? data : data.data ?? [];
-      setRows(raw.map((c: any) => ({ ...c, status: c.isActive ? 'active' : 'inactive' })));
+      setRows(raw.map((c: Company & { isActive?: boolean }) => ({ ...c, status: c.isActive ? 'active' : 'inactive' })));
     } catch {
       setRows([]);
     } finally {

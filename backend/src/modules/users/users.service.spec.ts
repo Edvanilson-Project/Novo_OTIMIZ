@@ -28,6 +28,19 @@ function makeTenant(id: number | null = 16) {
   return { getCompanyId: jest.fn().mockReturnValue(id) } as any;
 }
 
+function makeDataSource() {
+  const mgr = {
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
+    query: jest.fn().mockResolvedValue([]),
+  };
+  return {
+    getRepository: jest.fn().mockReturnValue({
+      find: jest.fn().mockResolvedValue([]),
+    }),
+    transaction: jest.fn().mockImplementation((cb: (m: any) => Promise<void>) => cb(mgr)),
+  } as any;
+}
+
 const baseUser = {
   id: 1,
   name: 'Ana',
@@ -44,7 +57,7 @@ describe('UsersService', () => {
   beforeEach(() => {
     repo = makeRepo(baseUser);
     tenant = makeTenant(16);
-    service = new UsersService(repo, tenant);
+    service = new UsersService(repo, tenant, makeDataSource());
   });
 
   // ── requireCompanyId ─────────────────────────────────────────────────────

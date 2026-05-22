@@ -68,7 +68,14 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedScenarios, setSelectedScenarios] = useState<[string, string] | null>(null);
-  const [comparison, setComparison] = useState<any>(null);
+  interface ComparisonResult {
+    scenario1: { name: string; totalCost?: number; vehiclesUsed?: number; algorithm?: string };
+    scenario2: { name: string; totalCost?: number; vehiclesUsed?: number; algorithm?: string };
+    savings: number;
+    savingsPercent?: number | null;
+    differences?: string[];
+  }
+  const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const triggerScenarios = useCallback(async () => {
@@ -321,7 +328,7 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
                   </Typography>
                 </Alert>
               </Grid>
-              {comparison.differences?.length > 0 && (
+              {(comparison.differences?.length ?? 0) > 0 && comparison.differences && (
                 <Grid size={{ xs: 12 }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
                     Diferenças

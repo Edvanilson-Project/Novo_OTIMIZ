@@ -96,8 +96,9 @@ const WhatIfPanel: React.FC<WhatIfPanelProps> = ({ scheduleId, originalCost }) =
       });
       setRealScenarioId(submission.scenarioId);
       setRealRun(submission);
-    } catch (err: any) {
-      setRealError(err?.response?.data?.message || 'Falha ao enfileirar reotimização real.');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } } | undefined;
+      setRealError(axiosErr?.response?.data?.message ?? 'Falha ao enfileirar reotimização real.');
     } finally {
       setRealLoading(false);
     }

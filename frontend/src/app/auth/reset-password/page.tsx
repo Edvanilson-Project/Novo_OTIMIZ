@@ -33,8 +33,9 @@ function ResetPasswordForm() {
       await apiClient.post('/auth/reset-password', { token, newPassword: password });
       setSuccess(true);
       setTimeout(() => router.push('/auth/login'), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Erro ao redefinir a senha. O link pode ter expirado.');
+    } catch (err) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr.response?.data?.message || 'Erro ao redefinir a senha. O link pode ter expirado.');
     } finally {
       setLoading(false);
     }

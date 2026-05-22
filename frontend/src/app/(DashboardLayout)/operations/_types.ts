@@ -380,6 +380,58 @@ export interface OptimizationResultSummary {
   operational_quality_decision?: OperationalQualityDecision | null;
   metadata?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
+  /** Resolved optimizer parameters (snake_case from Python API) */
+  resolved_params?: Record<string, unknown>;
+  /** Run-level fields present when a full OptimizationRun is passed as this type */
+  id?: number;
+  scheduleId?: number;
+  updatedAt?: string;
+  createdAt?: string;
+  /** Snake_case wrapper sometimes returned by the API before normalization */
+  result?: OptimizationResultSummary;
+  /** Nested summary when full run object is passed to components expecting this type */
+  resultSummary?: OptimizationResultSummary | null;
+  /** Schedule entity fields (status, error info) present when the full entity is used */
+  status?: OptimizationStatus;
+  error_code?: string;
+  error_message?: string;
+  hard_constraint_report?: Record<string, unknown> | null;
+}
+
+export interface OptimizationParameters {
+  dynamic_rules?: unknown[];
+  operational_quality_mode?: string;
+  algorithm_preference?: string;
+  preferred_algorithm?: string;
+  min_break_minutes?: number;
+  meal_break_minutes?: number;
+  min_layover_minutes?: number;
+  connection_tolerance_minutes?: number;
+  pullout_minutes?: number;
+  pullback_minutes?: number;
+  [key: string]: unknown;
+}
+
+export interface ScheduleValidationIssue {
+  detail: string;
+  suggestedFix?: string;
+}
+
+export interface ScheduleValidationStats {
+  totalTrips?: number;
+  allocatedTrips?: number;
+  totalVehicles?: number;
+  totalDuties?: number;
+  totalOperatorHours?: number;
+  allocationPercentage?: number;
+}
+
+export interface ScheduleValidationResult {
+  valid: boolean;
+  errorCount?: number;
+  stats?: ScheduleValidationStats;
+  errors?: ScheduleValidationIssue[];
+  warnings?: ScheduleValidationIssue[];
 }
 
 export interface OptimizationRunComparisonPerformance {
@@ -410,11 +462,19 @@ export interface OptimizationRunComparisonReproducibility {
 
 export interface OptimizationBlock {
   block_id: number;
+  /** camelCase fallback for block_id */
+  blockId?: number;
+  /** Legacy id alias */
+  id?: number;
   trips?: number[] | TripDetail[];
   trip_details?: TripDetail[];
   num_trips?: number;
   start_time?: number;
+  /** camelCase fallback for start_time */
+  startTime?: number;
   end_time?: number;
+  /** camelCase fallback for end_time */
+  endTime?: number;
   spread_minutes?: number;
   idle_minutes?: number;
   total_cost?: number;
@@ -424,7 +484,7 @@ export interface OptimizationBlock {
   activation_cost?: number;
   connection_cost?: number;
   deadhead_cost?: number;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 }
 
 
@@ -432,6 +492,11 @@ export interface OptimizationBlock {
 export interface OptimizationDutyTimeSegment {
   type?: string;
   event_type?: string;
+  segment_sequence?: number;
+  distance_km?: number;
+  /** Legacy single-trip id fields (some API responses include these on segments) */
+  tripId?: number;
+  trip_id?: number;
   event_scope?: string;
   bundle_event_type?: string;
   start?: number;
@@ -485,10 +550,19 @@ export interface OptimizationOperationalTimeReport {
   operator?: {
     operator_not_assigned?: boolean;
   };
+  /** Flat aliases sometimes returned directly by the API (without nesting) */
+  violations?: string[];
+  operator_not_assigned?: boolean;
+  mandatory_rest_required?: boolean;
+  has_valid_mandatory_rest?: boolean | null;
+  suggestion?: string;
+  user_explanation?: string;
 }
 
 export interface OptimizationDuty {
   duty_id: number;
+  /** Legacy id field used as fallback for duty_id in some API responses */
+  id?: number;
   blocks?: number[];
   trip_ids?: number[];
   trips?: TripDetail[];
@@ -511,7 +585,7 @@ export interface OptimizationDuty {
   rest_violations?: number;
   cct_penalties_cost?: number;
   warnings?: string[];
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 }
 
 export interface OptimizationDutySegment {
@@ -556,4 +630,15 @@ export interface TripDetail {
   is_paired?: boolean;
   direction?: 'outbound' | 'inbound';
   destination_terminal_id?: number | null;
+  /** camelCase aliases present when trip comes from the hydrated blocks */
+  tripId?: number;
+  lineId?: number | null;
+  lineCode?: string;
+  line_code?: string;
+  startTime?: number;
+  endTime?: number;
+  color?: string;
+  sentido?: string;
+  distance_km?: number;
+  [key: string]: unknown;
 }

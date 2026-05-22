@@ -29,8 +29,19 @@ import {
 import { IconSettings, IconBolt, IconRefresh, IconRobot, IconShieldCheck } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { linesApi, terminalsApi, operationsApi, parametersApi, auditApi } from "@/lib/api";
-import type { OperationalQualityDecision, OperationalQualityMode } from "../_types";
+import type {
+  Line,
+  Terminal,
+  OptimizationParameters,
+  OptimizationResultSummary,
+  ScheduleValidationResult,
+  ScheduleValidationIssue,
+  OperationalQualityDecision,
+  OperationalQualityMode,
+} from "../_types";
+import type { Socket } from "socket.io-client";
 import { type TripIntervalPolicy } from "./_helpers/formatters";
+import type { DynamicRule } from "./_components/DynamicRulesEditor";
 import { getSessionUser } from "@/lib/api";
 
 const AiCostDrawer = dynamic(
@@ -83,16 +94,16 @@ export default function PlannerPage() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
-  const [schedule, setSchedule] = useState<any>(null);
-  const [lines, setLines] = useState<any[]>([]);
-  const [terminals, setTerminals] = useState<any[]>([]);
-  const [depots, setDepots] = useState<any[]>([]);
-  const [parameters, setParameters] = useState<any>(null);
+  const [schedule, setSchedule] = useState<OptimizationResultSummary | null>(null);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [depots, setDepots] = useState<Terminal[]>([]);
+  const [parameters, setParameters] = useState<OptimizationParameters | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState("hybrid_pipeline");
   const [selectedOperationalQualityMode, setSelectedOperationalQualityMode] = useState<OperationalQualityMode>("balanced");
   const [selectedDepotIds, setSelectedDepotIds] = useState<number[]>([]);
   const [validating, setValidating] = useState(false);
-  const [validationResult, setValidationResult] = useState<any>(null);
+  const [validationResult, setValidationResult] = useState<ScheduleValidationResult | null>(null);
   const [validationOpen, setValidationOpen] = useState(false);
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [notification, setNotification] = useState({
@@ -109,7 +120,14 @@ export default function PlannerPage() {
   } | null>(null);
 
   const companyId = useMemo(() => getSessionUser()?.companyId ?? 0, []);
-  const socketRef = useRef<any>(null);
+
+  interface SocketModuleRef {
+    socket: Socket;
+    disconnectSocket: () => void;
+    reconnectSocket: () => void;
+    getSocketDiagnostics: () => { connected: boolean; id: string | null };
+  }
+  const socketRef = useRef<SocketModuleRef | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const optimizingRef = useRef(false);
@@ -124,9 +142,9 @@ export default function PlannerPage() {
     );
   }, [schedule]);
 
-  const hardConstraintReport = useMemo<Record<string, any> | null>(() => {
+  const hardConstraintReport = useMemo<Record<string, unknown> | null>(() => {
     return (
-      (schedule as any)?.hard_constraint_report ??
+      schedule?.hard_constraint_report ??
       schedule?.resultSummary?.hardConstraintReport ??
       null
     );
@@ -134,18 +152,18 @@ export default function PlannerPage() {
 
   const intervalPolicy: TripIntervalPolicy = useMemo(
     () => {
-      const summary = schedule?.resultSummary ?? {};
-      const meta = summary.metadata ?? summary.meta ?? {};
-      const input = meta.input ?? summary.resolved_params ?? {};
-      const cct = input.cct_params ?? input.cct ?? {};
-      const vsp = input.vsp_params ?? input.vsp ?? {};
+      const summary = (schedule?.resultSummary ?? {}) as Record<string, unknown>;
+      const meta = (summary.metadata ?? summary.meta ?? {}) as Record<string, unknown>;
+      const input = (meta.input ?? summary.resolved_params ?? {}) as Record<string, unknown>;
+      const cct = (input.cct_params ?? input.cct ?? {}) as Record<string, unknown>;
+      const vsp = (input.vsp_params ?? input.vsp ?? {}) as Record<string, unknown>;
       return {
-        minBreakMinutes: cct.min_break_minutes ?? parameters?.min_break_minutes ?? 30,
-        mealBreakMinutes: cct.meal_break_minutes ?? parameters?.meal_break_minutes ?? 60,
-        minLayoverMinutes: vsp.min_layover_minutes ?? cct.min_layover_minutes ?? parameters?.min_layover_minutes ?? 8,
-        connectionToleranceMinutes: cct.connection_tolerance_minutes ?? parameters?.connection_tolerance_minutes ?? 0,
-        pulloutMinutes: vsp.pullout_minutes ?? cct.pullout_minutes ?? parameters?.pullout_minutes ?? 0,
-        pullbackMinutes: vsp.pullback_minutes ?? cct.pullback_minutes ?? parameters?.pullback_minutes ?? 0,
+        minBreakMinutes: (cct.min_break_minutes as number | undefined) ?? parameters?.min_break_minutes ?? 30,
+        mealBreakMinutes: (cct.meal_break_minutes as number | undefined) ?? parameters?.meal_break_minutes ?? 60,
+        minLayoverMinutes: (vsp.min_layover_minutes as number | undefined) ?? (cct.min_layover_minutes as number | undefined) ?? parameters?.min_layover_minutes ?? 8,
+        connectionToleranceMinutes: (cct.connection_tolerance_minutes as number | undefined) ?? parameters?.connection_tolerance_minutes ?? 0,
+        pulloutMinutes: (vsp.pullout_minutes as number | undefined) ?? (cct.pullout_minutes as number | undefined) ?? parameters?.pullout_minutes ?? 0,
+        pullbackMinutes: (vsp.pullback_minutes as number | undefined) ?? (cct.pullback_minutes as number | undefined) ?? parameters?.pullback_minutes ?? 0,
       };
     },
     [parameters, schedule]
@@ -237,25 +255,25 @@ export default function PlannerPage() {
       const socket = getSocket(companyId);
       socketRef.current = { socket, disconnectSocket, reconnectSocket, getSocketDiagnostics };
 
-      const handleQueued = (data: any) => {
+      const handleQueued = (data: Record<string, unknown>) => {
         setOptimizing(true);
         setOptimizationProgress({
-          taskId: data?.taskId ?? null,
-          scheduleId: data?.scheduleId ?? null,
+          taskId: (data?.taskId as string | null) ?? null,
+          scheduleId: (data?.scheduleId as number | null) ?? null,
           phase: "queued",
           phaseLabel: "Otimização enfileirada.",
           progressPct: 0,
         });
       };
 
-      const handleProgress = (data: any) => {
+      const handleProgress = (data: Record<string, unknown>) => {
         setOptimizing(true);
         setOptimizationProgress({
-          taskId: data?.taskId ?? null,
-          scheduleId: data?.scheduleId ?? null,
-          phase: data?.phase ?? "processing",
-          phaseLabel: data?.phaseLabel ?? "Otimização em andamento...",
-          progressPct: data?.progressPct ?? null,
+          taskId: (data?.taskId as string | null) ?? null,
+          scheduleId: (data?.scheduleId as number | null) ?? null,
+          phase: (data?.phase as string) ?? "processing",
+          phaseLabel: (data?.phaseLabel as string) ?? "Otimização em andamento...",
+          progressPct: (data?.progressPct as number | null) ?? null,
         });
       };
 
@@ -267,13 +285,13 @@ export default function PlannerPage() {
         fetchData();
       };
 
-      const handleFailed = (data: any) => {
+      const handleFailed = (data: Record<string, unknown>) => {
         stopOptimizationFallbacks();
         setOptimizing(false);
         setOptimizationProgress(null);
         setNotification({
           open: true,
-          message: "Falha na otimização: " + (data?.error || "Erro desconhecido"),
+          message: "Falha na otimização: " + ((data?.error as string) || "Erro desconhecido"),
           severity: "error",
         });
       };
@@ -369,14 +387,15 @@ export default function PlannerPage() {
         message: `Otimização disparada com algoritmo "${ALGORITHMS.find((a) => a.value === selectedAlgorithm)?.label}"...`,
         severity: "info",
       });
-    } catch (error: any) {
+    } catch (error) {
       stopOptimizationFallbacks();
       setOptimizing(false);
       setOptimizationProgress(null);
-      if (error.response?.status === 409) {
+      const axiosError = error as { response?: { status?: number; data?: { message?: string } } };
+      if (axiosError.response?.status === 409) {
         setNotification({
           open: true,
-          message: error.response?.data?.message || "Otimização já em andamento.",
+          message: axiosError.response?.data?.message || "Otimização já em andamento.",
           severity: "warning",
         });
         fetchData();
@@ -384,7 +403,7 @@ export default function PlannerPage() {
       }
       setNotification({
         open: true,
-        message: error.response?.data?.message || "Erro ao disparar otimização.",
+        message: axiosError.response?.data?.message || "Erro ao disparar otimização.",
         severity: "error",
       });
     }
@@ -397,10 +416,11 @@ export default function PlannerPage() {
       const result = await auditApi.validateSchedule(schedule.id);
       setValidationResult(result);
       setValidationOpen(true);
-    } catch (e: any) {
+    } catch (e) {
+      const axiosError = e as { response?: { data?: { message?: string } } };
       setNotification({
         open: true,
-        message: e?.response?.data?.message || 'Erro ao validar escala.',
+        message: axiosError?.response?.data?.message || 'Erro ao validar escala.',
         severity: 'error',
       });
     } finally {
@@ -410,7 +430,7 @@ export default function PlannerPage() {
 
   const handleWhatIfUpdate = (newCost: number | null) => {
     if (newCost !== null && schedule) {
-      setSchedule((prev: any) => ({ ...prev, totalCost: newCost }));
+      setSchedule((prev) => (prev ? { ...prev, totalCost: newCost } : prev));
     }
   };
 
@@ -422,15 +442,15 @@ export default function PlannerPage() {
         <DashboardKPIs schedule={schedule} />
 
         <DynamicRulesEditor
-          initialRules={dynamicRules}
-          onSaved={(rules) => setParameters((p: any) => ({ ...p, dynamic_rules: rules }))}
+          initialRules={dynamicRules as DynamicRule[]}
+          onSaved={(rules) => setParameters((p) => ({ ...(p ?? {}), dynamic_rules: rules }))}
         />
 
         <DashboardCard
           title="Gantt Planner"
           subtitle={
             schedule
-              ? `Escala de ${new Date(schedule.createdAt).toLocaleDateString("pt-BR")} — Planejamento Integrado VSP + CSP`
+              ? `Escala de ${new Date(schedule.createdAt ?? '').toLocaleDateString("pt-BR")} — Planejamento Integrado VSP + CSP`
               : "Planejamento Integrado de Frota e Tripulação"
           }
         >
@@ -560,11 +580,11 @@ export default function PlannerPage() {
                         disabled={optimizing}
                         renderValue={(selected) =>
                           (selected as number[])
-                            .map((id) => depots.find((d: any) => d.id === id)?.name ?? id)
+                            .map((id) => depots.find((d) => d.id === id)?.name ?? id)
                             .join(', ')
                         }
                       >
-                        {depots.map((depot: any) => (
+                        {depots.map((depot) => (
                           <MenuItem key={depot.id} value={depot.id}>
                             {depot.name}
                           </MenuItem>
@@ -668,7 +688,7 @@ export default function PlannerPage() {
 
             {schedule?.status === "completed" && hardConstraintReport && (
               (() => {
-                const output = hardConstraintReport.output ?? {};
+                const output = (hardConstraintReport.output ?? {}) as { soft_issues?: string[]; hard_issues?: string[] };
                 const softIssues: string[] = output.soft_issues ?? [];
                 const hardIssues: string[] = output.hard_issues ?? [];
                 if (hardIssues.length === 0 && softIssues.length === 0) return null;
@@ -765,14 +785,14 @@ export default function PlannerPage() {
                 ))}
               </Stack>
 
-              {validationResult.errors?.length > 0 && (
+              {(validationResult.errors?.length ?? 0) > 0 && validationResult.errors && (
                 <>
                   <Divider />
                   <Typography variant="subtitle2" color="error.main">
                     Erros ({validationResult.errors.length})
                   </Typography>
                   <List dense disablePadding>
-                    {validationResult.errors.map((e: any, i: number) => (
+                    {validationResult.errors.map((e: ScheduleValidationIssue, i: number) => (
                       <ListItem key={i} disablePadding sx={{ py: 0.25 }}>
                         <ListItemText
                           primary={<Typography variant="body2" color="error.main">{e.detail}</Typography>}
@@ -784,14 +804,14 @@ export default function PlannerPage() {
                 </>
               )}
 
-              {validationResult.warnings?.length > 0 && (
+              {(validationResult.warnings?.length ?? 0) > 0 && validationResult.warnings && (
                 <>
                   <Divider />
                   <Typography variant="subtitle2" color="warning.main">
                     Avisos ({validationResult.warnings.length})
                   </Typography>
                   <List dense disablePadding>
-                    {validationResult.warnings.map((w: any, i: number) => (
+                    {validationResult.warnings.map((w: ScheduleValidationIssue, i: number) => (
                       <ListItem key={i} disablePadding sx={{ py: 0.25 }}>
                         <ListItemText
                           primary={<Typography variant="body2" color="warning.dark">{w.detail}</Typography>}

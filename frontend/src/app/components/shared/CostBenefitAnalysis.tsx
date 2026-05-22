@@ -103,8 +103,9 @@ const CostBenefitAnalysis: React.FC<CostBenefitAnalysisProps> = ({ scheduleId })
           'Nenhuma run de otimização registrada nos últimos 30 dias. Execute cenários em "Otimização Avançada" para popular esta análise.',
         );
       }
-    } catch (err: any) {
-      if (err?.response?.status === 404) {
+    } catch (err) {
+      const axiosErr = err as { response?: { status?: number; data?: { message?: string } } };
+      if (axiosErr?.response?.status === 404) {
         setError('Sem dados disponíveis para análise');
       } else {
         setError('Erro ao carregar análise de custo-benefício');

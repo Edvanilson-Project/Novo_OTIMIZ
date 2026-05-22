@@ -5,7 +5,13 @@ import { Card, CardHeader, Tooltip, Divider, IconButton } from "@mui/material";
 import { CustomizerContext } from '@/app/context/customizerContext';
 import { IconDownload } from "@tabler/icons-react";
 
-const DownloadCard = ({ title, children, onDownload }: any) => {
+interface DownloadCardProps {
+  title: string;
+  children: React.ReactNode;
+  onDownload?: () => void;
+}
+
+const DownloadCard = ({ title, children, onDownload }: DownloadCardProps) => {
   const { isCardShadow } = useContext(CustomizerContext);
 
   const theme = useTheme();

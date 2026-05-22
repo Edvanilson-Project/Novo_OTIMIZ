@@ -1,5 +1,6 @@
 'use client';
 import { Box, Avatar, Typography, IconButton, Tooltip, useMediaQuery, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
+import type { Theme } from '@mui/material/styles';
 import { IconPower } from '@tabler/icons-react';
 import { CustomizerContext } from "@/app/context/customizerContext";
 import { useContext, useState } from 'react';
@@ -14,7 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export const Profile = () => {
-  const lgUp = useMediaQuery((theme: any) => theme.breakpoints.up('lg'));
+  const lgUp = useMediaQuery((theme: Theme) => theme.breakpoints.up('lg'));
   const { isSidebarHover, isCollapse } = useContext(CustomizerContext);
   const hideMenu = lgUp ? isCollapse === 'mini-sidebar' && !isSidebarHover : false;
   const [confirmOpen, setConfirmOpen] = useState(false);

@@ -39,7 +39,7 @@ export default function ReportingPage() {
 
   useEffect(() => {
     operationsApi.getLatestSchedule()
-      .then((s: any) => { if (s?.id) setScheduleId(s.id); })
+      .then((s) => { if (s?.id) setScheduleId(s.id); })
       .catch((err) => {
         console.error('[Reporting] failed to load latest schedule', err);
       });

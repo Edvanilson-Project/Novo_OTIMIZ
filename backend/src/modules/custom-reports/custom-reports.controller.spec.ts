@@ -4,6 +4,7 @@ import {
   CustomReportsService,
   SUPPORTED_METRICS,
 } from './custom-reports.service';
+import { CreateCustomReportDto } from './custom-reports.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 describe('CustomReportsController', () => {
@@ -50,7 +51,9 @@ describe('CustomReportsController', () => {
   });
 
   it('create calls service.create', async () => {
-    const result = await controller.create({ name: 'R2' });
+    // O input parcial é intencional — testamos o pass-through do controller,
+    // não a validação (que é feita pelo ValidationPipe no app real).
+    const result = await controller.create({ name: 'R2' } as CreateCustomReportDto);
     expect(service.create).toHaveBeenCalledWith({ name: 'R2' });
     expect(result).toMatchObject({ id: 2 });
   });

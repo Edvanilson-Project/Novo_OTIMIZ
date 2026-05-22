@@ -4,6 +4,10 @@ if (typeof (globalThis as any).crypto === 'undefined') {
   (globalThis as any).crypto = webcrypto;
 }
 
+// Sentry must be initialized before any other module
+import { initSentry } from './common/telemetry/sentry.setup';
+initSentry();
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -12,7 +16,32 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { Response } from 'express';
 
+const WEAK_JWT_DEFAULTS = new Set([
+  'otimiz-dev-jwt-secret-change-in-production',
+  'your_jwt_secret_here_min_32_chars',
+  '',
+]);
+
+function assertProductionSecrets(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  const jwtSecret = process.env.JWT_SECRET ?? '';
+  if (WEAK_JWT_DEFAULTS.has(jwtSecret) || jwtSecret.length < 32) {
+    console.error(
+      'FATAL: JWT_SECRET is missing or too weak for production. Set a random string ≥32 chars.',
+    );
+    process.exit(1);
+  }
+  const internalKey = process.env.INTERNAL_OPTIMIZER_KEY ?? '';
+  if (!internalKey || internalKey === 'internal-key-123456') {
+    console.error(
+      'FATAL: INTERNAL_OPTIMIZER_KEY is missing or using default value in production.',
+    );
+    process.exit(1);
+  }
+}
+
 async function bootstrap() {
+  assertProductionSecrets();
   const app = await NestFactory.create(AppModule);
 
   // Security headers via Helmet

@@ -52,6 +52,15 @@ jobs:
           DB_PASSWORD: postgres
           DB_NAME: otimiz_test
 
+      - name: Test migration rollback
+        run: npm run migration:revert && npm run migration:run
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: otimiz_test
+
       - name: Run tests
         run: npm test -- --no-coverage --forceExit
         env:

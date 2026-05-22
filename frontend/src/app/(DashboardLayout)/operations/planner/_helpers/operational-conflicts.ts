@@ -11,11 +11,11 @@ interface TripWithTimes {
 }
 
 function resolvedPolicy(res: OptimizationResultSummary) {
-  const summary = res as any;
-  const meta = summary.metadata ?? summary.meta ?? {};
-  const input = meta.input ?? summary.resolved_params ?? {};
-  const cct = input.cct_params ?? input.cct ?? {};
-  const vsp = input.vsp_params ?? input.vsp ?? {};
+  const summary = res as Record<string, unknown>;
+  const meta = (summary.metadata ?? summary.meta ?? {}) as Record<string, unknown>;
+  const input = (meta.input ?? summary.resolved_params ?? {}) as Record<string, unknown>;
+  const cct = (input.cct_params ?? input.cct ?? {}) as Record<string, unknown>;
+  const vsp = (input.vsp_params ?? input.vsp ?? {}) as Record<string, unknown>;
   return {
     minBreakMinutes: Number(cct.min_break_minutes ?? 30),
     mealBreakMinutes: Number(cct.meal_break_minutes ?? cct.min_break_minutes ?? 30),

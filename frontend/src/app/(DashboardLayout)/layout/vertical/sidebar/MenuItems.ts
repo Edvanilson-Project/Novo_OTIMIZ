@@ -1,3 +1,4 @@
+import type React from "react";
 import {
   IconAperture,
   IconSettings,
@@ -19,18 +20,20 @@ import {
 import { uniqueId } from "lodash";
 
 export interface MenuitemsType {
-  [x: string]: any;
+  [x: string]: unknown;
   id?: string;
   navlabel?: boolean;
   subheader?: string;
   title?: string;
-  icon?: any;
+  icon?: React.ElementType;
   href?: string;
   children?: MenuitemsType[];
   chip?: string;
   chipColor?: string;
   variant?: string;
   external?: boolean;
+  disabled?: boolean;
+  subtitle?: string;
   /** Roles mínimas para ver este item. Undefined = todos os usuários autenticados. */
   allowedRoles?: string[];
 }

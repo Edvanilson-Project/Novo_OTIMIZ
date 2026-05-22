@@ -92,8 +92,9 @@ export default function WeeklyRosteringPage() {
 
   useEffect(() => {
     operationsApi.getDrivers()
-      .then((data: any) => {
-        const list: Driver[] = Array.isArray(data) ? data : (data.drivers ?? data.data ?? []);
+      .then((data: unknown) => {
+        const raw = data as { drivers?: Driver[]; data?: Driver[] } | Driver[];
+        const list: Driver[] = Array.isArray(raw) ? raw : ((raw as { drivers?: Driver[]; data?: Driver[] }).drivers ?? (raw as { data?: Driver[] }).data ?? []);
         setDrivers(list);
         setSelectedDriverIds(list.slice(0, Math.min(5, list.length)).map((d) => d.id));
       })
@@ -152,8 +153,9 @@ export default function WeeklyRosteringPage() {
 
       const res = await weeklyRosteringApi.solve(body);
       setResult(res);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao executar escala semanal.');
+    } catch (e) {
+      const axiosErr = e as { response?: { data?: { detail?: string } } };
+      setError(axiosErr?.response?.data?.detail || 'Erro ao executar escala semanal.');
     } finally {
       setLoading(false);
     }

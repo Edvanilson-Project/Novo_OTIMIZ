@@ -17,7 +17,10 @@ import {
 } from '@tabler/icons-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import type { Line, Terminal, OptimizationResultSummary } from '../../_types';
+import type {
+  Line, Terminal, OptimizationResultSummary,
+  OptimizationDuty, OptimizationDutyTimeSegment, TripDetail, OptimizationBlock,
+} from '../../_types';
 import {
   minToHHMM, minToDuration, fmtCurrency, fmtSignedCurrency,
   getTripPublicId, type TripIntervalPolicy,
@@ -95,9 +98,74 @@ interface DutyAuditSummary {
   hasValidMandatoryRest: boolean | null;
 }
 
+// ─── Raw/Hydrated Data Interfaces ────────────────────────────────────────────
+/** Trip item produced by hydrateBlocks — normalized shape used internally */
+interface HydratedTripItem {
+  // Required display fields
+  start_time: number;
+  end_time: number;
+  color: string;
+  kind: string;
+  // ID fields
+  tripId?: number;
+  id?: number;
+  trip_id?: number;
+  source_trip_id?: number;
+  public_trip_id?: number;
+  // Line info
+  lineCode?: string | null;
+  lineId?: number | null;
+  line_code?: string | null;
+  line_id?: number | null;
+  // Terminal / spatial
+  origin_id?: number | string | null;
+  destination_id?: number | string | null;
+  // Time
+  duration?: number;
+  startTime?: number;
+  endTime?: number;
+  // Vehicle/block
+  block_id?: number | null;
+  vehicle_id?: number | null;
+  _blockId?: number;
+  // Driver/routing
+  direction?: string;
+  sentido?: string;
+  distance_km?: number;
+  // Duty assignment fields
+  duty_id?: number;
+  driver_id?: number;
+  event_scope?: string;
+  sequence_in_duty?: number;
+  segment_sequence?: number | null;
+  sequence_in_bundle?: number;
+  bundle_trip_count?: number;
+  bundle_event_type?: string;
+  is_paired?: boolean;
+  [key: string]: unknown;
+}
+
+/** Block with hydrated items array (returned by hydrateBlocks) */
+interface HydratedBlock {
+  block_id: number;
+  items: HydratedTripItem[];
+  start_time: number;
+  end_time: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** Props for the GanttRowItem component */
+interface GanttItemProps {
+  item: HydratedTripItem;
+  scale: number;
+  onDragStart: (e: React.DragEvent, item: HydratedTripItem) => void;
+  colors: ReturnType<typeof getGanttColors>;
+}
+
 // ─── Component Interfaces ─────────────────────────────────────────────────────
 export interface TabGanttProps {
-  res: OptimizationResultSummary;
+  res: OptimizationResultSummary | null;
   lines: Line[];
   terminals: Terminal[];
   intervalPolicy?: TripIntervalPolicy;
@@ -130,7 +198,7 @@ function minToHHMMExport(minutes: number): string {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
-function buildDutyAuditSummary(duty: any): DutyAuditSummary {
+function buildDutyAuditSummary(duty: OptimizationDuty): DutyAuditSummary {
   const dutyId = Number(duty?.duty_id ?? duty?.id ?? 0);
   const report = duty?.operational_time_report ?? {};
   const issueCodes = Array.isArray(report?.violations)
@@ -158,7 +226,7 @@ function buildDutyAuditSummary(duty: any): DutyAuditSummary {
   };
 }
 
-function buildDutyExportFields(duty: any) {
+function buildDutyExportFields(duty: OptimizationDuty) {
   const audit = buildDutyAuditSummary(duty);
   return {
     driver_display_name: audit.driverDisplayName,
@@ -190,9 +258,9 @@ function normalizeTripIds(rawTripIds: unknown): number[] {
   return normalized;
 }
 
-function resolveSegmentBlockId(segment: Record<string, any>, tripDetails: any[]): number | null {
-  for (const key of ['block_id', 'from_block_id', 'to_block_id']) {
-    const value = Number(segment[key]);
+function resolveSegmentBlockId(segment: OptimizationDutyTimeSegment, tripDetails: HydratedTripItem[]): number | null {
+  for (const key of ['block_id', 'from_block_id', 'to_block_id'] as const) {
+    const value = Number((segment as Record<string, unknown>)[key]);
     if (Number.isFinite(value) && value > 0) {
       return value;
     }
@@ -206,7 +274,19 @@ function resolveSegmentBlockId(segment: Record<string, any>, tripDetails: any[])
   return null;
 }
 
-function normalizeExportSegments(rawSegments: any[], tripById: Map<number, any>): Record<string, any>[] {
+type NormalizedSegment = OptimizationDutyTimeSegment & {
+  type: string;
+  event_type: string;
+  event_scope: string;
+  trip_ids: number[];
+  trip_count: number;
+  block_id: number | null;
+  vehicle_id: number | null;
+  bundle_event_type?: string;
+  explanation?: string;
+};
+
+function normalizeExportSegments(rawSegments: OptimizationDutyTimeSegment[], tripById: Map<number, HydratedTripItem>): NormalizedSegment[] {
   if (!Array.isArray(rawSegments) || rawSegments.length === 0) {
     return [];
   }
@@ -214,7 +294,7 @@ function normalizeExportSegments(rawSegments: any[], tripById: Map<number, any>)
   const baseSegments = rawSegments.map((segment) => {
     const segType = String(segment?.type ?? segment?.event_type ?? 'unknown');
     const tripIds = normalizeTripIds(segment?.trip_ids);
-    const tripDetails = sortOperationalTrips(tripIds.map((tripId) => tripById.get(tripId)).filter(Boolean));
+    const tripDetails = sortOperationalTrips(tripIds.map((tripId) => tripById.get(tripId)).filter((t): t is HydratedTripItem => Boolean(t)));
     const blockId = resolveSegmentBlockId(segment, tripDetails);
     const tripCount = tripIds.length;
     const bundleEventType = segType === 'commercial_trip' && tripCount > 1
@@ -239,7 +319,7 @@ function normalizeExportSegments(rawSegments: any[], tripById: Map<number, any>)
     };
   });
 
-  return baseSegments;
+  return baseSegments as NormalizedSegment[];
 }
 
 // ─── Event Kind Config ────────────────────────────────────────────────────────
@@ -271,12 +351,12 @@ function sortOperationalTrips<T extends Record<string, any>>(trips: T[]): T[] {
   });
 }
 
-function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] {
+function resolveDutyDetailedTrips(duty: OptimizationDuty, tripById: Map<number, HydratedTripItem>): HydratedTripItem[] {
   const dutyId = duty.duty_id ?? duty.id;
   const explicitTrips = Array.isArray(duty.detailed_trip_assignments) ? duty.detailed_trip_assignments : [];
   if (explicitTrips.length > 0) {
     return explicitTrips
-      .map((trip: any) => {
+      .map((trip) => {
         const sourceTripId = Number(trip.source_trip_id ?? trip.id ?? trip.trip_id ?? 0);
         const hydratedTrip = tripById.get(sourceTripId) ?? tripById.get(Number(trip.trip_id ?? 0));
         const vehicleId = trip.vehicle_id ?? trip.block_id ?? hydratedTrip?.block_id ?? hydratedTrip?.vehicle_id ?? null;
@@ -289,16 +369,16 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
           vehicle_id: vehicleId,
           duty_id: dutyId,
           driver_id: dutyId,
-        };
+        } as HydratedTripItem;
       })
-      .sort((left: any, right: any) => {
+      .sort((left, right) => {
         const sequenceDiff = Number(left.sequence_in_duty ?? 0) - Number(right.sequence_in_duty ?? 0);
         if (sequenceDiff !== 0) {
           return sequenceDiff;
         }
         return sortOperationalTrips([left, right])[0] === left ? -1 : 1;
       })
-      .map((trip: any, index: number) => ({
+      .map((trip, index) => ({
         ...trip,
         sequence_in_duty: Number(trip.sequence_in_duty ?? index + 1),
         sequence_in_bundle: Number(trip.sequence_in_bundle ?? 1),
@@ -308,21 +388,21 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
   }
 
   const segmentTrips = Array.isArray(duty.duty_time_segments)
-    ? duty.duty_time_segments.flatMap((segment: any, absoluteIndex: number) => {
+    ? duty.duty_time_segments.flatMap((segment, absoluteIndex) => {
       if ((segment.type ?? segment.event_type) !== 'commercial_trip') {
         return [];
       }
       const trips = sortOperationalTrips(
         (Array.isArray(segment.trip_ids) ? segment.trip_ids : [])
-          .map((tripId: number) => tripById.get(Number(tripId)))
-          .filter(Boolean),
+          .map((tripId) => tripById.get(Number(tripId)))
+          .filter((t): t is HydratedTripItem => Boolean(t)),
       );
-      return trips.map((trip: any, tripIndex: number) => ({
+      return trips.map((trip, tripIndex) => ({
         ...trip,
         source_trip_id: trip.tripId ?? trip.id ?? trip.trip_id,
         trip_id: trip.trip_id ?? trip.tripId ?? trip.id,
-        block_id: trip.block_id ?? segment.block_id ?? null,
-        vehicle_id: trip.block_id ?? segment.block_id ?? null,
+        block_id: trip.block_id ?? (segment.block_id != null ? Number(segment.block_id) : null),
+        vehicle_id: trip.block_id ?? (segment.block_id != null ? Number(segment.block_id) : null),
         duty_id: dutyId,
         driver_id: dutyId,
         event_scope: 'trip',
@@ -332,7 +412,7 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
         bundle_trip_count: trips.length,
         bundle_event_type: segment.bundle_event_type ?? (trips.length > 1 ? 'commercial_trip_bundle' : 'commercial_trip'),
         is_paired: trips.length > 1,
-      }));
+      } as HydratedTripItem));
     })
     : [];
 
@@ -340,9 +420,9 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
     ? segmentTrips
     : sortOperationalTrips(
       ((duty.trip_ids || duty.trips || []) as number[])
-        .map((tripId: number) => tripById.get(Number(tripId)))
-        .filter(Boolean)
-        .map((trip: any) => ({
+        .map((tripId) => tripById.get(Number(tripId)))
+        .filter((t): t is HydratedTripItem => Boolean(t))
+        .map((trip) => ({
           ...trip,
           source_trip_id: trip.tripId ?? trip.id ?? trip.trip_id,
           trip_id: trip.trip_id ?? trip.tripId ?? trip.id,
@@ -355,13 +435,13 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
           bundle_trip_count: 1,
           bundle_event_type: 'commercial_trip',
           is_paired: false,
-        })),
+        } as HydratedTripItem)),
     );
 
-  return fallbackTrips.map((trip: any, index: number) => ({
+  return fallbackTrips.map((trip, index) => ({
     ...trip,
     sequence_in_duty: Number(trip.sequence_in_duty ?? index + 1),
-  }));
+  } as HydratedTripItem));
 }
 
 // ─── Helper: build PlanEvent[] from a sorted trip list ───────────────────────
@@ -371,7 +451,7 @@ function resolveDutyDetailedTrips(duty: any, tripById: Map<number, any>): any[] 
 // Refeição = intervalo ≥ mealBreakMinutes
 // Recolhimento = deadhead último terminal → garagem (após a última viagem)
 function buildEvents(
-  trips: any[],
+  trips: HydratedTripItem[],
   terminalMap: Map<number, Terminal>,
   lineByCode: Map<string, Line>,
   intervalPolicy?: TripIntervalPolicy,
@@ -388,8 +468,10 @@ function buildEvents(
   const breakThreshold = intervalPolicy?.minBreakMinutes ?? 30;
   const events: PlanEvent[] = [];
 
-  const tName = (id?: number) =>
-    id != null ? (terminalMap.get(id)?.shortName ?? terminalMap.get(id)?.name ?? `T${id}`) : '—';
+  const tName = (id?: number | string | null) => {
+    const n = id != null ? Number(id) : null;
+    return n != null ? (terminalMap.get(n)?.shortName ?? terminalMap.get(n)?.name ?? `T${n}`) : '—';
+  };
 
   const firstTrip = realTrips[0];
   const lastTrip = realTrips[realTrips.length - 1];
@@ -425,7 +507,7 @@ function buildEvents(
       kind: 'viagem',
       tripId: t.tripId,
       linha: t.lineCode ?? String(t.lineId ?? '—'),
-      sentido: t.direction ?? t.sentido ?? (t.tripId % 2 === 0 ? 'VOLTA' : 'IDA'),
+      sentido: t.direction ?? t.sentido ?? ((t.tripId ?? 0) % 2 === 0 ? 'VOLTA' : 'IDA'),
       inicio: t.start_time ?? 0,
       chegada: t.end_time ?? 0,
       origemName: tName(t.origin_id),
@@ -492,17 +574,17 @@ function buildEvents(
 
 // ─── Helper: build PlanEvent[] correctly directly from duty_time_segments ───
 function buildEventsFromSegments(
-  dutySegments: any[],
+  dutySegments: OptimizationDutyTimeSegment[],
   dutyId: number | undefined,
   terminalMap: Map<number, Terminal>,
-  tripById: Map<number, any>,
-  detailedTrips: any[] = [],
+  tripById: Map<number, HydratedTripItem>,
+  detailedTrips: HydratedTripItem[] = [],
   blockId?: number
 ): PlanEvent[] {
   const events: PlanEvent[] = [];
-  const detailedTripsBySegment = new Map<number, any[]>();
+  const detailedTripsBySegment = new Map<number, HydratedTripItem[]>();
 
-  detailedTrips.forEach((trip: any) => {
+  detailedTrips.forEach((trip) => {
     const key = Number(trip.segment_sequence ?? 0);
     if (!Number.isFinite(key) || key <= 0) {
       return;
@@ -535,8 +617,10 @@ function buildEventsFromSegments(
 
     if (!kind) return;
 
-    const tName = (id?: number | string) =>
-      id != null ? (terminalMap.get(Number(id))?.shortName ?? terminalMap.get(Number(id))?.name ?? `T${id}`) : '—';
+    const tName = (id?: number | string | null) => {
+      const n = id != null ? Number(id) : null;
+      return n != null ? (terminalMap.get(n)?.shortName ?? terminalMap.get(n)?.name ?? `T${n}`) : '—';
+    };
 
     if (type === 'commercial_trip') {
       const segmentKey = seg.segment_sequence ?? (segIndex + 1);
@@ -544,10 +628,10 @@ function buildEventsFromSegments(
         (detailedTripsBySegment.get(segmentKey) ??
           (Array.isArray(seg.trip_ids) ? seg.trip_ids : [])
             .map((tripId: number) => tripById.get(Number(tripId)))
-            .filter(Boolean)) as any[],
+            .filter((t): t is HydratedTripItem => Boolean(t))),
       );
       if (segmentTrips.length > 0) {
-        segmentTrips.forEach((trip: any) => {
+        segmentTrips.forEach((trip) => {
           const sourceTripId = Number(trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? 0);
           const hydratedTrip = tripById.get(sourceTripId) ?? tripById.get(Number(trip.trip_id ?? 0));
           const lineCode = trip.lineCode ?? hydratedTrip?.lineCode ?? trip.line_code ?? hydratedTrip?.line_code ?? null;
@@ -691,16 +775,16 @@ const DRIVING_TIME_TYPES = new Set(['commercial_trip', 'commercial_trip_bundle',
 
 /** Build operational export rows using solver duty_time_segments as primary source */
 function buildOperationalExportRows(
-  duties: any[],
-  effectiveBlocks: any[],
+  duties: OptimizationDuty[],
+  effectiveBlocks: HydratedBlock[],
   scheduleId: number | string,
-  tripById: Map<number, any>,
+  tripById: Map<number, HydratedTripItem>,
 ): Record<string, unknown>[] {
   // tripId → blockId map
   const tripToBlock = new Map<number, number>();
   effectiveBlocks.forEach((b) => {
-    const blockId = b.block_id ?? b.id;
-    (b.items || b.trips || []).forEach((t: any) => {
+    const blockId = b.block_id;
+    (b.items || []).forEach((t) => {
       const tid = t.tripId ?? t.id ?? t.trip_id;
       if (tid != null) tripToBlock.set(Number(tid), Number(blockId));
     });
@@ -708,7 +792,7 @@ function buildOperationalExportRows(
 
   const rows: Record<string, unknown>[] = [];
 
-  duties.forEach((duty: any) => {
+  duties.forEach((duty) => {
     const dutyId = duty.duty_id ?? duty.id;
     const segments = normalizeExportSegments(duty.duty_time_segments ?? [], tripById);
     const dutyTripIds: number[] = duty.trip_ids ?? [];
@@ -716,7 +800,7 @@ function buildOperationalExportRows(
 
     if (segments.length > 0) {
       // ── Primary path: use solver segments ──
-      segments.forEach((seg: any, idx: number) => {
+      segments.forEach((seg: NormalizedSegment, idx: number) => {
         const baseEventType = seg.type ?? seg.event_type ?? 'unknown';
         const tripCount = Number(seg.trip_count ?? (Array.isArray(seg.trip_ids) ? seg.trip_ids.length : 0) ?? 0);
         const eventType = baseEventType === 'commercial_trip' && tripCount > 1
@@ -807,22 +891,22 @@ function buildOperationalExportRows(
 
       // Get trips for this duty from blocks
       const dutyTrips = dutyTripIds
-        .map((tid: number) => {
+        .map((tid) => {
           for (const b of effectiveBlocks) {
-            const found = (b.items || b.trips || []).find(
-              (t: any) => (t.tripId ?? t.id ?? t.trip_id) === tid
+            const found = b.items.find(
+              (t) => (t.tripId ?? t.id ?? t.trip_id) === tid
             );
-            if (found) return { ...found, _blockId: b.block_id ?? b.id };
+            if (found) return { ...found, _blockId: b.block_id };
           }
           return null;
         })
-        .filter(Boolean)
-        .sort((a: any, b: any) => (a.start_time ?? 0) - (b.start_time ?? 0));
+        .filter((t): t is HydratedTripItem & { _blockId: number } => Boolean(t))
+        .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
 
       if (dutyTrips.length === 0) return;
 
       let seq = 0;
-      dutyTrips.forEach((trip: any, idx: number) => {
+      dutyTrips.forEach((trip, idx) => {
         const tid = trip.tripId ?? trip.id ?? trip.trip_id;
         const st = Number(trip.start_time ?? 0);
         const et = Number(trip.end_time ?? 0);
@@ -939,13 +1023,13 @@ function buildOperationalExportRows(
 }
 
 function buildDetailedTripExportRows(
-  duties: any[],
-  tripById: Map<number, any>,
+  duties: OptimizationDuty[],
+  tripById: Map<number, HydratedTripItem>,
   scheduleId: number | string,
 ): Record<string, unknown>[] {
-  return duties.flatMap((duty: any) => {
+  return duties.flatMap((duty) => {
     const dutyId = duty.duty_id ?? duty.id;
-    return resolveDutyDetailedTrips(duty, tripById).map((trip: any) => {
+    return resolveDutyDetailedTrips(duty, tripById).map((trip) => {
       const sourceTripId = Number(trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? 0);
       const publicTripId = trip.trip_id ?? trip.public_trip_id ?? sourceTripId;
       const startTime = Number(trip.start_time ?? trip.startTime ?? 0);
@@ -980,18 +1064,18 @@ function buildDetailedTripExportRows(
 }
 
 function buildDriverExportRows(
-  duties: any[],
-  tripById: Map<number, any>,
+  duties: OptimizationDuty[],
+  tripById: Map<number, HydratedTripItem>,
   scheduleId: number | string,
 ): Record<string, unknown>[] {
-  return duties.flatMap((duty: any) => {
+  return duties.flatMap((duty) => {
     const dutyId = duty.duty_id ?? duty.id;
     const dutyExportFields = buildDutyExportFields(duty);
     const normalizedSegments = normalizeExportSegments(duty.duty_time_segments ?? [], tripById);
     const detailedTrips = resolveDutyDetailedTrips(duty, tripById);
-    const detailedBySegment = new Map<number, any[]>();
+    const detailedBySegment = new Map<number, HydratedTripItem[]>();
 
-    detailedTrips.forEach((trip: any) => {
+    detailedTrips.forEach((trip) => {
       const segmentSequence = Number(trip.segment_sequence ?? 0);
       if (!Number.isFinite(segmentSequence) || segmentSequence <= 0) {
         return;
@@ -1001,7 +1085,7 @@ function buildDriverExportRows(
       detailedBySegment.set(segmentSequence, currentTrips);
     });
 
-    return normalizedSegments.flatMap((segment: any, sequence: number) => {
+    return (normalizedSegments as NormalizedSegment[]).flatMap((segment: NormalizedSegment, sequence: number) => {
       const segType = String(segment.type ?? segment.event_type ?? 'unknown');
       const {
         driver_display_name,
@@ -1017,7 +1101,7 @@ function buildDriverExportRows(
       if (segType === 'commercial_trip') {
         const segmentTrips = sortOperationalTrips(detailedBySegment.get(sequence + 1) ?? []);
         if (segmentTrips.length > 0) {
-          return segmentTrips.map((trip: any) => {
+          return segmentTrips.map((trip) => {
             const sourceTripId = trip.source_trip_id ?? trip.tripId ?? trip.id ?? trip.trip_id ?? '';
             const startTime = Number(trip.start_time ?? trip.startTime ?? 0);
             const endTime = Number(trip.end_time ?? trip.endTime ?? 0);
@@ -1097,8 +1181,8 @@ function buildDriverExportRows(
         issue_severity,
         issue_codes,
         issue_explanation,
-        explanation: segment.explanation ?? '',
-      }];
+        explanation: String(segment.explanation ?? ''),
+      }] as Record<string, unknown>[];
     });
   });
 }
@@ -1333,7 +1417,7 @@ GanttTimeHeader.displayName = 'GanttTimeHeader';
 // ─── GanttRowItem ─────────────────────────────────────────────────────────────
 const GanttRowItem = React.memo(({
   item, scale, onDragStart, colors,
-}: { item: any; scale: number; onDragStart: (e: React.DragEvent, item: any) => void; colors: any }) => {
+}: GanttItemProps) => {
   const left = item.start_time * scale * BASE_PIXELS_PER_MINUTE;
   const width = (item.end_time - item.start_time) * scale * BASE_PIXELS_PER_MINUTE;
   const isApoio = item.kind === 'apoio' || (!item.lineId && !item.lineCode);
@@ -1388,8 +1472,8 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   // 0=Gantt, 1=Veículos, 2=Motoristas, 3=Viagens
   const [activeTab, setActiveTab] = useState(0);
   const [scale, setScale] = useState(2.5);
-  const [localBlocks, setLocalBlocks] = useState<any[]>([]);
-  const [backupBlocks, setBackupBlocks] = useState<any[]>([]);
+  const [localBlocks, setLocalBlocks] = useState<HydratedBlock[]>([]);
+  const [backupBlocks, setBackupBlocks] = useState<HydratedBlock[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -1414,8 +1498,8 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const [hoverBlockId, setHoverBlockId] = useState<number | null>(null);
 
   const tripMetadataRef = useRef<Map<number, TripMetadata>>(new Map());
-  const localBlocksRef = useRef<any[]>([]);
-  const backupBlocksRef = useRef<any[]>([]);
+  const localBlocksRef = useRef<HydratedBlock[]>([]);
+  const backupBlocksRef = useRef<HydratedBlock[]>([]);
   const baselineCostRef = useRef<number>(0);
   const hydratedIdentityRef = useRef<string | null>(null);
 
@@ -1426,18 +1510,18 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const totalWidth = HORIZON_MINUTES * ppm + SIDEBAR_WIDTH;
 
   const sourceBlocks = useMemo(() => {
-    if (Array.isArray((res as any)?.blocks)) return (res as any).blocks;
-    if (Array.isArray((res as any)?.result?.blocks)) return (res as any).result.blocks;
+    if (Array.isArray(res?.blocks)) return res.blocks ?? [];
+    if (Array.isArray(res?.result?.blocks)) return res.result?.blocks ?? [];
     return [];
   }, [res]);
 
-  const hydrateBlocks = useCallback((rawBlocks: any[]) => {
+  const hydrateBlocks = useCallback((rawBlocks: OptimizationBlock[]): HydratedBlock[] => {
     if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) return [];
 
     const codeColorMap = new Map<string, string>();
     let colorIdx = 0;
     rawBlocks.forEach((block) => {
-      (block as any).trips?.forEach((trip: any) => {
+      ((block.trips ?? []) as (number | TripDetail)[]).forEach((trip) => {
         if (typeof trip === 'number') return;
         const code = trip.line_code ?? trip.lineCode ?? null;
         if (code && !codeColorMap.has(code)) {
@@ -1449,10 +1533,10 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
     return rawBlocks
       .map((block) => {
-        const b = block as any;
-        const blockId = b.block_id ?? b.blockId ?? b.id;
-        const items = (b.trips || [])
-          .map((trip: any) => {
+        const blockId = block.block_id ?? block.blockId ?? block.id ?? 0;
+        const items: HydratedTripItem[] = ((block.trips ?? []) as (number | TripDetail)[])
+          .filter((trip): trip is TripDetail => typeof trip !== 'number')
+          .map((trip) => {
             const tripId = trip.id ?? trip.trip_id ?? getTripPublicId(trip);
             const code = trip.line_code ?? trip.lineCode ?? null;
             const color = code ? (codeColorMap.get(code) ?? linePalette[0]) : linePalette[0];
@@ -1466,34 +1550,34 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
               color,
               kind: 'trip',
               block_id: blockId,
-            };
+            } as HydratedTripItem;
           })
-          .sort((a: any, z: any) => a.start_time - z.start_time);
+          .sort((a, z) => a.start_time - z.start_time);
 
         return {
           ...block,
           id: blockId,
           block_id: blockId,
-          start_time: b.start_time ?? b.startTime ?? 0,
-          end_time: b.end_time ?? b.endTime ?? 0,
+          start_time: block.start_time ?? block.startTime ?? 0,
+          end_time: block.end_time ?? block.endTime ?? 0,
           items,
-        };
+        } as HydratedBlock;
       })
-      .sort((a: any, b: any) => (a.block_id || 0) - (b.block_id || 0));
+      .sort((a, b) => (a.block_id || 0) - (b.block_id || 0));
   }, [linePalette]);
 
   const hydratedBlocks = useMemo(() => hydrateBlocks(sourceBlocks), [sourceBlocks, hydrateBlocks]);
   const hydratedIdentity = useMemo(() => {
-    const scheduleId = (res as any)?.id ?? (res as any)?.scheduleId ?? 'no-schedule';
-    const updatedAt = (res as any)?.updatedAt ?? (res as any)?.createdAt ?? 'no-date';
+    const scheduleId = res?.id ?? res?.scheduleId ?? 'no-schedule';
+    const updatedAt = res?.updatedAt ?? res?.createdAt ?? 'no-date';
     return `${scheduleId}:${updatedAt}:${hydratedBlocks.length}`;
   }, [res, hydratedBlocks.length]);
 
-  const cloneBlocks = useCallback((blocks: any[]) => {
+  const cloneBlocks = useCallback((blocks: HydratedBlock[]): HydratedBlock[] => {
     if (typeof structuredClone === 'function') {
-      return structuredClone(blocks);
+      return structuredClone(blocks) as HydratedBlock[];
     }
-    return JSON.parse(JSON.stringify(blocks));
+    return JSON.parse(JSON.stringify(blocks)) as HydratedBlock[];
   }, []);
 
   const effectiveBlocks = useMemo(
@@ -1504,7 +1588,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const presentLineCodes = useMemo(() => {
     const codes = new Set<string>();
     (effectiveBlocks || []).forEach((b) =>
-      (b.items || []).forEach((t: any) => { const c = t.lineCode || t.line_code; if (c) codes.add(c); })
+      (b.items || []).forEach((t) => { const c = t.lineCode || (t.line_code as string | undefined); if (c) codes.add(c); })
     );
     return [...codes].sort();
   }, [effectiveBlocks]);
@@ -1516,13 +1600,15 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
     const metadata = new Map<number, TripMetadata>();
     hydratedBlocks.forEach((block) => {
-      (block.items || []).forEach((item: any) => {
-        metadata.set(item.tripId, { lineId: item.lineId ?? null, lineCode: item.lineCode ?? null, color: item.color });
+      (block.items || []).forEach((item) => {
+        if (item.tripId != null) {
+          metadata.set(item.tripId, { lineId: item.lineId ?? null, lineCode: item.lineCode ?? null, color: item.color });
+        }
       });
     });
     tripMetadataRef.current = metadata;
 
-    baselineCostRef.current = res ? ((res as any).totalCost ?? (res as any).total_cost ?? 0) : 0;
+    baselineCostRef.current = res ? (res.totalCost ?? res.total_cost ?? 0) : 0;
     const liveSnapshot = cloneBlocks(hydratedBlocks);
     const backupSnapshot = cloneBlocks(hydratedBlocks);
     setLocalBlocks(liveSnapshot);
@@ -1536,10 +1622,10 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
   const filteredBlocks = useMemo(() => {
     return effectiveBlocks.filter((block) => {
-      if (filterLine && !block.items?.some((t: any) => (t.lineCode ?? t.line_code) === filterLine)) return false;
+      if (filterLine && !block.items?.some((t) => (t.lineCode ?? (t.line_code as string | undefined)) === filterLine)) return false;
       if (filterSearch) {
         const q = filterSearch.toLowerCase();
-        return String(block.block_id).includes(q) || block.items?.some((t: any) =>
+        return String(block.block_id).includes(q) || block.items?.some((t) =>
           String(t.tripId ?? '').includes(q) || String(t.lineCode ?? '').toLowerCase().includes(q)
         );
       }
@@ -1547,25 +1633,25 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     });
   }, [effectiveBlocks, filterLine, filterSearch]);
 
-  const unassignedTrips: any[] = useMemo(() => {
+  const unassignedTrips = useMemo((): (TripDetail | number)[] => {
     if (!res) return [];
-    const raw = (res as any).metadata?.unassigned_trips || (res as any).unassigned_trips || [];
-    return Array.isArray(raw) ? raw : [];
+    const raw = res.metadata?.['unassigned_trips'] ?? res.unassigned_trips ?? [];
+    return Array.isArray(raw) ? (raw as (TripDetail | number)[]) : [];
   }, [res]);
 
-  const duties = useMemo(() => {
+  const duties = useMemo((): OptimizationDuty[] => {
     if (!res) return [];
-    return (res as any).resultSummary?.duties || (res as any).duties || [];
+    return res.resultSummary?.duties ?? res.duties ?? [];
   }, [res]);
 
   const scheduleId = useMemo(
-    () => (res as any)?.id ?? (res as any)?.scheduleId ?? '',
+    () => res?.id ?? res?.scheduleId ?? '',
     [res],
   );
 
   const dutyAuditById = useMemo(() => {
     const auditMap = new Map<number, DutyAuditSummary>();
-    duties.forEach((duty: any) => {
+    duties.forEach((duty) => {
       const dutyId = Number(duty.duty_id ?? duty.id ?? 0);
       auditMap.set(dutyId, buildDutyAuditSummary(duty));
     });
@@ -1577,14 +1663,14 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     // Build trip→blockId from effectiveBlocks to correct optimizer block_id mismatches
     const tripToBlock = new Map<number, number>();
     effectiveBlocks.forEach((b) => {
-      (b.items || []).forEach((t: any) => {
+      (b.items || []).forEach((t) => {
         if (t.tripId) tripToBlock.set(Number(t.tripId), Number(b.block_id));
       });
     });
 
-    const resolveBlockId = (seg: any): number => {
+    const resolveBlockId = (seg: OptimizationDutyTimeSegment | undefined): number => {
       // Prefer trip-based lookup (authoritative) over segment's block_id (may be stale/mismatched)
-      const tripIds: number[] = Array.isArray(seg?.trip_ids) ? seg.trip_ids.map(Number) : [];
+      const tripIds: number[] = Array.isArray(seg?.trip_ids) ? seg.trip_ids!.map(Number) : [];
       for (const tid of tripIds) {
         const bid = tripToBlock.get(tid);
         if (bid) return bid;
@@ -1594,18 +1680,18 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
     const pullout = new Map<number, { start: number; end: number }>();
     const pullback = new Map<number, { start: number; end: number }>();
-    duties.forEach((duty: any) => {
-      const segs: any[] = duty.duty_time_segments || [];
-      const poSeg = segs.find((s: any) => s.type === 'pullout' || s.type === 'vehicle_pullout');
+    duties.forEach((duty) => {
+      const segs: OptimizationDutyTimeSegment[] = duty.duty_time_segments || [];
+      const poSeg = segs.find((s) => s.type === 'pullout' || s.type === 'vehicle_pullout');
       if (poSeg) {
-        const firstCT = segs.find((s: any) => s.type === 'commercial_trip');
+        const firstCT = segs.find((s) => s.type === 'commercial_trip');
         const bid = resolveBlockId(firstCT);
         if (bid && !pullout.has(bid))
           pullout.set(bid, { start: Number(poSeg.start), end: Number(poSeg.end) });
       }
-      const pbSeg = [...segs].reverse().find((s: any) => s.type === 'pullback' || s.type === 'vehicle_pullback');
+      const pbSeg = [...segs].reverse().find((s) => s.type === 'pullback' || s.type === 'vehicle_pullback');
       if (pbSeg) {
-        const lastCT = [...segs].reverse().find((s: any) => s.type === 'commercial_trip');
+        const lastCT = [...segs].reverse().find((s) => s.type === 'commercial_trip');
         const bid = resolveBlockId(lastCT);
         if (bid && !pullback.has(bid))
           pullback.set(bid, { start: Number(pbSeg.start), end: Number(pbSeg.end) });
@@ -1619,15 +1705,17 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   // Driver-specific events (descanso, troca_motorista) are NOT shown in the vehicle view.
   const vehicleGroups = useMemo((): PlanGroup[] => {
     return effectiveBlocks.map((block) => {
-      const allItems: any[] = block.items || [];
+      const allItems = block.items || [];
       // Commercial trips are items with a line code or line id; include all as viagem
       const trips = allItems.length > 0 ? allItems : [];
       if (trips.length === 0) {
         return { id: block.block_id, label: `Veículo ${block.block_id}`, tripCount: 0, totalKm: 0, startTime: 0, endTime: 0, events: [] };
       }
 
-      const tName = (id?: number) =>
-        id != null ? (terminalMap.get(id)?.shortName ?? terminalMap.get(id)?.name ?? `T${id}`) : '—';
+      const tName = (id?: number | string | null) => {
+        const n = id != null ? Number(id) : null;
+        return n != null ? (terminalMap.get(n)?.shortName ?? terminalMap.get(n)?.name ?? `T${n}`) : '—';
+      };
 
       const events: PlanEvent[] = [];
       const firstTrip = trips[0];
@@ -1653,7 +1741,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       }
 
       // All trips — vehicles do not have driver breaks between trips
-      trips.forEach((t: any) => {
+      trips.forEach((t) => {
         events.push({
           kind: 'viagem', tripId: t.tripId,
           linha: t.lineCode ?? String(t.lineId ?? '—'),
@@ -1686,7 +1774,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
       const solturaEvt = events.find(e => e.kind === 'soltura');
       const recolhEvt = events.slice().reverse().find(e => e.kind === 'recolhimento');
-      const commercialTrips = trips.filter((t: any) => t.lineCode || t.lineId);
+      const commercialTrips = trips.filter((t) => t.lineCode || t.lineId);
       return {
         id: block.block_id,
         label: `Veículo ${block.block_id}`,
@@ -1701,8 +1789,8 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
   // ─── PlanGroups for Motoristas tab ───
   const tripById = useMemo(() => {
-    const map = new Map<number, any>();
-    effectiveBlocks.forEach((b) => (b.items || []).forEach((t: any) => map.set(t.tripId, t)));
+    const map = new Map<number, HydratedTripItem>();
+    effectiveBlocks.forEach((b) => (b.items || []).forEach((t) => { if (t.tripId != null) map.set(t.tripId, t); }));
     return map;
   }, [effectiveBlocks]);
 
@@ -1711,10 +1799,10 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     const map = new Map<number, { firstTripId: number; lastTripId: number }>();
     effectiveBlocks.forEach((b) => {
       const sorted = (b.items || [])
-        .filter((t: any) => t.lineCode || t.lineId)
-        .sort((a: any, z: any) => (a.start_time ?? 0) - (z.start_time ?? 0));
+        .filter((t) => t.lineCode || t.lineId)
+        .sort((a, z) => (a.start_time ?? 0) - (z.start_time ?? 0));
       if (sorted.length > 0)
-        map.set(b.block_id, { firstTripId: sorted[0].tripId, lastTripId: sorted[sorted.length - 1].tripId });
+        map.set(b.block_id, { firstTripId: sorted[0].tripId ?? 0, lastTripId: sorted[sorted.length - 1].tripId ?? 0 });
     });
     return map;
   }, [effectiveBlocks]);
@@ -1722,21 +1810,21 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   // tripId → dutyId (para a aba Viagens)
   const tripToDutyId = useMemo(() => {
     const map = new Map<number, number>();
-    duties.forEach((duty: any) => {
+    duties.forEach((duty) => {
       const dutyId = duty.duty_id ?? duty.id;
-      (duty.trip_ids || []).forEach((tid: number) => map.set(tid, dutyId));
+      if (dutyId != null) (duty.trip_ids || []).forEach((tid) => map.set(tid, dutyId));
     });
     return map;
   }, [duties]);
 
   const dutyGroups = useMemo((): PlanGroup[] => {
-    return duties.map((duty: any) => {
+    return duties.map((duty) => {
       const dutyId = duty.duty_id ?? duty.id;
-      const tripIds: number[] = duty.trip_ids || duty.trips || [];
+      const tripIds: number[] = duty.trip_ids || [];
       const fallbackDutyTrips = tripIds
         .map((id) => tripById.get(id))
-        .filter(Boolean)
-        .sort((a: any, b: any) => (a.start_time ?? 0) - (b.start_time ?? 0));
+        .filter((t): t is HydratedTripItem => Boolean(t))
+        .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
       const detailedDutyTrips = resolveDutyDetailedTrips(duty, tripById);
       const dutyTrips = detailedDutyTrips.length > 0 ? detailedDutyTrips : fallbackDutyTrips;
 
@@ -1842,8 +1930,8 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   );
 
   // ─── Drag-and-drop ───
-  const handleDragStart = useCallback((e: React.DragEvent, item: any) => {
-    e.dataTransfer.setData('trip_id', item.tripId.toString());
+  const handleDragStart = useCallback((e: React.DragEvent, item: HydratedTripItem) => {
+    e.dataTransfer.setData('trip_id', (item.tripId ?? 0).toString());
     e.dataTransfer.setData('origin_block_id', item.block_id?.toString() || '');
     e.dataTransfer.effectAllowed = 'move';
   }, []);
@@ -1875,12 +1963,12 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
     const movingTrip = preMoveBlocks
       .find((b) => b.block_id === originBlockId)
-      ?.items.find((t: any) => t.tripId === tripId);
+      ?.items.find((t) => t.tripId === tripId);
     if (!movingTrip) return;
 
     const newLocalBlocks = preMoveBlocks.map((block) => {
       if (block.block_id === originBlockId)
-        return { ...block, items: block.items.filter((t: any) => t.tripId !== tripId) };
+        return { ...block, items: block.items.filter((t) => t.tripId !== tripId) };
       if (block.block_id === targetBlockId)
         return {
           ...block,
@@ -1898,7 +1986,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       const payload = {
         blocks: preMoveBlocks.map((b) => ({
           block_id: b.block_id,
-          trips: b.items.map((t: any) => ({
+          trips: b.items.map((t) => ({
             id: t.tripId, start_time: t.start_time, end_time: t.end_time,
             line_id: t.lineId ?? 0, origin_id: t.origin_id ?? 0,
             destination_id: t.destination_id ?? 0, duration: t.duration ?? 0, distance_km: t.distance_km ?? 0,
@@ -1946,13 +2034,13 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     const backup = backupBlocksRef.current;
 
     const backupTripBlock = new Map<number, number>();
-    backup.forEach((block) => (block.items || []).forEach((t: any) => backupTripBlock.set(t.tripId, block.block_id)));
+    backup.forEach((block) => (block.items || []).forEach((t) => { if (t.tripId != null) backupTripBlock.set(t.tripId, block.block_id); }));
 
     const moves: { tripId: number; targetBlockId: number }[] = [];
     current.forEach((block) => {
-      (block.items || []).forEach((t: any) => {
-        const oldBlock = backupTripBlock.get(t.tripId);
-        if (oldBlock !== undefined && oldBlock !== block.block_id)
+      (block.items || []).forEach((t) => {
+        const oldBlock = t.tripId != null ? backupTripBlock.get(t.tripId) : undefined;
+        if (oldBlock !== undefined && oldBlock !== block.block_id && t.tripId != null)
           moves.push({ tripId: t.tripId, targetBlockId: block.block_id });
       });
     });
@@ -1964,7 +2052,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     }
     setSaving(true);
     try {
-      const scheduleId = (res as any).id || (res as any).scheduleId;
+      const scheduleId = res?.id ?? res?.scheduleId ?? 0;
       for (const { tripId, targetBlockId } of moves)
         await operationsApi.reassignTrip({ scheduleId, tripId, targetBlockId });
       const persistedSnapshot = cloneBlocks(current);
@@ -1982,12 +2070,12 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   const unsavedMoves = useMemo(() => {
     const persistedTripBlock = new Map<number, number>();
     backupBlocks.forEach((b) =>
-      (b.items || []).forEach((t: any) => persistedTripBlock.set(t.tripId, b.block_id))
+      (b.items || []).forEach((t) => { if (t.tripId != null) persistedTripBlock.set(t.tripId, b.block_id); })
     );
     let moves = 0;
     localBlocks.forEach((b) => {
-      (b.items || []).forEach((t: any) => {
-        const old = persistedTripBlock.get(t.tripId);
+      (b.items || []).forEach((t) => {
+        const old = t.tripId != null ? persistedTripBlock.get(t.tripId) : undefined;
         if (old !== undefined && old !== b.block_id) moves += 1;
       });
     });
@@ -2025,13 +2113,13 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
           <Box sx={{ width: 140, minWidth: 140, borderRight: `1px solid ${theme.palette.divider}`, p: 1.5, bgcolor: 'background.paper', zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main' }}>Veículo {block.block_id}</Typography>
             <Typography variant="caption" color="text.secondary">
-              {(block.items || []).filter((t: any) => t.lineCode || t.lineId).length} viagens
+              {(block.items || []).filter((t) => t.lineCode || t.lineId).length} viagens
             </Typography>
           </Box>
           <Box sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden', bgcolor: colors.trackBg }}>
             <Box sx={{ position: 'absolute', left: OVERNIGHT_START_MIN * scale * BASE_PIXELS_PER_MINUTE, top: 0, bottom: 0, right: 0, bgcolor: alpha(theme.palette.warning.main, 0.05), pointerEvents: 'none', zIndex: 0 }} />
             <Box sx={{ position: 'absolute', left: OVERNIGHT_START_MIN * scale * BASE_PIXELS_PER_MINUTE, top: 0, bottom: 0, width: 0, borderLeft: '2px dashed', borderColor: 'divider', opacity: 0.9, pointerEvents: 'none', zIndex: 5 }} />
-            {(block.items || []).map((item: any, i: number) => (
+            {(block.items || []).map((item, i) => (
               <GanttRowItem key={`${item.tripId}-${i}`} item={item} scale={scale} onDragStart={handleDragStart} colors={colors} />
             ))}
           </Box>
@@ -2156,7 +2244,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
             <Box sx={{ p: 2, borderTop: `1px solid ${theme.palette.divider}` }}>
               <Alert severity="warning" sx={{ mb: 1 }}>{unassignedTrips.length} viagem(ns) não atribuída(s)</Alert>
               <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-                {unassignedTrips.map((t: any, i: number) => {
+                {unassignedTrips.map((t: TripDetail | number, i: number) => {
                   const tid = typeof t === 'number' ? t : (t.id ?? t.trip_id);
                   const st = typeof t === 'object' ? minToHHMM(t.start_time) : '?';
                   const et = typeof t === 'object' ? minToHHMM(t.end_time) : '?';

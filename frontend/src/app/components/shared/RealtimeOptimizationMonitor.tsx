@@ -124,7 +124,7 @@ const RealtimeOptimizationMonitor: React.FC<RealtimeOptimizationMonitorProps> = 
         try {
           const [statusData, schedule] = await Promise.all([
             operationsApi.getOptimizeStatus().catch(() => null),
-            operationsApi.getLatestSchedule().catch(() => null) as Promise<any>,
+            operationsApi.getLatestSchedule().catch(() => null),
           ]);
           if (schedule) {
             const totalTrips = Number(schedule.total_trips ?? schedule.totalTrips ?? 0);

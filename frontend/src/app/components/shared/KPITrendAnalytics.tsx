@@ -49,8 +49,17 @@ const KPITrendAnalytics: React.FC<KPITrendAnalyticsProps> = ({ scheduleId, days 
   const fetchTrends = async () => {
     try {
       setLoading(true);
-      const data = await operationReportingApi.getHistorical(scheduleId, days);
-      setTrends(data.map((r: any) => ({
+      type HistoricalRow = {
+        generatedAt: string;
+        metrics: {
+          totalCost: number;
+          averageUtilization: number;
+          vehiclesUsed: number;
+          assignedTrips: number;
+        };
+      };
+      const data = (await operationReportingApi.getHistorical(scheduleId, days)) as HistoricalRow[];
+      setTrends(data.map((r) => ({
         date: new Date(r.generatedAt),
         cost: r.metrics.totalCost,
         utilization: r.metrics.averageUtilization,
@@ -59,9 +68,9 @@ const KPITrendAnalytics: React.FC<KPITrendAnalyticsProps> = ({ scheduleId, days 
       })));
 
       if (data.length > 0) {
-        const costs = data.map((r: any) => r.metrics.totalCost);
-        const utilizations = data.map((r: any) => r.metrics.averageUtilization);
-        const vehicleUsage = data.map((r: any) => r.metrics.vehiclesUsed);
+        const costs = data.map((r) => r.metrics.totalCost);
+        const utilizations = data.map((r) => r.metrics.averageUtilization);
+        const vehicleUsage = data.map((r) => r.metrics.vehiclesUsed);
 
         const avgCost = costs.reduce((a: number, b: number) => a + b, 0) / costs.length;
         const costTrend = costs[costs.length - 1] - costs[0];

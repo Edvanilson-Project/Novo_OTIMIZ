@@ -6,9 +6,9 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-otimiz_db}
       POSTGRES_USER: ${DB_USER:-otimiz_admin}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-otimiz_password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
     ports:
-      - "5444:5432"
+      - "127.0.0.1:5444:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -18,20 +18,31 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
 
   redis:
     image: redis:alpine
     container_name: otimiz-v2-redis
     restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set} --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "6388:6379"
+      - "127.0.0.1:6388:6379"
     networks:
       - otimiz-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
 
   optimizer:
     build:
@@ -48,25 +59,32 @@ services:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-otimiz_admin}
-      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - DB_NAME=${DB_NAME:-otimiz_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_TASK_RESULT_EXPIRES=3600
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
+      - ENVIRONMENT=production
       - PORT=8000
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     networks:
       - otimiz-network
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '3.0'
 
   backend:
     build:
@@ -84,21 +102,22 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - NODE_OPTIONS=--max-old-space-size=12288
+      - NODE_OPTIONS=--max-old-space-size=512
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-otimiz_admin}
-      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - DB_NAME=${DB_NAME:-otimiz_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - JWT_SECRET=${JWT_SECRET:-otimiz-dev-jwt-secret-change-in-production}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1d}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-15m}
       - OPTIMIZER_URL=http://optimizer:8000
-      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     networks:
       - otimiz-network
     healthcheck:
@@ -107,6 +126,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
 
   frontend:
     build:
@@ -119,9 +143,7 @@ services:
         condition: service_healthy
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_API_URL=http://backend:3001/api/v1
-    ports:
-      - "3000:3000"
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://localhost/api/v1}
     networks:
       - otimiz-network
     healthcheck:
@@ -130,6 +152,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
   celery-worker:
     build:
@@ -137,7 +164,7 @@ services:
       dockerfile: Dockerfile
     container_name: otimiz-v2-celery-worker
     restart: unless-stopped
-    command: celery -A src.worker worker --loglevel=info --concurrency=2 --queues=optimizer
+    command: celery -A src.worker worker --loglevel=info --concurrency=2 --queues=optimizer --time-limit=600 --soft-time-limit=540
     depends_on:
       redis:
         condition: service_healthy
@@ -147,16 +174,22 @@ services:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-otimiz_admin}
-      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - DB_NAME=${DB_NAME:-otimiz_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_TASK_RESULT_EXPIRES=3600
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
       - WORKER_TYPE=general
     networks:
       - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '2.0'
 
   celery-worker-depot:
     build:
@@ -164,7 +197,7 @@ services:
       dockerfile: Dockerfile
     container_name: otimiz-v2-celery-worker-depot
     restart: unless-stopped
-    command: celery -A src.worker worker --loglevel=info --concurrency=4 --queues=optimizer_depot
+    command: celery -A src.worker worker --loglevel=info --concurrency=4 --queues=optimizer_depot --time-limit=900 --soft-time-limit=840
     depends_on:
       redis:
         condition: service_healthy
@@ -174,29 +207,162 @@ services:
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=${DB_USER:-otimiz_admin}
-      - DB_PASSWORD=${DB_PASSWORD:-otimiz_password}
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
       - DB_NAME=${DB_NAME:-otimiz_db}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:-internal-key-123456}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_TASK_RESULT_EXPIRES=3600
+      - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
       - WORKER_TYPE=depot
     networks:
       - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '3.0'
 
   celery-flower:
     image: mher/flower:2.0
     container_name: otimiz-v2-flower
     restart: unless-stopped
-    command: celery flower --broker=redis://redis:6379/0 --port=5555
+    command: celery flower --broker=redis://:${REDIS_PASSWORD}@redis:6379/0 --port=5555 --basic-auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:?FLOWER_PASSWORD must be set}
     depends_on:
       redis:
         condition: service_healthy
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     networks:
       - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.2'
+
+  pgbackup:
+    image: prodrigestivill/postgres-backup-local:16
+    container_name: otimiz-v2-pgbackup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${DB_NAME:-otimiz_db}
+      - POSTGRES_USER=${DB_USER:-otimiz_admin}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD must be set}
+      - SCHEDULE=@daily
+      - BACKUP_KEEP_DAYS=7
+      - BACKUP_KEEP_WEEKS=4
+      - BACKUP_KEEP_MONTHS=6
+      - HEALTHCHECK_PORT=8080
+    volumes:
+      - pgbackups:/backups
+    networks:
+      - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+
+  nginx:
+    image: nginx:alpine
+    container_name: otimiz-v2-nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  # ── Observability stack ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: otimiz-v2-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    networks:
+      - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: otimiz-v2-alertmanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    environment:
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_FROM=${SMTP_FROM:-alertmanager@otimiz.com.br}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - ALERT_EMAIL=${ALERT_EMAIL:-admin@otimiz.com.br}
+      - ALERT_EMAIL_CRITICAL=${ALERT_EMAIL_CRITICAL:-admin@otimiz.com.br}
+    networks:
+      - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: otimiz-v2-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - otimiz-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
 
 networks:
   otimiz-network:
@@ -204,3 +370,6 @@ networks:
 
 volumes:
   pgdata:
+  pgbackups:
+  prometheus_data:
+  grafana_data:

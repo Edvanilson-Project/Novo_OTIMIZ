@@ -4,12 +4,31 @@ Ponto de entrada da aplicação.
 """
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import structlog
 import uvicorn
+
+# Sentry — optional, no-ops if SENTRY_DSN not set or package not installed
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    _sentry_dsn = os.environ.get("SENTRY_DSN")
+    if _sentry_dsn:
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=os.environ.get("SENTRY_ENVIRONMENT", os.environ.get("ENVIRONMENT", "production")),
+            traces_sample_rate=0.1,
+            integrations=[FastApiIntegration(), CeleryIntegration()],
+            before_send=lambda event, hint: {k: v for k, v in event.items() if k != "user"} if event else event,
+        )
+        structlog.get_logger(__name__).info("sentry_initialized", env=os.environ.get("SENTRY_ENVIRONMENT"))
+except ImportError:
+    pass  # sentry-sdk not installed — acceptable in dev
 from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -238,8 +257,24 @@ async def _auto_reconcile_loop() -> None:
         await asyncio.sleep(loop_interval)
 
 
+_WEAK_INTERNAL_KEYS = {"internal-key-123456", "", "change-me"}
+
+def _assert_production_secrets() -> None:
+    import os
+    if os.environ.get("ENVIRONMENT", "development").lower() != "production":
+        return
+    key = settings.internal_security_key or ""
+    if key in _WEAK_INTERNAL_KEYS or len(key) < 16:
+        log.error(
+            "fatal_weak_internal_key",
+            msg="INTERNAL_OPTIMIZER_KEY is missing or too weak for production",
+        )
+        raise SystemExit(1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _assert_production_secrets()
     configure_logging(settings.log_level)
     log.info(
         "optimizer_starting",
@@ -281,8 +316,8 @@ com múltiplos algoritmos:
 """,
     version=settings.app_version,
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
 # ── Multi-Tenancy & Correlation ID ──────────────────────────────────────────
@@ -292,8 +327,9 @@ app.add_middleware(TenantLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Internal-Key", "X-Correlation-ID", "X-Company-ID"],
+    allow_credentials=True,
 )
 
 # ── Prometheus metrics ───────────────────────────────────────────────────────

@@ -88,8 +88,9 @@ export default function DutyStatsPanel({ scheduleId }: Props) {
       try {
         const d = await operationReportingApi.getDutyStats(scheduleId);
         if (!cancelled) { setData(d); setError(null); }
-      } catch (err: any) {
-        if (!cancelled) setError(err?.response?.data?.message ?? err?.message ?? 'Erro ao carregar jornadas');
+      } catch (err) {
+        const axiosErr = err as { response?: { data?: { message?: string } }; message?: string };
+        if (!cancelled) setError(axiosErr?.response?.data?.message ?? axiosErr?.message ?? 'Erro ao carregar jornadas');
       } finally {
         if (!cancelled) setLoading(false);
       }

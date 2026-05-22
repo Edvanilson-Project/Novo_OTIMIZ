@@ -33,17 +33,15 @@ export default function GlobalError({
               borderRadius: 8,
               padding: 16,
               marginBottom: 24,
-              overflowX: 'auto',
             }}>
-              <strong style={{ color: '#ff6b6b' }}>{error.name}: </strong>
-              <span>{error.message}</span>
-              {error.stack && (
-                <pre style={{ marginTop: 12, fontSize: 12, color: '#888', whiteSpace: 'pre-wrap' }}>
-                  {error.stack}
-                </pre>
-              )}
+              {/* Never expose stack traces to users — log internally instead */}
+              <p style={{ color: '#aaa', margin: 0 }}>
+                Se o problema persistir, entre em contato com o suporte informando o código de erro.
+              </p>
               {error.digest && (
-                <p style={{ marginTop: 8, color: '#666', fontSize: 12 }}>digest: {error.digest}</p>
+                <p style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+                  Código: <code>{error.digest}</code>
+                </p>
               )}
             </div>
             <button

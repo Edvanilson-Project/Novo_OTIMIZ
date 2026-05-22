@@ -103,8 +103,9 @@ const MaintenanceScheduler: React.FC<MaintenanceSchedulerProps> = ({
       await vehiclesApi.createMaintenance(vehicleId, formData);
       await fetchMaintenance();
       handleCloseDialog();
-    } catch (err: any) {
-      setError(err?.response?.data?.message || 'Erro ao agendar manutenção');
+    } catch (err) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message || 'Erro ao agendar manutenção');
     }
   };
 

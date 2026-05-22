@@ -10,7 +10,7 @@ import { LightThemeColors } from './LightThemeColors';
 import { baseDarkTheme, baselightTheme } from './DefaultColors';
 import * as locales from '@mui/material/locale';
 
-export const BuildTheme = (config: any = {}) => {
+export const BuildTheme = (config: Record<string, unknown> = {}) => {
   const themeOptions = LightThemeColors.find((theme) => theme.name === config.theme);
   const darkthemeOptions = DarkThemeColors.find((theme) => theme.name === config.theme);
   const { activeMode, isBorderRadius } = useContext(CustomizerContext);

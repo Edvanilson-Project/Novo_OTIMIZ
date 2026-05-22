@@ -32,6 +32,7 @@ celery[redis]>=5.4.0          # Fila de tarefas assíncronas (workers VSP/CSP pa
 # ── Observability ────────────────────────────────────────────────────────────
 structlog>=24.4.0
 prometheus-fastapi-instrumentator>=7.0.0
+sentry-sdk[fastapi,celery]>=2.0.0  # Error tracking — graceful no-op if SENTRY_DSN not set
 
 # ── Dev / test ────────────────────────────────────────────────────────────────
 pytest>=8.3.0

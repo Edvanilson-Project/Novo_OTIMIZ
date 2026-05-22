@@ -73,7 +73,14 @@ export default function FairnessHistogram({ scheduleId }: Props) {
     void (async () => {
       setLoading(true);
       try {
-        const schedule: any = await operationsApi.getLatestSchedule();
+        const schedule = (await operationsApi.getLatestSchedule()) as
+          | {
+              resultSummary?: { costBreakdown?: { csp?: { fairness?: FairnessData } }; duties?: unknown[] };
+              metadata?: { cost_breakdown?: { csp?: { fairness?: FairnessData } } };
+              cost_breakdown?: { csp?: { fairness?: FairnessData } };
+              duties?: unknown[];
+            }
+          | null;
         if (cancelled) return;
         const fb =
           schedule?.resultSummary?.costBreakdown?.csp?.fairness ??
@@ -84,17 +91,20 @@ export default function FairnessHistogram({ scheduleId }: Props) {
           setError("Métricas de equidade indisponíveis para este schedule.");
           return;
         }
-        const rawDuties: any[] = schedule?.duties ?? schedule?.resultSummary?.duties ?? [];
+        const rawDuties = (schedule?.duties ?? schedule?.resultSummary?.duties ?? []) as Array<
+          Record<string, unknown>
+        >;
         const dutyWork: DutyWork[] = rawDuties.map((d) => ({
           dutyId: Number(d.duty_id ?? d.dutyId ?? 0),
           workMinutes: Number(d.work_time ?? d.workMinutes ?? 0),
         }));
-        setFairness(fb as FairnessData);
+        setFairness(fb);
         setDuties(dutyWork);
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!cancelled) {
           console.error("[FairnessHistogram] load failed", err);
-          setError(err?.message || "Erro ao carregar dados.");
+          const message = err instanceof Error ? err.message : "Erro ao carregar dados.";
+          setError(message);
         }
       } finally {
         if (!cancelled) setLoading(false);

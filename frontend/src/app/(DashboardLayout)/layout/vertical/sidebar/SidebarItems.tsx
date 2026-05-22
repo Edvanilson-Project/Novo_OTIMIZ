@@ -38,7 +38,7 @@ const SidebarItems = () => {
   }, []);
 
   const lgUp = useMediaQuery((theme) => theme.breakpoints.up('lg'));
-  const hideMenu = lgUp ? isCollapse == "mini-sidebar" && !isSidebarHover : '';
+  const hideMenu = lgUp ? isCollapse == "mini-sidebar" && !isSidebarHover : false;
 
   // Filtra itens pela role do usuário, removendo navlabels órfãos
   const visibleItems = (() => {

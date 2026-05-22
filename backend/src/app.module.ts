@@ -12,6 +12,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { JwtAuthGuard } from './modules/auth/jwt-auth.guard';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuditInterceptor } from './modules/audit/audit.interceptor';
+import { RlsTenantInterceptor } from './common/interceptors/rls-tenant.interceptor';
 import { AuditLog } from './modules/database/entities/audit-log.entity';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -47,6 +48,9 @@ import { VehicleMaintenance } from './modules/database/entities/vehicle-maintena
 import { VehicleAvailabilityWindow } from './modules/database/entities/vehicle-availability-window.entity';
 import { OptimizationRun } from './modules/database/entities/optimization-run.entity';
 import { CustomReport } from './modules/database/entities/custom-report.entity';
+import { RefreshToken } from './modules/database/entities/refresh-token.entity';
+import { PasswordResetToken } from './modules/database/entities/password-reset-token.entity';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -79,6 +83,8 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
           VehicleAvailabilityWindow,
           OptimizationRun,
           CustomReport,
+          RefreshToken,
+          PasswordResetToken,
         ],
         // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
         // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
@@ -108,6 +114,7 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
       OptimizationRun,
       CustomReport,
     ]),
+    EmailModule,
     AuthModule,
     ParametersModule,
     OperationsModule,
@@ -148,6 +155,10 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
     {
       provide: APP_GUARD,
       useClass: RolesGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RlsTenantInterceptor,
     },
     {
       provide: APP_INTERCEPTOR,

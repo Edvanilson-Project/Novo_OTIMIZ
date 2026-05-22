@@ -88,7 +88,7 @@ export default function UsersPage() {
       const usersList: User[] = Array.isArray(usersData) ? usersData : usersData.data ?? [];
       const companiesList: Company[] = Array.isArray(companiesData) ? companiesData : companiesData.data ?? [];
       const companyMap = new Map(companiesList.map((c: Company) => [c.id, c.name]));
-      setRows(usersList.map((u: any) => ({ ...u, status: u.isActive ? 'active' : 'inactive', companyName: u.companyId ? companyMap.get(u.companyId) : undefined })));
+      setRows(usersList.map((u: User & { isActive?: boolean }) => ({ ...u, status: u.isActive ? 'active' : 'inactive', companyName: u.companyId ? companyMap.get(u.companyId) : undefined })));
       setCompanies(companiesList);
     } finally {
       setLoading(false);

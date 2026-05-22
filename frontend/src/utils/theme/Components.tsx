@@ -2,7 +2,7 @@
 import "./DefaultColors";
 import { Theme } from "@mui/material/styles";
 
-const components: any = (theme: Theme) => {
+const components = (theme: Theme): Record<string, unknown> => {
   return {
     MuiCssBaseline: {
       styleOverrides: {

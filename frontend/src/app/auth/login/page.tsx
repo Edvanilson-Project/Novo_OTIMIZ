@@ -26,8 +26,9 @@ export default function LoginPage() {
       const { access_token, user } = res.data;
       saveSession(access_token, user);
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Credenciais inválidas. Tente novamente.');
+    } catch (err) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr.response?.data?.message || 'Credenciais inválidas. Tente novamente.');
     } finally {
       setLoading(false);
     }
