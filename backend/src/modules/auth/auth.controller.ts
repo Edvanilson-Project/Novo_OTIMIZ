@@ -73,7 +73,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ short: { ttl: 60_000, limit: 10 } })
+  @Throttle({ short: { ttl: 60_000, limit: parseInt(process.env.THROTTLE_LOGIN_LIMIT ?? '10', 10) } })
   @ApiOperation({ summary: 'Autenticar usuário', description: 'Retorna JWT e define cookies HttpOnly.' })
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 200, description: 'Login bem-sucedido.' })

@@ -214,6 +214,7 @@ jobs:
           JWT_SECRET: ci-e2e-jwt-secret-change-in-production-min32
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
           OPTIMIZER_URL: http://localhost:8000
+          THROTTLE_LOGIN_LIMIT: '1000'
 
       # ── Optimizer ─────────────────────────────────────────────────────────────
       - name: Install optimizer dependencies

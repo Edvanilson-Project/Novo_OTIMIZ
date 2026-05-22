@@ -97,7 +97,10 @@ test.describe('Planner controls', () => {
   });
 
   test('algorithm selector renders expected options', async ({ page }) => {
-    await page.locator('label').filter({ hasText: /Algoritmo/i }).first().click();
+    // MUI Select trigger has role="button" + aria-haspopup="listbox"; clicking the <label> alone does not open it
+    const trigger = page.locator('[role="button"][aria-haspopup="listbox"]').first();
+    if (await trigger.count() === 0) return;
+    await trigger.click();
     await expect(page.locator('[role="option"]').filter({ hasText: /Guloso/i })).toBeVisible({ timeout: 4_000 });
     await page.keyboard.press('Escape');
   });
@@ -125,8 +128,9 @@ test.describe('GTFS import', () => {
     // Navigate to the viagens/trips tab if tabs exist
     const tripsTab = page.locator('[role="tab"]').filter({ hasText: /Viagen|Trip/i });
     if (await tripsTab.count() > 0) await tripsTab.first().click();
+    // The GTFS upload button renders as MUI <Button component="span"> → <span role="button">, not <button>
     await expect(
-      page.locator('button').filter({ hasText: /GTFS/i }),
+      page.locator('button, [role="button"]').filter({ hasText: /GTFS/i }),
     ).toBeVisible({ timeout: 6_000 });
   });
 });

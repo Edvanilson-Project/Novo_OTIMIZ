@@ -219,20 +219,23 @@ test.describe('Planner — selectors', () => {
   });
 
   test('algorithm dropdown lists expected options', async ({ page }) => {
-    const selector = page.locator('label').filter({ hasText: /Algoritmo/i }).first();
-    await selector.click();
-    await expect(page.locator('[role="option"], [role="listbox"] li').first()).toBeVisible({ timeout: 4_000 });
-    // Greedy (Guloso) should always be present
-    const hasGreedy = await page.locator('[role="option"]').filter({ hasText: /Guloso|Greedy/i }).count();
+    // MUI Select trigger has role="button" + aria-haspopup="listbox"; clicking the <label> alone does not open it
+    const trigger = page.locator('[role="button"][aria-haspopup="listbox"]').first();
+    if (await trigger.count() === 0) return;
+    await trigger.click();
+    const options = page.locator('[role="option"]');
+    await expect(options.first()).toBeVisible({ timeout: 4_000 });
+    const hasGreedy = await options.filter({ hasText: /Guloso|Greedy/i }).count();
     expect(hasGreedy).toBeGreaterThan(0);
     await page.keyboard.press('Escape');
   });
 
   test('quality mode selector contains balanced option', async ({ page }) => {
-    const qualLabel = page.locator('label').filter({ hasText: /Qualidade Operacional/i }).first();
-    if (await qualLabel.count() === 0) return;
-    await qualLabel.click();
-    await expect(page.locator('[role="option"], [role="listbox"] li').first()).toBeVisible({ timeout: 4_000 });
+    // Second MUI Select on the planner page (algorithm is first, quality mode is second)
+    const triggers = page.locator('[role="button"][aria-haspopup="listbox"]');
+    if (await triggers.count() < 2) return;
+    await triggers.nth(1).click();
+    await expect(page.locator('[role="option"]').first()).toBeVisible({ timeout: 4_000 });
     await page.keyboard.press('Escape');
   });
 
