@@ -4,6 +4,7 @@ import { OperationReportGeneratorService } from './operation-report-generator.se
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
 import { DutyAssignment } from '../../database/entities/duty-assignment.entity';
+import { Trip } from '../../database/entities/trip.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
@@ -56,8 +57,19 @@ describe('OperationReportGeneratorService', () => {
   let scheduleRepo: any;
   let blockRepo: any;
   let runRepo: any;
-
   let dutyRepo: any;
+  let tripRepo: any;
+
+  // Mock trips for utilization calculation
+  const mockTrips = [
+    { id: 1, startTime: 360, endTime: 420, duration: 60 }, // 6:00-7:00 = 60min
+    { id: 2, startTime: 420, endTime: 480, duration: 60 }, // 7:00-8:00
+    { id: 3, startTime: 480, endTime: 540, duration: 60 }, // 8:00-9:00
+    { id: 4, startTime: 540, endTime: 600, duration: 60 }, // 9:00-10:00
+    { id: 5, startTime: 600, endTime: 660, duration: 60 }, // 10:00-11:00
+    { id: 6, startTime: 660, endTime: 720, duration: 60 }, // 11:00-12:00
+    { id: 7, startTime: 720, endTime: 780, duration: 60 }, // 12:00-13:00
+  ];
 
   beforeEach(async () => {
     scheduleRepo = { findOne: jest.fn() };
@@ -68,6 +80,7 @@ describe('OperationReportGeneratorService', () => {
       createQueryBuilder: jest.fn(),
     };
     dutyRepo = { find: jest.fn() };
+    tripRepo = { find: jest.fn().mockResolvedValue(mockTrips) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -76,6 +89,7 @@ describe('OperationReportGeneratorService', () => {
         { provide: getRepositoryToken(BlockAssignment), useValue: blockRepo },
         { provide: getRepositoryToken(OptimizationRun), useValue: runRepo },
         { provide: getRepositoryToken(DutyAssignment), useValue: dutyRepo },
+        { provide: getRepositoryToken(Trip), useValue: tripRepo },
       ],
     }).compile();
 
