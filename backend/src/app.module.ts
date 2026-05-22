@@ -51,6 +51,8 @@ import { CustomReport } from './modules/database/entities/custom-report.entity';
 import { RefreshToken } from './modules/database/entities/refresh-token.entity';
 import { PasswordResetToken } from './modules/database/entities/password-reset-token.entity';
 import { EmailModule } from './modules/email/email.module';
+import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 
 @Module({
   imports: [
@@ -127,6 +129,7 @@ import { EmailModule } from './modules/email/email.module';
     CustomReportsModule,
     AuditModule,
     GtfsModule,
+    MonitoringModule,
     JwtModule.register({}),
     // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
     // (/optimize). Throttles podem ser sobrescritos por endpoint via @Throttle decorator.
@@ -163,6 +166,10 @@ import { EmailModule } from './modules/email/email.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RequestLoggingInterceptor,
     },
   ],
 })
