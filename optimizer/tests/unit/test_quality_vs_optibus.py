@@ -265,7 +265,7 @@ class TestCoverageCorrectness:
 
     def test_sa_vsp_covers_all_trips(self):
         trips = _consecutive_trips(10)
-        sol = SimulatedAnnealingVSP().solve(trips, _vt())
+        sol = SimulatedAnnealingVSP(vsp_params={"sa_max_iterations": 500}).solve(trips, _vt())
         covered = {t.id for b in sol.blocks for t in b.trips}
         assert covered == {t.id for t in trips}
 
@@ -297,7 +297,7 @@ class TestNoTimeOverlaps:
 
     def test_sa_no_overlaps(self):
         trips = _consecutive_trips(10)
-        sol = SimulatedAnnealingVSP().solve(trips, _vt())
+        sol = SimulatedAnnealingVSP(vsp_params={"sa_max_iterations": 500}).solve(trips, _vt())
         assert _validate_no_overlaps(sol.blocks) == []
 
     def test_tabu_no_overlaps(self):
@@ -575,7 +575,7 @@ class TestAllAlgorithmsProduce_ValidSolutions:
 
     def test_sa_vsp(self):
         trips = _consecutive_trips(8)
-        self._assert_valid_vsp(SimulatedAnnealingVSP().solve(trips, _vt()), trips)
+        self._assert_valid_vsp(SimulatedAnnealingVSP(vsp_params={"sa_max_iterations": 500}).solve(trips, _vt()), trips)
 
     def test_tabu_vsp(self):
         trips = _consecutive_trips(8)
@@ -593,7 +593,10 @@ class TestAllAlgorithmsProduce_ValidSolutions:
         trips = _consecutive_trips(10)
         trip_ids = {t.id for t in trips}
         for algo_cls in [GreedyVSP, SimulatedAnnealingVSP, TabuSearchVSP]:
-            sol = algo_cls().solve(trips, _vt())
+            if algo_cls == SimulatedAnnealingVSP:
+                sol = algo_cls(vsp_params={"sa_max_iterations": 500}).solve(trips, _vt())
+            else:
+                sol = algo_cls().solve(trips, _vt())
             covered = {t.id for b in sol.blocks for t in b.trips}
             assert covered == trip_ids, f"{algo_cls.__name__} missed trips: {trip_ids - covered}"
 

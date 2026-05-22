@@ -139,6 +139,7 @@ class TestSAMultiDepot:
             "min_layover_minutes": 5,
             "same_depot_required": True,
             "random_seed": 42,
+            "sa_max_iterations": 500,
         }
         trips = [
             _trip(1, 360, 470, depot_id=1),
@@ -156,6 +157,7 @@ class TestSAMultiDepot:
             "min_layover_minutes": 5,
             "same_depot_required": True,
             "random_seed": 42,
+            "sa_max_iterations": 500,
         }
         trips = [
             _trip(1, 360, 470, depot_id=1),

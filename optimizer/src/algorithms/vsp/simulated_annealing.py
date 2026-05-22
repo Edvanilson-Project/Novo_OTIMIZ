@@ -329,10 +329,11 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
 
         min_temp = float(settings.sa_min_temp)
         iterations_per_temp = int(settings.sa_iterations_per_temp)
+        max_iterations = int(self.vsp_params.get("sa_max_iterations", settings.sa_max_iterations))
         iteration = 0
         restarts = 0
 
-        while not self._check_timeout():
+        while iteration < max_iterations and not self._check_timeout():
             temp = self.initial_temp
 
             if restarts > 0:

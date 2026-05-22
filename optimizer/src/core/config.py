@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     sa_cooling_rate: float = 0.997
     sa_min_temp: float = 0.1
     sa_iterations_per_temp: int = 50
+    sa_max_iterations: int = 10000
 
     # Tabu Search
     ts_tabu_size: int = 30

@@ -219,7 +219,7 @@ class TestInvariantLBLessThanOrEqualUB:
 
     def test_simulated_annealing_satisfies_lb_le_ub(self):
         trips = _peak_overlap_trips(10)
-        sol = SimulatedAnnealingVSP(vsp_params={"sa_iterations": 50}).solve(
+        sol = SimulatedAnnealingVSP(vsp_params={"sa_max_iterations": 500}).solve(
             trips, self._vehicle_types(), depot_id=1
         )
         result = _make_result(sol)
