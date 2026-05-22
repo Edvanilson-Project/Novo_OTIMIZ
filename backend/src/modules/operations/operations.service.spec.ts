@@ -37,17 +37,34 @@ function makeTenant(id: number | null = 16) {
   return { getCompanyId: jest.fn().mockReturnValue(id) } as any;
 }
 
+function makeScheduleRepo(schedules: any[] = []) {
+  return {
+    find: jest.fn().mockResolvedValue(schedules),
+    findOne: jest.fn().mockResolvedValue(schedules[0] ?? null),
+    create: jest.fn((d: any) => d),
+    save: jest.fn((d: any) =>
+      Promise.resolve(
+        Array.isArray(d)
+          ? d.map((x, i) => ({ id: i + 1, ...x }))
+          : { id: 1, ...d },
+      ),
+    ),
+  } as any;
+}
+
 describe('OperationsService', () => {
   let service: OperationsService;
   let tripRepo: ReturnType<typeof makeTripRepo>;
   let driverRepo: ReturnType<typeof makeDriverRepo>;
   let tenant: ReturnType<typeof makeTenant>;
+  let scheduleRepo: ReturnType<typeof makeScheduleRepo>;
 
   beforeEach(() => {
     tripRepo = makeTripRepo();
     driverRepo = makeDriverRepo();
     tenant = makeTenant(16);
-    service = new OperationsService(tripRepo, driverRepo, tenant);
+    scheduleRepo = makeScheduleRepo();
+    service = new OperationsService(tripRepo, driverRepo, tenant, scheduleRepo);
   });
 
   // ── getTrips ──────────────────────────────────────────────────────────────

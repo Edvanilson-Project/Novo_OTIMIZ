@@ -138,7 +138,7 @@ export default function ScheduleHistoryPage() {
               </Table>
             </TableContainer>
 
-            <Stack direction="row" justifyContent="center" sx={{ mt: 2 }}>
+            <Stack direction="row" sx={{ justifyContent: 'center', mt: 2 }}>
               <Pagination
                 count={data.pages}
                 page={page}

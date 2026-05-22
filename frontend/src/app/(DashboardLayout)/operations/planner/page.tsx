@@ -43,6 +43,7 @@ import type { Socket } from "socket.io-client";
 import { type TripIntervalPolicy } from "./_helpers/formatters";
 import type { DynamicRule } from "./_components/DynamicRulesEditor";
 import { getSessionUser } from "@/lib/api";
+import { TripReassignmentModal } from "@/app/components/shared/TripReassignmentModal";
 
 const AiCostDrawer = dynamic(
   () => import("./_components/AiCostDrawer").then((mod) => mod.AiCostDrawer),
@@ -118,6 +119,8 @@ export default function PlannerPage() {
     phaseLabel?: string | null;
     progressPct?: number | null;
   } | null>(null);
+  const [reassignmentModalOpen, setReassignmentModalOpen] = useState(false);
+  const [selectedTripForReassignment, setSelectedTripForReassignment] = useState<{ tripId: number; code?: string } | null>(null);
 
   const companyId = useMemo(() => getSessionUser()?.companyId ?? 0, []);
 
@@ -131,6 +134,11 @@ export default function PlannerPage() {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const optimizingRef = useRef(false);
+
+  const handleOpenReassignmentModal = useCallback((tripId: number, tripCode?: string) => {
+    setSelectedTripForReassignment({ tripId, code: tripCode });
+    setReassignmentModalOpen(true);
+  }, []);
 
   const dynamicRules = useMemo(() => parameters?.dynamic_rules || [], [parameters?.dynamic_rules]);
   const operationalQualityDecision = useMemo<OperationalQualityDecision | null>(() => {
@@ -833,6 +841,26 @@ export default function PlannerPage() {
           <Button onClick={() => setValidationOpen(false)}>Fechar</Button>
         </DialogActions>
       </Dialog>
+
+      {schedule && (
+        <TripReassignmentModal
+          open={reassignmentModalOpen}
+          onClose={() => {
+            setReassignmentModalOpen(false);
+            setSelectedTripForReassignment(null);
+          }}
+          onSuccess={() => {
+            setNotification({
+              open: true,
+              message: "Viagem reatribuída com sucesso!",
+              severity: "success",
+            });
+          }}
+          scheduleId={schedule.id ?? 0}
+          tripId={selectedTripForReassignment?.tripId ?? 0}
+          tripCode={selectedTripForReassignment?.code}
+        />
+      )}
     </Box>
   );
 }

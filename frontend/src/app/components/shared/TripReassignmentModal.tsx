@@ -110,22 +110,27 @@ export function TripReassignmentModal({
             }}
             onOpen={handleOpen}
             loading={loading && blocks.length === 0}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Bloco de Destino"
-                placeholder="Procure ou selecione"
-                InputProps={{
-                  ...params.InputProps,
-                  endAdornment: (
-                    <>
-                      {loading && blocks.length === 0 ? <CircularProgress color="inherit" size={20} /> : null}
-                      {params.InputProps.endAdornment}
-                    </>
-                  ),
-                }}
-              />
-            )}
+            renderInput={(params) => {
+              const { InputProps: autocompleteInputProps, ...textFieldParams } = params as any;
+              return (
+                <TextField
+                  {...textFieldParams}
+                  label="Bloco de Destino"
+                  placeholder="Procure ou selecione"
+                  slotProps={{
+                    input: {
+                      ...autocompleteInputProps,
+                      endAdornment: (
+                        <>
+                          {loading && blocks.length === 0 ? <CircularProgress color="inherit" size={20} /> : null}
+                          {autocompleteInputProps?.endAdornment}
+                        </>
+                      ),
+                    },
+                  }}
+                />
+              );
+            }}
           />
           <Typography variant="caption" color="textSecondary">
             Selecione o bloco onde deseja reatribuir esta viagem.
