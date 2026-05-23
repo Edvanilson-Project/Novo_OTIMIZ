@@ -10,18 +10,21 @@ const PASS = process.env.E2E_PASS ?? 'admin123';
 setup('authenticate once for E2E suite', async ({ page }) => {
   mkdirSync(path.dirname(authFile), { recursive: true });
 
-  await page.goto(`${BASE}/auth/login`);
+  await page.goto(`${BASE}/auth/login`, { waitUntil: 'networkidle' });
   await page.getByRole('textbox', { name: /e-mail/i }).fill(USER);
   await page.getByRole('textbox', { name: /senha/i }).fill(PASS);
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/v1/auth/login') && response.status() === 200,
-      { timeout: 15_000 },
-    ),
-    page.getByRole('button', { name: /^Entrar$/i }).click(),
-  ]);
-  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+
+  await page.getByRole('button', { name: /^Entrar$/i }).click();
+
+  try {
+    await page.waitForURL(/\/dashboard(?:[/?#].*)?$/, { timeout: 20_000 });
+  } catch {
+    const bodyText = (await page.locator('body').textContent())
+      ?.replace(/\s+/g, ' ')
+      .trim();
+    throw new Error(`Auth failed or navigation timeout. Page text: ${bodyText}`);
+  }
+
   await expect(page.locator('body')).not.toContainText('Credenciais inválidas');
 
   await page.context().storageState({ path: authFile });
