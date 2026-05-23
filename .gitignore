@@ -16,6 +16,9 @@ frontend/next-env.d.ts
 **/test-results/
 **/playwright-report/
 **/playwright/.cache/
+# Playwright auth state — generated at runtime, contains real session tokens
+**/e2e/.auth/
+**/e2e/.auth/*.json
 
 # Python
 **/.venv/
