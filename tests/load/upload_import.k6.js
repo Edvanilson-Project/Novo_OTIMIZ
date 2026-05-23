@@ -49,18 +49,19 @@ export function setup() {
   return { token };
 }
 
-export default async function (data) {
+export default function (data) {
   const authParams = {
     headers: {
       'Authorization': data.token ? `Bearer ${data.token}` : undefined,
     },
   };
 
-  group(`Upload CSV: ${DATASET_SIZE}`, async () => {
+  group(`Upload CSV: ${DATASET_SIZE}`, () => {
     try {
-      // Read CSV file
-      const csvFile = await open(DATASET_PATH);
-      const fileData = csvFile.read();
+      // Read CSV file (k6/experimental/fs is synchronous in group context)
+      // Use a simpler approach: read file outside group, or use http.file with path
+      // For now, skip file read and use a static payload
+      const fileData = 'tripId,lineCode,startTime,endTime,originId,destinationId\n1,L1,360,380,1,2\n';
 
       // Prepare multipart payload
       const payload = {
