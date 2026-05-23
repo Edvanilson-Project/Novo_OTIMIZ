@@ -66,6 +66,7 @@ export default function (data) {
       // Prepare multipart payload
       const payload = {
         file: http.file(fileData, 'trips.csv', 'text/csv'),
+        type: 'trips',
       };
 
       const uploadRes = http.post(
@@ -75,13 +76,13 @@ export default function (data) {
       );
 
       check(uploadRes, {
-        'upload status 200': (r) => r.status === 200,
-        'upload has tripCount': (r) => r.json('tripCount') !== undefined,
+        'upload status 2xx': (r) => r.status >= 200 && r.status < 300,
+        'upload has inserted': (r) => r.json('inserted') !== undefined,
       });
 
-      if (uploadRes.status === 200) {
-        const tripCount = uploadRes.json('tripCount');
-        console.log(`✅ Upload ${DATASET_SIZE}: ${tripCount} trips imported`);
+      if (uploadRes.status >= 200 && uploadRes.status < 300) {
+        const inserted = uploadRes.json('inserted');
+        console.log(`✅ Upload ${DATASET_SIZE}: ${inserted} trips imported`);
       } else {
         console.error(`❌ Upload ${DATASET_SIZE} failed: ${uploadRes.status} - ${uploadRes.body}`);
       }
