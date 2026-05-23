@@ -13,6 +13,7 @@ import Link from "next/link";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { operationsApi } from "@/lib/api";
 import { minToHHMM } from "@/lib/format";
+import { useAuth, type AppRole } from "@/app/hooks/useAuth";
 
 interface KPICardProps {
   title: string;
@@ -75,11 +76,54 @@ interface ScheduleData {
 }
 
 export default function DashboardPage() {
+  const { user, checked } = useAuth();
   const [trips, setTrips] = useState<any[]>([]);
   const [drivers, setDrivers] = useState<any[]>([]);
   const [schedule, setSchedule] = useState<ScheduleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const quickLinks: Array<{
+    label: string;
+    href: string;
+    icon: React.ReactNode;
+    color: string;
+    allowedRoles: AppRole[];
+  }> = [
+    {
+      label: "Carregar Viagens",
+      href: "/operations/data",
+      icon: <IconRoute size={20} />,
+      color: "primary.main",
+      allowedRoles: ["super_admin", "company_admin", "analyst", "operator"],
+    },
+    {
+      label: "Executar Otimização",
+      href: "/operations/planner",
+      icon: <IconCalendarStats size={20} />,
+      color: "success.main",
+      allowedRoles: ["super_admin", "company_admin", "analyst"],
+    },
+    {
+      label: "Gerenciar Empresas",
+      href: "/settings/companies",
+      icon: <IconUsers size={20} />,
+      color: "info.main",
+      allowedRoles: ["super_admin"],
+    },
+    {
+      label: "Parâmetros CCT",
+      href: "/settings/parameters",
+      icon: <IconTrendingDown size={20} />,
+      color: "warning.main",
+      allowedRoles: ["super_admin", "company_admin", "analyst"],
+    },
+  ];
+
+  const visibleQuickLinks = quickLinks.filter((item) => {
+    if (!user?.role) return false;
+    return item.allowedRoles.includes(user.role as AppRole);
+  });
 
   const fetchAll = async () => {
     setLoading(true);
@@ -109,7 +153,13 @@ export default function DashboardPage() {
     }
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    if (checked) {
+      void fetchAll();
+    }
+  }, [checked]);
+
+  if (!checked) return null;
 
   const totalDuration = trips.reduce((acc, t) => acc + (t.duration || 0), 0);
   const avgDuration = trips.length > 0 ? Math.round(totalDuration / trips.length) : 0;
@@ -248,12 +298,7 @@ export default function DashboardPage() {
             <CardContent>
               <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>Acesso Rápido</Typography>
               <Grid container spacing={2}>
-                {[
-                  { label: "Carregar Viagens", href: "/operations/data", icon: <IconRoute size={20} />, color: "primary.main" },
-                  { label: "Executar Otimização", href: "/operations/planner", icon: <IconCalendarStats size={20} />, color: "success.main" },
-                  { label: "Gerenciar Empresas", href: "/settings/companies", icon: <IconUsers size={20} />, color: "info.main" },
-                  { label: "Parâmetros CCT", href: "/settings/parameters", icon: <IconTrendingDown size={20} />, color: "warning.main" },
-                ].map((item) => (
+                {visibleQuickLinks.map((item) => (
                   <Grid key={item.href} size={{ xs: 12, sm: 6, md: 3 }}>
                     <Button
                       component={Link}

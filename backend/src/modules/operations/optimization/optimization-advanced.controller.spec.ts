@@ -15,6 +15,7 @@ describe('OptimizationAdvancedController', () => {
   beforeEach(async () => {
     scenarioSvc = {
       generateScenarios: jest.fn().mockResolvedValue([{ scenarioId: 'S1' }]),
+      listScenarios: jest.fn().mockResolvedValue([{ scenarioId: 'S1' }]),
       getScenarioRun: jest.fn().mockResolvedValue({
         id: 1,
         scenarioId: 'S1',
@@ -72,7 +73,7 @@ describe('OptimizationAdvancedController', () => {
 
   it('listScenarios calls same service', async () => {
     await controller.listScenarios(10);
-    expect(scenarioSvc.generateScenarios).toHaveBeenCalledWith(10);
+    expect(scenarioSvc.listScenarios).toHaveBeenCalledWith(10);
   });
 
   it('getScenarioRun returns formatted run', async () => {

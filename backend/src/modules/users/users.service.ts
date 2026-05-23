@@ -50,6 +50,12 @@ export class UsersService {
       throw new BadRequestException('CompanyId divergente do tenant autenticado.');
     }
     const email = String(dto.email ?? '');
+    const password = typeof dto.password === 'string' ? dto.password.trim() : '';
+
+    if (!password) {
+      throw new BadRequestException('Senha é obrigatória para criar usuário.');
+    }
+
     const exists = await this.repo.findOne({ where: { email, companyId } });
     if (exists) throw new ConflictException('Já existe um usuário com este e-mail nesta empresa');
 
@@ -57,9 +63,7 @@ export class UsersService {
     if (role !== undefined && !ALLOWED_ROLES.includes(role)) {
       throw new UnprocessableEntityException(`Role inválida: ${String(role)}`);
     }
-    const passwordHash = dto.password
-      ? await bcrypt.hash(String(dto.password), 10)
-      : '';
+    const passwordHash = await bcrypt.hash(password, 10);
     const entity = this.repo.create({
       name: String(dto.name ?? ''),
       email,

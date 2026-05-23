@@ -102,10 +102,27 @@ const EMPTY_DRIVER: Omit<Driver, "id"> = {
   driverId: "", name: "", role: "Motorista", maxHoursPerDay: 480, lastShiftEnd: 0,
 };
 
+const HHMM_INPUT_REGEX = /^\d+:\d{2}$/;
+
 // converte "HH:MM" para minutos desde meia-noite
 function hhmmToMin(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
+}
+
+function normalizeLegWindow(startTime: string, endTime: string) {
+  const startMinutes = hhmmToMin(startTime);
+  let endMinutes = hhmmToMin(endTime);
+
+  while (endMinutes < startMinutes) {
+    endMinutes += 1440;
+  }
+
+  return {
+    startTime: startMinutes,
+    endTime: endMinutes,
+    duration: endMinutes - startMinutes,
+  };
 }
 
 // ─── Página ───────────────────────────────────────────────────────────────────
@@ -318,12 +335,12 @@ export default function OperationsDataPage() {
     // para overnight). originId != destinationId. distanceKm > 0. duration plausível
     // (1..480min). end > start. Estas validações evitam submetting de dados inválidos
     // que o backend rejeitaria com erro genérico.
-    const HHMM = /^([0-9]{1,2}):([0-5][0-9])$/;
+    const HHMM = /^([0-9]+):([0-5][0-9])$/;
     const parseHHMM = (s: string): number | null => {
       const m = HHMM.exec(s.trim());
       if (!m) return null;
       const h = Number(m[1]); const min = Number(m[2]);
-      if (h < 0 || h > 47) return null;  // permite até 47:59 para overnight
+      if (h < 0) return null;
       return h * 60 + min;
     };
     const validateLeg = (label: string, st: string, et: string, oid: number, did: number, dist: number): string | null => {
@@ -332,7 +349,8 @@ export default function OperationsDataPage() {
       const em = parseHHMM(et);
       if (sm === null) return `${label}: horário de início inválido (use HH:MM, ex: 06:00).`;
       if (em === null) return `${label}: horário de fim inválido (use HH:MM, ex: 14:00).`;
-      const adjustedEnd = em < sm ? em + 1440 : em; // overnight
+      let adjustedEnd = em;
+      while (adjustedEnd < sm) adjustedEnd += 1440;
       const dur = adjustedEnd - sm;
       if (dur <= 0) return `${label}: fim deve ser depois do início.`;
       if (dur > 480) return `${label}: duração ${dur}min excede 8h — verifique se está correto.`;
@@ -348,38 +366,43 @@ export default function OperationsDataPage() {
       if (voltaErr) { notify(voltaErr, "error"); return; }
     }
     try {
+      const outboundWindow = normalizeLegWindow(
+        tripForm.startTime,
+        tripForm.endTime,
+      );
+      const outboundDuration =
+        tripForm.duration > 0 ? tripForm.duration : outboundWindow.duration;
       const payload: Record<string, unknown> = {
         lineCode: tripForm.lineCode || undefined,
-        startTime: tripForm.startTime,
-        endTime: tripForm.endTime,
-        duration: tripForm.duration || undefined,
+        startTime: outboundWindow.startTime,
+        endTime: outboundWindow.endTime,
+        duration: outboundDuration,
         originId: tripForm.originId,
         destinationId: tripForm.destinationId,
         distanceKm: tripForm.distanceKm,
         direction: tripForm.direction || "IDA",
-        roundTrip: tripForm.roundTrip,
         isReliefPoint: tripForm.isReliefPoint,
         midTripReliefPointId: tripForm.midTripReliefPointId,
         midTripReliefOffsetMinutes: tripForm.midTripReliefOffsetMinutes,
         depotId: tripForm.depotId,
       };
-      if (tripForm.roundTrip) {
-        payload.returnStartTime = tripForm.returnStartTime;
-        payload.returnEndTime = tripForm.returnEndTime;
-        payload.returnDuration = tripForm.returnDuration || undefined;
-        payload.returnOriginId = tripForm.returnOriginId;
-        payload.returnDestinationId = tripForm.returnDestinationId;
-        payload.returnDistanceKm = tripForm.returnDistanceKm;
-      }
       if (editingTrip) {
         await operationsApi.updateTrip(editingTrip.id, payload);
         // Se existe viagem par e roundTrip está ativo, atualiza a par também
         if (editingPairTrip && tripForm.roundTrip) {
+          const returnWindow = normalizeLegWindow(
+            tripForm.returnStartTime,
+            tripForm.returnEndTime,
+          );
+          const returnDuration =
+            tripForm.returnDuration > 0
+              ? tripForm.returnDuration
+              : returnWindow.duration;
           const returnPayload: Record<string, unknown> = {
             lineCode: tripForm.lineCode || undefined,
-            startTime: tripForm.returnStartTime,
-            endTime: tripForm.returnEndTime,
-            duration: tripForm.returnDuration || undefined,
+            startTime: returnWindow.startTime,
+            endTime: returnWindow.endTime,
+            duration: returnDuration,
             originId: tripForm.returnOriginId,
             destinationId: tripForm.returnDestinationId,
             distanceKm: tripForm.returnDistanceKm,
@@ -391,6 +414,23 @@ export default function OperationsDataPage() {
           notify("Viagem atualizada!");
         }
       } else {
+        if (tripForm.roundTrip) {
+          const returnWindow = normalizeLegWindow(
+            tripForm.returnStartTime,
+            tripForm.returnEndTime,
+          );
+          const returnDuration =
+            tripForm.returnDuration > 0
+              ? tripForm.returnDuration
+              : returnWindow.duration;
+          payload.roundTrip = true;
+          payload.returnStartTime = returnWindow.startTime;
+          payload.returnEndTime = returnWindow.endTime;
+          payload.returnDuration = returnDuration;
+          payload.returnOriginId = tripForm.returnOriginId;
+          payload.returnDestinationId = tripForm.returnDestinationId;
+          payload.returnDistanceKm = tripForm.returnDistanceKm;
+        }
         const result = await operationsApi.createTrip(payload) as { trips?: unknown[] };
         const count = result?.trips ? result.trips.length : 1;
         notify(count > 1 ? `${count} viagens criadas (IDA + VOLTA com mesmo pairId)!` : "Viagem criada!");
@@ -536,7 +576,7 @@ export default function OperationsDataPage() {
           value={startTime} onChange={e => {
             const v = e.target.value;
             onStartTime(v);
-            if (endTime && /^\d{1,2}:\d{2}$/.test(v) && /^\d{1,2}:\d{2}$/.test(endTime)) {
+            if (endTime && HHMM_INPUT_REGEX.test(v) && HHMM_INPUT_REGEX.test(endTime)) {
               const s = hhmmToMin(v), en = hhmmToMin(endTime);
               if (en >= s) onDuration(en - s);
             }
@@ -548,7 +588,7 @@ export default function OperationsDataPage() {
           value={endTime} onChange={e => {
             const v = e.target.value;
             onEndTime(v);
-            if (startTime && /^\d{1,2}:\d{2}$/.test(v) && /^\d{1,2}:\d{2}$/.test(startTime)) {
+            if (startTime && HHMM_INPUT_REGEX.test(v) && HHMM_INPUT_REGEX.test(startTime)) {
               const s = hhmmToMin(startTime), en = hhmmToMin(v);
               if (en >= s) onDuration(en - s);
             }
@@ -622,7 +662,9 @@ export default function OperationsDataPage() {
               <Grid size={{ xs: 12, md: 6 }}>
                 <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <Tooltip title="Atualizar lista">
-                    <IconButton onClick={fetchData} disabled={loading}><IconRefresh size={20} /></IconButton>
+                    <span>
+                      <IconButton onClick={fetchData} disabled={loading}><IconRefresh size={20} /></IconButton>
+                    </span>
                   </Tooltip>
                   {activeTab === 0 && (
                     <>
@@ -642,12 +684,14 @@ export default function OperationsDataPage() {
                   )}
                   {activeTab === 0 && (
                     <Tooltip title="Importar arquivo GTFS (.zip) — cria terminais, linhas e viagens automaticamente">
-                      <Button variant="outlined" color="info" component="label"
-                        startIcon={gtfsUploading ? <CircularProgress size={18} color="inherit" /> : <IconUpload size={18} />}
-                        disabled={gtfsUploading} size="small">
-                        {gtfsUploading ? "Importando..." : "Importar GTFS"}
-                        <input type="file" hidden accept=".zip" onChange={handleGtfsImport} />
-                      </Button>
+                      <span>
+                        <Button variant="outlined" color="info" component="label"
+                          startIcon={gtfsUploading ? <CircularProgress size={18} color="inherit" /> : <IconUpload size={18} />}
+                          disabled={gtfsUploading} size="small">
+                          {gtfsUploading ? "Importando..." : "Importar GTFS"}
+                          <input type="file" hidden accept=".zip" onChange={handleGtfsImport} />
+                        </Button>
+                      </span>
                     </Tooltip>
                   )}
                   <Tooltip title="Baixar modelo de planilha para importação (CSV/Excel)">

@@ -5,23 +5,19 @@
  */
 import { test, expect, Page } from '@playwright/test';
 
-const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
-const USER = process.env.E2E_USER ?? 'admin@empresa.com';
-const PASS = process.env.E2E_PASS ?? 'admin123';
+const BASE = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3005';
 
-async function login(page: Page) {
-  await page.goto(`${BASE}/auth/login`);
-  await page.locator('input[type="email"], input[name="email"]').fill(USER);
-  await page.locator('input[type="password"]').fill(PASS);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForURL(/dashboard|planner|operations/, { timeout: 12_000 });
+async function gotoDriversTab(page: Page) {
+  await page.goto(`${BASE}/operations/data`);
+  await page.locator('body').waitFor({ timeout: 8_000 });
+  const driversTab = page.locator('[role="tab"]').filter({ hasText: /Motoristas/i }).first();
+  await driversTab.click();
 }
 
 // ─── Trips CRUD ───────────────────────────────────────────────────────────────
 
 test.describe('Trips CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/data`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -59,9 +55,7 @@ test.describe('Trips CRUD', () => {
 
 test.describe('Drivers CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
-    await page.goto(`${BASE}/settings/drivers`);
-    await page.locator('body').waitFor({ timeout: 8_000 });
+    await gotoDriversTab(page);
   });
 
   test('drivers page loads without crash', async ({ page }) => {
@@ -82,7 +76,6 @@ test.describe('Drivers CRUD', () => {
 
 test.describe('Fleet CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/settings/fleet`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -120,7 +113,6 @@ test.describe('Fleet CRUD', () => {
 
 test.describe('Terminals CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/terminals`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -156,7 +148,6 @@ test.describe('Terminals CRUD', () => {
 
 test.describe('Parameters page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/settings/parameters`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -186,7 +177,6 @@ test.describe('Parameters page', () => {
 
 test.describe('Users page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/settings/users`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -212,7 +202,6 @@ test.describe('Users page', () => {
 
 test.describe('Planner — selectors', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/planner`);
     await page.locator('button').filter({ hasText: /Otimiza|Executar|Atualizar/i }).first()
       .waitFor({ timeout: 12_000 });
@@ -252,7 +241,6 @@ test.describe('Planner — selectors', () => {
 
 test.describe('Rostering page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/rostering`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -274,7 +262,6 @@ test.describe('Rostering page', () => {
 
 test.describe('Custom reports — CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/reporting/custom`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -299,12 +286,10 @@ test.describe('Custom reports — CRUD', () => {
 
 test.describe('Optimize status API', () => {
   test('GET /api/operations/optimize/status returns valid shape', async ({ page }) => {
-    await login(page);
+    await page.goto(`${BASE}/dashboard`);
     // Call the backend directly via fetch inside the browser context (same origin/cookies)
     const result = await page.evaluate(async () => {
-      const token = localStorage.getItem('token') ?? sessionStorage.getItem('token') ?? '';
       const res = await fetch('/api/operations/optimize/status', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: 'include',
       });
       if (!res.ok) return null;
@@ -321,7 +306,6 @@ test.describe('Optimize status API', () => {
 
 test.describe('Advanced optimization — Monitor tab', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/advanced-optimization`);
     await page.locator('body').waitFor({ timeout: 10_000 });
   });
@@ -350,7 +334,6 @@ test.describe('Advanced optimization — Monitor tab', () => {
 
 test.describe('Map page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/map`);
     await page.locator('body').waitFor({ timeout: 10_000 });
   });

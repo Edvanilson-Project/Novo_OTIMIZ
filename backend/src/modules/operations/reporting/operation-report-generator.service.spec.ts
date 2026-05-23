@@ -165,6 +165,32 @@ describe('OperationReportGeneratorService', () => {
       expect(report.metrics.unassignedTrips).toBe(2);
       expect(report.issues.some((i) => i.severity === 'critical')).toBe(true);
     });
+
+    it('counts persisted block trips as assigned even when vehicleId is null', async () => {
+      scheduleRepo.findOne.mockResolvedValue(
+        baselineSchedule({
+          metadata: {
+            total_trips: 2,
+            unassigned_trips: 0,
+          },
+          blocks: [
+            { blockId: 1, vehicleId: null, tripIds: [1, 2], cost: 500 },
+          ],
+        }),
+      );
+      runRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
+
+      const report = await service.generateReport(1, 16);
+
+      expect(report.metrics.assignedTrips).toBe(2);
+      expect(report.metrics.unassignedTrips).toBe(0);
+      expect(report.metrics.vehiclesUsed).toBe(1);
+    });
   });
 
   describe('getHistoricalReports', () => {

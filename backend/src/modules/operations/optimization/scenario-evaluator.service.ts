@@ -1,8 +1,14 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
+import { Trip } from '../../database/entities/trip.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
@@ -98,6 +104,8 @@ export class ScenarioEvaluatorService {
     private scheduleRepo: Repository<Schedule>,
     @InjectRepository(BlockAssignment)
     private blockRepo: Repository<BlockAssignment>,
+    @InjectRepository(Trip)
+    private tripRepo: Repository<Trip>,
     @InjectRepository(OptimizationRun)
     private optimizationRunRepo: Repository<OptimizationRun>,
     private tenantContext: TenantContext,
@@ -111,21 +119,42 @@ export class ScenarioEvaluatorService {
    * Retorna estado atual (status + métricas se já completed) — frontend polla.
    */
   async generateScenarios(scheduleId: number): Promise<ScenarioOption[]> {
-    const companyId = this.tenantContext.getCompanyId();
-    if (!companyId) throw new NotFoundException('Empresa não identificada.');
-
-    const baseline = await this.scheduleRepo.findOne({
-      where: { id: scheduleId, companyId },
-      relations: ['blocks'],
-    });
-    if (!baseline)
-      throw new NotFoundException(`Schedule ${scheduleId} não encontrado.`);
+    const { companyId, baseline, hasTrips } = await this.loadScenarioContext(
+      scheduleId,
+    );
+    if (!hasTrips) {
+      throw new BadRequestException(
+        'Nenhuma viagem disponível para gerar cenários. Importe ou cadastre viagens antes de usar a otimização avançada.',
+      );
+    }
 
     const out: ScenarioOption[] = [this.materializeCurrent(baseline)];
 
     for (const cfg of SCENARIO_CONFIGS) {
       out.push(await this.ensureScenarioRun(companyId, baseline, cfg));
     }
+    return out;
+  }
+
+  async listScenarios(scheduleId: number): Promise<ScenarioOption[]> {
+    const { companyId, baseline } = await this.loadScenarioContext(scheduleId);
+
+    const out: ScenarioOption[] = [this.materializeCurrent(baseline)];
+
+    for (const cfg of SCENARIO_CONFIGS) {
+      const latestRun = await this.optimizationRunRepo.findOne({
+        where: {
+          companyId,
+          baselineScheduleId: baseline.id,
+          scenarioId: cfg.id,
+        },
+        order: { createdAt: 'DESC' },
+      });
+      if (latestRun) {
+        out.push(this.toScenarioOption(cfg, latestRun));
+      }
+    }
+
     return out;
   }
 
@@ -143,7 +172,7 @@ export class ScenarioEvaluatorService {
     savingsPercent: number | null;
     differences: string[];
   }> {
-    const scenarios = await this.generateScenarios(scheduleId);
+    const scenarios = await this.listScenarios(scheduleId);
     const s1 = scenarios.find((s) => s.id === scenario1Id);
     const s2 = scenarios.find((s) => s.id === scenario2Id);
     if (!s1 || !s2) throw new NotFoundException('Cenário não encontrado.');
@@ -394,6 +423,31 @@ export class ScenarioEvaluatorService {
       startedAt: baseline.createdAt,
       completedAt: baseline.createdAt,
       errorMessage: null,
+    };
+  }
+
+  private async loadScenarioContext(scheduleId: number): Promise<{
+    companyId: number;
+    baseline: Schedule;
+    hasTrips: boolean;
+  }> {
+    const companyId = this.tenantContext.getCompanyId();
+    if (!companyId) throw new NotFoundException('Empresa não identificada.');
+
+    const baseline = await this.scheduleRepo.findOne({
+      where: { id: scheduleId, companyId },
+      relations: ['blocks'],
+    });
+    if (!baseline) {
+      throw new NotFoundException(`Schedule ${scheduleId} não encontrado.`);
+    }
+
+    const tripCount = await this.tripRepo.count({ where: { companyId } });
+
+    return {
+      companyId,
+      baseline,
+      hasTrips: tripCount > 0,
     };
   }
 }

@@ -16,6 +16,9 @@ export class DutyAssignment extends TenantBaseEntity {
   @Column()
   dutyId: number;
 
+  @Column('integer', { nullable: true })
+  driverId: number | null;
+
   @Column({ type: 'integer', array: true })
   tripIds: number[];
 

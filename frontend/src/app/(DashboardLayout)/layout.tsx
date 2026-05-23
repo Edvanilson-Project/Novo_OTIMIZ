@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Header from "./layout/vertical/header/Header";
 import Customizer from "./layout/shared/customizer/Customizer";
 import { CustomizerContext } from "@/app/context/customizerContext";
-import { getSessionUser } from "@/lib/api";
+import { hydrateSessionUser } from "@/lib/api";
 
 const Sidebar = dynamic(() => import("./layout/vertical/sidebar/Sidebar"), {
   ssr: false,
@@ -41,8 +41,8 @@ export default function DashboardLayout({ children }: Props) {
   useEffect(() => {
     let isMounted = true;
 
-    const checkAuth = () => {
-      const user = getSessionUser();
+    const checkAuth = async () => {
+      const user = await hydrateSessionUser();
       if (!user) {
         if (isMounted) router.replace('/auth/login');
       } else {
@@ -50,7 +50,7 @@ export default function DashboardLayout({ children }: Props) {
       }
     };
 
-    checkAuth();
+    void checkAuth();
 
     return () => {
       isMounted = false;

@@ -12,7 +12,6 @@ import Typography from "@mui/material/Typography";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import { CustomizerContext } from "@/app/context/customizerContext";
-import { useTranslation } from "react-i18next";
 import type { MenuitemsType } from "../MenuItems";
 
 interface NavItemProps {
@@ -34,7 +33,6 @@ export default function NavItem({
   const { isBorderRadius } = useContext(CustomizerContext);
   const Icon = item?.icon;
   const theme = useTheme();
-  const { t } = useTranslation();
 
   const itemIcon = Icon ? (
     (level ?? 1) > 1 ? (
@@ -93,7 +91,7 @@ export default function NavItem({
             {itemIcon}
           </ListItemIcon>
           <ListItemText>
-            {hideMenu ? "" : <>{t(`${item?.title}`)}</>}
+            {hideMenu ? "" : <>{item?.title}</>}
             <br />
             {item?.subtitle ? (
               <Typography variant="caption">

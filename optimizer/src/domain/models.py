@@ -321,8 +321,10 @@ class OptimizationResult:
         trip_ids = [int(t.id) for t in block.trips]
         costs = block_costs.get(int(block.id), {})
         meta = dict(block.meta)
+        vehicle_id = int(meta.get("vehicle_id", meta.get("source_block_id", block.id)))
         return {
             "block_id": block.id,
+            "vehicle_id": vehicle_id,
             "trips": trip_ids,
             "trip_ids": trip_ids,
             "num_trips": len(block.trips),
@@ -363,8 +365,12 @@ class OptimizationResult:
         costs = duty_costs.get(int(duty.id), {})
         operational_segments = list(duty.meta.get("duty_time_segments") or [])
         operational_report = dict(duty.meta.get("operational_time_report") or {})
+        operator_id = duty.meta.get("operator_id")
+        operator_name = duty.meta.get("operator_name")
         payload = {
             "duty_id": duty.id,
+            "operator_id": int(operator_id) if operator_id is not None else None,
+            "operator_name": operator_name,
             "blocks": block_ids,
             "trip_ids": trip_ids,
             "trips": trip_ids,
@@ -388,6 +394,8 @@ class OptimizationResult:
             "cct_penalties_cost": round(float(costs.get("cct_penalties", 0.0) or 0.0), 2),
             "total_cost": round(float(costs.get("total", 0.0) or 0.0), 2),
             "meta": {
+                "operator_id": int(operator_id) if operator_id is not None else None,
+                "operator_name": operator_name,
                 "quality_metrics": dict(duty.meta.get("quality_metrics") or {}),
                 "operational_time_report": operational_report,
                 "user_explanation": operational_report.get("user_explanation"),

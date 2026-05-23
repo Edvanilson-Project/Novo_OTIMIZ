@@ -12,12 +12,19 @@ import { JwtService } from '@nestjs/jwt';
 
 /**
  * Lê allowlist da env CORS_ALLOWED_ORIGINS (mesma usada em main.ts).
- * Sem allowlist em produção = bloqueio. Em dev cai para localhost:3000.
+ * Sem allowlist em produção = bloqueio. Em dev cobre localhost/127.0.0.1 nas portas da UI.
  */
 function resolveAllowedOrigins(): string[] {
+  const devDefaultOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:3005',
+    'http://127.0.0.1:3005',
+  ].join(',');
   const raw =
     process.env.CORS_ALLOWED_ORIGINS ||
-    (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000');
+    process.env.FRONTEND_URL ||
+    (process.env.NODE_ENV === 'production' ? '' : devDefaultOrigins);
   return raw
     .split(',')
     .map((o) => o.trim())
@@ -34,10 +41,13 @@ function resolveAllowedOrigins(): string[] {
 export class OptimizationGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
+  private static readonly ANONYMOUS_SOCKET_WARN_THROTTLE_MS = 60_000;
+
   @WebSocketServer()
   server: Server;
 
   private logger: Logger = new Logger('OptimizationGateway');
+  private lastAnonymousSocketWarningAt: number | null = null;
 
   constructor(private readonly jwtService: JwtService) {}
 
@@ -63,9 +73,7 @@ export class OptimizationGateway
 
     const token = this.extractToken(client);
     if (!token) {
-      this.logger.warn(
-        `Socket ${client.id} sem token — desconectando (era anônimo).`,
-      );
+      this.logAnonymousConnection(client);
       client.disconnect(true);
       return;
     }
@@ -108,6 +116,29 @@ export class OptimizationGateway
     const auth = client.handshake.auth as { token?: string } | undefined;
     if (auth?.token) return auth.token;
     return undefined;
+  }
+
+  private logAnonymousConnection(client: Socket) {
+    const origin = client.handshake.headers?.origin ?? 'origin-desconhecida';
+    const address = client.handshake.address ?? 'ip-desconhecido';
+    const now = Date.now();
+    const details = `origem=${origin} ip=${address}`;
+
+    if (
+      this.lastAnonymousSocketWarningAt === null ||
+      now - this.lastAnonymousSocketWarningAt >=
+        OptimizationGateway.ANONYMOUS_SOCKET_WARN_THROTTLE_MS
+    ) {
+      this.lastAnonymousSocketWarningAt = now;
+      this.logger.warn(
+        `Socket ${client.id} sem token — desconectando (${details}). Novas ocorrências em 60s seguirão em debug.`,
+      );
+      return;
+    }
+
+    this.logger.debug(
+      `Socket ${client.id} sem token — desconectando (${details}).`,
+    );
   }
 
   handleDisconnect(client: Socket) {

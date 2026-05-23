@@ -23,8 +23,8 @@ export default function LoginPage() {
     setError('');
     try {
       const res = await authApi.login(email, password);
-      const { access_token, user } = res.data;
-      saveSession(access_token, user);
+      const { user } = res.data;
+      saveSession('', user);
       router.push('/dashboard');
     } catch (err) {
       const axiosErr = err as { response?: { data?: { message?: string } } };

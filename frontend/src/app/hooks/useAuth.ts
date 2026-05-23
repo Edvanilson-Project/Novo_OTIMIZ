@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSessionUser, type SessionUser } from '@/lib/api';
+import { hydrateSessionUser, type SessionUser } from '@/lib/api';
 
 export type AppRole = 'super_admin' | 'company_admin' | 'analyst' | 'operator';
 
@@ -21,7 +21,7 @@ export function useAuth(requiredRole?: AppRole) {
     let isMounted = true;
 
     const checkAuth = async () => {
-      const u = getSessionUser();
+      const u = await hydrateSessionUser();
 
       if (!u) {
         if (isMounted) router.replace('/auth/login');
@@ -39,7 +39,7 @@ export function useAuth(requiredRole?: AppRole) {
       }
     };
 
-    checkAuth();
+    void checkAuth();
 
     return () => {
       isMounted = false;

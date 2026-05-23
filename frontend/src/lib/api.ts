@@ -21,7 +21,12 @@ const _refreshQueue: QueueItem[] = [];
 
 function _flushQueue(error: unknown, value?: unknown) {
   _refreshQueue.splice(0).forEach(({ resolve, reject }) => {
-    error ? reject(error) : resolve(value);
+    if (error) {
+      reject(error);
+      return;
+    }
+
+    resolve(value);
   });
 }
 
@@ -80,12 +85,52 @@ export interface SessionUser {
   avatarUrl?: string | null;
 }
 
+function normalizeSessionUser(payload: unknown): SessionUser | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const candidate = payload as Partial<SessionUser> & {
+    id?: number | string;
+    sub?: number | string;
+    companyId?: number | string;
+  };
+  const id = Number(candidate.id ?? candidate.sub);
+  const companyId = Number(candidate.companyId);
+
+  if (
+    !Number.isFinite(id) ||
+    !Number.isFinite(companyId) ||
+    typeof candidate.role !== 'string'
+  ) {
+    return null;
+  }
+
+  const email = typeof candidate.email === 'string' ? candidate.email : '';
+  const fallbackName =
+    typeof candidate.name === 'string' && candidate.name.trim().length > 0
+      ? candidate.name
+      : email || `Usuário ${id}`;
+
+  return {
+    id,
+    companyId,
+    email,
+    role: candidate.role,
+    name: fallbackName,
+    avatarUrl:
+      typeof candidate.avatarUrl === 'string' || candidate.avatarUrl === null
+        ? candidate.avatarUrl
+        : undefined,
+  };
+}
+
 // ─── Sessão ──────────────────────────────────────────────────────────────────
 // O token JWT não é armazenado em JS — viaja exclusivamente via cookie HttpOnly
 // definido pelo backend. Aqui guardamos apenas metadados não-sensíveis do usuário.
 export function saveSession(_accessToken: string, user: SessionUser) {
   if (typeof window === 'undefined') return;
-  sessionStorage.setItem('otimiz_user', JSON.stringify(user));
+  const normalizedUser = normalizeSessionUser(user);
+  if (!normalizedUser) return;
+  sessionStorage.setItem('otimiz_user', JSON.stringify(normalizedUser));
 }
 
 export function getSessionUser(): SessionUser | null {
@@ -107,6 +152,22 @@ export const authApi = {
     apiClient.post('/auth/login', { email, password }),
   getProfile: () => apiClient.get('/auth/profile'),
 };
+
+export async function hydrateSessionUser(): Promise<SessionUser | null> {
+  const cachedUser = getSessionUser();
+  if (cachedUser) return cachedUser;
+
+  try {
+    const response = await authApi.getProfile();
+    const user = normalizeSessionUser(response.data);
+    if (!user) return null;
+    saveSession('', user);
+    return user;
+  } catch {
+    clearSession();
+    return null;
+  }
+}
 
 // ─── Lines ───────────────────────────────────────────────────────────────────
 export const linesApi = {
