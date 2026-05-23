@@ -215,6 +215,7 @@ jobs:
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
           OPTIMIZER_URL: http://localhost:8000
           THROTTLE_LOGIN_LIMIT: '1000'
+          CORS_ALLOWED_ORIGINS: 'http://localhost:3000,http://127.0.0.1:3000'
 
       # ── Optimizer ─────────────────────────────────────────────────────────────
       - name: Install optimizer dependencies

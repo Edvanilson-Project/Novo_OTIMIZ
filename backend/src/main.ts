@@ -81,7 +81,7 @@ async function bootstrap() {
   const allowedOrigins = (
     process.env.CORS_ALLOWED_ORIGINS ||
     process.env.FRONTEND_URL ||
-    (process.env.NODE_ENV === 'production' ? '' : devDefaultOrigins)
+    devDefaultOrigins
   )
     .split(',')
     .map((o) => o.trim())
