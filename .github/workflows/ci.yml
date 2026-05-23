@@ -123,8 +123,13 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: pnpm install --frozen-lockfile
 
       - name: TypeScript check
         run: npx tsc --noEmit
@@ -182,6 +187,11 @@ jobs:
           cache: 'pip'
           cache-dependency-path: optimizer/requirements*.txt
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       # ── Backend ──────────────────────────────────────────────────────────────
       - name: Install backend dependencies
         working-directory: backend
@@ -237,7 +247,7 @@ jobs:
       # ── Frontend ──────────────────────────────────────────────────────────────
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm ci --legacy-peer-deps
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
         working-directory: frontend
