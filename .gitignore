@@ -50,6 +50,10 @@ frontend/next-env.d.ts
 **/*.swp
 **/*.swo
 
+# Load test & performance results — generated at runtime, contains sensitive timing data
+docs/performance/results/
+tests/load/datasets/*.csv
+
 # Runtime strategy data
 **/data/strategy/archive/
 **/data/strategy/inbox/
