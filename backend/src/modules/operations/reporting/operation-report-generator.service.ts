@@ -652,21 +652,58 @@ export class OperationReportGeneratorService {
     blocks: BlockAssignment[],
     companyId: number,
   ): Promise<ReportMetrics> {
+    const scheduleMeta = (schedule.metadata || {}) as Record<string, unknown>;
+    const reportedTotalTrips = Number(
+      scheduleMeta.total_trips ?? scheduleMeta.totalTrips ?? Number.NaN,
+    );
+    const reportedUnassignedTrips = Number(
+      scheduleMeta.unassigned_trips ?? scheduleMeta.unassignedTrips ?? Number.NaN,
+    );
+    const hasPersistedTripMetrics =
+      Number.isFinite(reportedTotalTrips) ||
+      Number.isFinite(reportedUnassignedTrips);
+
     // Compat: tripIds[] (schema real) ou fallback 1/block (mocks legados)
     const tripsFor = (b: BlockAssignment) => b.tripIds?.length ?? 1;
-    const totalTrips = blocks.reduce((sum, b) => sum + tripsFor(b), 0);
-    const assignedBlocks = blocks.filter((b) => b.vehicleId != null);
-    const assignedTrips = assignedBlocks.reduce(
+    const assignedBlocks = blocks.filter((b) => {
+      if (hasPersistedTripMetrics) {
+        return tripsFor(b) > 0;
+      }
+
+      return (
+        b.vehicleId != null ||
+        b.blockId != null ||
+        ((b.metadata || {}) as Record<string, unknown>).vehicle_id != null ||
+        ((b.metadata || {}) as Record<string, unknown>).source_block_id != null
+      );
+    });
+    const inferredAssignedTrips = assignedBlocks.reduce(
       (sum, b) => sum + tripsFor(b),
       0,
     );
-    const unassignedTrips = totalTrips - assignedTrips;
+    const totalTrips = Number.isFinite(reportedTotalTrips)
+      ? reportedTotalTrips
+      : blocks.reduce((sum, b) => sum + tripsFor(b), 0);
+    const assignedTrips = hasPersistedTripMetrics
+      ? Math.max(totalTrips - Math.max(reportedUnassignedTrips, 0), 0)
+      : inferredAssignedTrips;
+    const unassignedTrips = hasPersistedTripMetrics
+      ? Math.max(reportedUnassignedTrips, 0)
+      : Math.max(totalTrips - assignedTrips, 0);
     const totalCost =
       Number(schedule.totalCost ?? 0) ||
       blocks.reduce((s, b) => s + (b.cost || 0), 0);
     const actualVehicles =
-      new Set(assignedBlocks.map((b) => b.vehicleId).filter((v) => v != null))
-        .size || assignedBlocks.length;
+      new Set(
+        assignedBlocks
+          .map((b) =>
+            b.vehicleId ??
+            b.blockId ??
+            ((b.metadata || {}) as Record<string, unknown>).vehicle_id ??
+            ((b.metadata || {}) as Record<string, unknown>).source_block_id,
+          )
+          .filter((v) => v != null),
+      ).size || assignedBlocks.length;
     const costPerTrip =
       assignedTrips > 0 && totalCost > 0 ? totalCost / assignedTrips : 0;
 

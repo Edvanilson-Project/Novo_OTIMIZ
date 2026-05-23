@@ -51,6 +51,20 @@ settings = get_settings()
 CACHE_VERSION = "v2.0"
 
 
+def _build_cache_fingerprint_payload(payload: dict) -> dict:
+    return {
+        "cache_version": CACHE_VERSION,
+        "company_id": payload.get("company_id"),
+        "algorithm": payload.get("algorithm"),
+        "depot_ids": payload.get("depot_ids") or [],
+        "trips": payload.get("trips") or [],
+        "vehicle_types": payload.get("vehicle_types") or [],
+        "cct_params": payload.get("cct_params") or {},
+        "vsp_params": payload.get("vsp_params") or {},
+        "optimization_params": payload.get("optimization_params") or {},
+    }
+
+
 def _to_vt(v) -> VehicleType:
     return VehicleType(
         id=v.id,
@@ -206,10 +220,7 @@ async def optimize(body: OptimizeRequest) -> Union[TaskSubmittedResponse, Optimi
     # hora apesar do TTL de 12h. Expiração temporal já é controlada por
     # task_timestamp + setex TTL — não precisa também na chave.
     try:
-        cache_payload = {
-            **payload,
-            "cache_version": CACHE_VERSION,
-        }
+        cache_payload = _build_cache_fingerprint_payload(payload)
         payload_str = json.dumps(cache_payload, sort_keys=True)
         fingerprint = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
         cache_key = f"optimizer:cache:{CACHE_VERSION}:{fingerprint}"

@@ -78,6 +78,11 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const readErrorMessage = (err: unknown, fallback: string) => {
+    const axiosErr = err as { response?: { data?: { message?: string } } };
+    return axiosErr?.response?.data?.message ?? fallback;
+  };
+
   const triggerScenarios = useCallback(async () => {
     try {
       setLoading(true);
@@ -85,7 +90,22 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
       setScenarios(data);
       setError(null);
     } catch (err) {
-      setError('Erro ao carregar cenários');
+      setError(
+        readErrorMessage(err, 'Erro ao gerar cenários avançados.'),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [scheduleId]);
+
+  const loadScenarios = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await scenariosApi.list(scheduleId);
+      setScenarios(data);
+      setError(null);
+    } catch (err) {
+      setError(readErrorMessage(err, 'Erro ao carregar cenários.'));
     } finally {
       setLoading(false);
     }
@@ -103,10 +123,10 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
     }
   }, [scheduleId]);
 
-  // Trigger inicial: enfileira cenários
+  // Carga inicial: leitura idempotente, sem enfileirar runs automaticamente.
   useEffect(() => {
-    triggerScenarios();
-  }, [triggerScenarios]);
+    void loadScenarios();
+  }, [loadScenarios]);
 
   // Polling enquanto algum cenário está running/pending
   useEffect(() => {
@@ -155,9 +175,17 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
   const failedCount = scenarios.filter((s) => s.status === 'failed').length;
   // Comparáveis: baseline + completed
   const comparable = scenarios.filter((s) => s.status === 'baseline' || s.status === 'completed');
+  const hasGeneratedScenarios = scenarios.some((s) => s.id !== 'current');
+  const reloadLabel = hasGeneratedScenarios ? 'Recarregar' : 'Gerar cenários';
 
   return (
     <Box>
+      {!hasGeneratedScenarios && !loading && !error && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Nenhum cenário avançado foi gerado ainda. Clique em &quot;{reloadLabel}&quot; para enfileirar cenários com as viagens atualmente carregadas.
+        </Alert>
+      )}
+
       {/* Status global do conjunto de cenários */}
       {pendingCount > 0 && (
         <Alert severity="info" icon={<IconRefresh size={20} />} sx={{ mb: 2 }}>
@@ -184,9 +212,9 @@ const ScenarioComparison: React.FC<ScenarioComparisonProps> = ({ scheduleId }) =
               size="small"
               startIcon={<IconRefresh size={16} />}
               onClick={triggerScenarios}
-              disabled={refreshing}
+              disabled={refreshing || loading}
             >
-              Recarregar
+              {reloadLabel}
             </Button>
           }
         />

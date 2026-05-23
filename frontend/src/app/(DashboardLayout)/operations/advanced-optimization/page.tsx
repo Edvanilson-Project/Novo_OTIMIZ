@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Alert, AlertTitle, Box, Container, Grid, Tabs, Tab, Typography, Button, Stack } from '@mui/material';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert, AlertTitle, Box, Container, Grid, Tabs, Tab, Typography, Button, Stack, CircularProgress } from '@mui/material';
 import { IconRefresh, IconFlask } from '@tabler/icons-react';
 import { operationsApi, operationReportingApi } from '@/lib/api';
 import ScenarioComparison from '../../../components/shared/ScenarioComparison';
@@ -14,9 +14,20 @@ interface ComparisonSide {
   vehiclesUsed?: number;
   averageUtilization?: number;
 }
+
 interface ReportMetrics {
   scenarioComparison?: { savingsPercent?: number; optimized?: ComparisonSide; current?: ComparisonSide };
   metrics?: { totalCost?: number; vehiclesUsed?: number; averageUtilization?: number; totalTrips?: number };
+}
+
+interface LatestScheduleLike {
+  id?: number | string | null;
+  scheduleId?: number | string | null;
+  totalCost?: number | string | null;
+  resultSummary?: {
+    run_id?: number | string | null;
+    totalCost?: number | string | null;
+  };
 }
 
 interface TabPanelProps {
@@ -47,24 +58,81 @@ export default function AdvancedOptimizationPage() {
   const [originalCost, setOriginalCost] = useState<number>(0);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [reportMetrics, setReportMetrics] = useState<ReportMetrics | null>(null);
+  const [loadingLatestSchedule, setLoadingLatestSchedule] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadedReportScheduleIdRef = useRef<number | null>(null);
+
+  const resolveScheduleId = (schedule: LatestScheduleLike | null): number | null => {
+    const candidate = Number(
+      schedule?.id ?? schedule?.scheduleId ?? schedule?.resultSummary?.run_id ?? null,
+    );
+    return Number.isFinite(candidate) && candidate > 0 ? candidate : null;
+  };
+
+  const resolveScheduleCost = (schedule: LatestScheduleLike | null): number => {
+    const candidate = Number(schedule?.totalCost ?? schedule?.resultSummary?.totalCost ?? 0);
+    return Number.isFinite(candidate) ? candidate : 0;
+  };
+
+  const loadAdvancedData = useCallback(async () => {
+    setLoadingLatestSchedule(true);
+    setLoadError(null);
+
+    try {
+      const latest = await operationsApi.getLatestSchedule() as LatestScheduleLike | null;
+      const nextScheduleId = resolveScheduleId(latest);
+      const nextOriginalCost = resolveScheduleCost(latest);
+
+      setScheduleId(nextScheduleId);
+      setOriginalCost(nextOriginalCost);
+
+      if (!nextScheduleId) {
+        setReportMetrics(null);
+        loadedReportScheduleIdRef.current = null;
+        return;
+      }
+
+      if (loadedReportScheduleIdRef.current !== nextScheduleId) {
+        const report = await operationReportingApi.generate(nextScheduleId) as ReportMetrics;
+        setReportMetrics(report);
+        loadedReportScheduleIdRef.current = nextScheduleId;
+      }
+    } catch (err) {
+      console.error('[AdvancedOptimization] failed to load latest schedule', err);
+      setLoadError('Erro ao carregar a última otimização.');
+      setScheduleId(null);
+      setReportMetrics(null);
+      loadedReportScheduleIdRef.current = null;
+    } finally {
+      setLoadingLatestSchedule(false);
+    }
+  }, []);
 
   useEffect(() => {
-    operationsApi.getLatestSchedule()
-      .then((s) => {
-        const schedule = s as { id?: number; totalCost?: number } | null;
-        if (schedule?.id) {
-          setScheduleId(schedule.id);
-          if (schedule?.totalCost) setOriginalCost(Number(schedule.totalCost));
-          return operationReportingApi.generate(schedule.id);
-        }
-      })
-      .then((report) => {
-        if (report) setReportMetrics(report as ReportMetrics);
-      })
-      .catch((err) => {
-        console.error('[AdvancedOptimization] failed to load report', err);
-      });
-  }, []);
+    void loadAdvancedData();
+  }, [loadAdvancedData]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void loadAdvancedData();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void loadAdvancedData();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [loadAdvancedData]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -84,9 +152,8 @@ export default function AdvancedOptimizationPage() {
         const s = await operationsApi.getOptimizeStatus().catch(() => null);
         if (s?.status === 'completed' || s?.status === 'failed') break;
       }
-      const updated = await operationsApi.getLatestSchedule().catch(() => null) as { id?: number; totalCost?: number } | null;
-      if (updated?.id) setScheduleId(updated.id);
-      if (updated?.totalCost) setOriginalCost(Number(updated.totalCost));
+      loadedReportScheduleIdRef.current = null;
+      await loadAdvancedData();
     } catch (err) {
       console.error('[AdvancedOptimization] optimize failed', err);
     } finally {
@@ -107,10 +174,18 @@ export default function AdvancedOptimizationPage() {
           </Typography>
         </Box>
         <Button
+          variant="outlined"
+          startIcon={loadingLatestSchedule ? <CircularProgress size={18} color="inherit" /> : <IconRefresh size={18} />}
+          onClick={() => void loadAdvancedData()}
+          disabled={loadingLatestSchedule || isOptimizing}
+        >
+          {loadingLatestSchedule ? 'Atualizando...' : 'Atualizar Dados'}
+        </Button>
+        <Button
           variant="contained"
           startIcon={<IconRefresh size={18} />}
           onClick={handleRunOptimization}
-          disabled={isOptimizing}
+          disabled={isOptimizing || loadingLatestSchedule || !scheduleId}
         >
           {isOptimizing ? 'Otimizando...' : 'Executar Otimização'}
         </Button>
@@ -152,7 +227,13 @@ export default function AdvancedOptimizationPage() {
       <TabPanel value={tabValue} index={0}>
         <Grid container spacing={3}>
           <Grid size={{ xs: 12 }}>
-            {scheduleId ? (
+            {loadingLatestSchedule ? (
+              <Box sx={{ py: 6, display: 'flex', justifyContent: 'center' }}>
+                <CircularProgress />
+              </Box>
+            ) : loadError ? (
+              <Alert severity="error">{loadError}</Alert>
+            ) : scheduleId ? (
               <ScenarioComparison scheduleId={scheduleId} />
             ) : (
               <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>
@@ -166,7 +247,13 @@ export default function AdvancedOptimizationPage() {
       <TabPanel value={tabValue} index={1}>
         <Grid container spacing={3}>
           <Grid size={{ xs: 12 }}>
-            {scheduleId ? (
+            {loadingLatestSchedule ? (
+              <Box sx={{ py: 6, display: 'flex', justifyContent: 'center' }}>
+                <CircularProgress />
+              </Box>
+            ) : loadError ? (
+              <Alert severity="error">{loadError}</Alert>
+            ) : scheduleId ? (
               <WhatIfPanel scheduleId={scheduleId} originalCost={originalCost} />
             ) : (
               <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>

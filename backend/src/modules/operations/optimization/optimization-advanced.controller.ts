@@ -33,7 +33,7 @@ export class OptimizationAdvancedController {
   // GET = leitura idempotente para polling. POST acima é o trigger inicial que pode enfileirar.
   @Get('scenarios/:scheduleId')
   async listScenarios(@Param('scheduleId', ParseIntPipe) scheduleId: number) {
-    return this.scenarioEvaluator.generateScenarios(scheduleId);
+    return this.scenarioEvaluator.listScenarios(scheduleId);
   }
 
   @Get('scenarios/:scheduleId/run/:scenarioId')

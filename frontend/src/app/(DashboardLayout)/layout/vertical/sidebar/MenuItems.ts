@@ -112,6 +112,7 @@ const Menuitems: MenuitemsType[] = [
     title: "Parâmetros CCT",
     icon: IconAdjustmentsHorizontal,
     href: "/settings/parameters",
+    allowedRoles: ["super_admin", "company_admin", "analyst"],
   },
   {
     id: uniqueId(),

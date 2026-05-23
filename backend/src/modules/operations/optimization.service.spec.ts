@@ -535,6 +535,162 @@ describe('OptimizationService polling', () => {
     );
   });
 
+  it('persistResults persiste vehicleId e driverId com fallback operacional', async () => {
+    const manager = {
+      create: jest.fn((_entity, data) => data),
+      save: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const localService = new OptimizationService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any,
+      { transaction: (cb: any) => cb(manager) } as any,
+      gateway as any,
+      {
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
+      } as any,
+      { getCompanyId: jest.fn() } as any,
+    );
+    (localService as any).logger = {
+      warn: jest.fn(),
+      error: jest.fn(),
+      log: jest.fn(),
+    };
+
+    await (localService as any).persistResults(
+      57,
+      16,
+      {
+        blocks: [
+          {
+            block_id: 11,
+            vehicle_id: 91,
+            trips: [1, 2],
+            total_cost: 300,
+            start_time: 320,
+            end_time: 410,
+          },
+        ],
+        duties: [
+          {
+            duty_id: 21,
+            operator_id: 7,
+            operator_name: 'Motorista 7',
+            trip_ids: [1, 2],
+            total_cost: 120,
+            meta: {
+              duty_time_segments: [],
+              operational_time_report: {
+                operator_not_assigned: false,
+              },
+            },
+          },
+        ],
+        vehicles: 1,
+        crew: 1,
+        total_cost: 420,
+        total_trips: 2,
+        unassigned_trips: 0,
+        cct_violations: 0,
+        vsp_algorithm: 'hybrid_pipeline',
+      },
+      {},
+    );
+
+    expect(manager.save).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      [expect.objectContaining({ vehicleId: 91 })],
+    );
+    expect(manager.save).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      [
+        expect.objectContaining({
+          driverId: 7,
+          metadata: expect.objectContaining({
+            operator_id: 7,
+            operator_not_assigned: false,
+          }),
+        }),
+      ],
+    );
+  });
+
+  it('inputFingerprint muda quando o conteúdo das viagens muda', () => {
+    const fingerprintBase = (service as any).computeInputFingerprint({
+      companyId: 16,
+      scenarioId: 'default',
+      baselineScheduleId: null,
+      algorithm: 'hybrid_pipeline',
+      trips: [
+        {
+          id: 1,
+          start_time: 320,
+          end_time: 365,
+          distance_km: 13.1,
+        },
+      ],
+      vehicleTypes: [],
+      optimizationParams: { random_seed: 42 },
+      cctParams: { min_break_minutes: 30 },
+      vspParams: {},
+      depotIds: [6],
+    });
+
+    const fingerprintChangedTrip = (service as any).computeInputFingerprint({
+      companyId: 16,
+      scenarioId: 'default',
+      baselineScheduleId: null,
+      algorithm: 'hybrid_pipeline',
+      trips: [
+        {
+          id: 1,
+          start_time: 320,
+          end_time: 365,
+          distance_km: 20,
+        },
+      ],
+      vehicleTypes: [],
+      optimizationParams: { random_seed: 42 },
+      cctParams: { min_break_minutes: 30 },
+      vspParams: {},
+      depotIds: [6],
+    });
+
+    const fingerprintChangedParams = (service as any).computeInputFingerprint({
+      companyId: 16,
+      scenarioId: 'default',
+      baselineScheduleId: null,
+      algorithm: 'hybrid_pipeline',
+      trips: [
+        {
+          id: 1,
+          start_time: 320,
+          end_time: 365,
+          distance_km: 13.1,
+        },
+      ],
+      vehicleTypes: [],
+      optimizationParams: { random_seed: 99 },
+      cctParams: { min_break_minutes: 30 },
+      vspParams: {},
+      depotIds: [6],
+    });
+
+    expect(fingerprintChangedTrip).not.toBe(fingerprintBase);
+    expect(fingerprintChangedParams).not.toBe(fingerprintBase);
+  });
+
   it('latest-schedule monta resultSummary com chosen_scenario e decision vindos do metadata', async () => {
     const scheduleRepoLocal = {
       findOne: jest.fn().mockResolvedValue({
@@ -747,6 +903,93 @@ describe('OptimizationService polling', () => {
       );
     },
   );
+
+  it('envia operator_profiles quando há motoristas disponíveis', async () => {
+    mockedAxios.post.mockReset();
+    mockedAxios.post.mockResolvedValueOnce({
+      data: { task_id: 'task-operator-profiles' },
+    } as any);
+
+    const tripRepo = {
+      find: jest.fn().mockResolvedValue([
+        {
+          id: 1,
+          tripId: 1001,
+          lineId: 11,
+          lineCode: '11',
+          tripGroupId: null,
+          direction: 'outbound',
+          startTime: 100,
+          endTime: 150,
+          originId: 10,
+          destinationId: 20,
+          duration: 50,
+          distanceKm: 12,
+        },
+      ]),
+    };
+    const scheduleRepoLocal = {
+      findOne: jest.fn().mockResolvedValueOnce(null),
+      save: jest
+        .fn()
+        .mockResolvedValue({ id: 902, companyId: 16, status: 'processing' }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const localService = new OptimizationService(
+      tripRepo as any,
+      {
+        find: jest.fn().mockResolvedValue([
+          {
+            id: 7,
+            driverId: 'DRV-7',
+            name: 'Motorista 7',
+            role: 'Motorista',
+            maxHoursPerDay: 510,
+            lastShiftEnd: 330,
+            metadata: { preferred_line_ids: [11] },
+          },
+        ]),
+      } as any,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          force_round_trip: true,
+          allow_vehicle_swap: true,
+          strict_union_rules: true,
+        }),
+      } as any,
+      scheduleRepoLocal as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      {
+        save: jest.fn().mockResolvedValue({ id: 7777 }),
+        update: jest.fn().mockResolvedValue(undefined),
+        findOne: jest.fn().mockResolvedValue(null),
+      } as any,
+      {} as any,
+      gateway as any,
+      {
+        get: jest.fn().mockReturnValue('test-specs-2026-abcdefghijklmnopqrstuvwxyz'),
+      } as any,
+      { getCompanyId: jest.fn() } as any,
+    );
+    (localService as any).pollOptimizerTask = jest.fn();
+    (localService as any).logger = {
+      warn: jest.fn(),
+      error: jest.fn(),
+      log: jest.fn(),
+    };
+
+    await localService.runOptimization(16, 'hybrid_pipeline');
+
+    const payload = mockedAxios.post.mock.calls[0][1] as any;
+    expect(payload.cct_params.operator_profiles).toEqual([
+      expect.objectContaining({
+        id: '7',
+        cp: 'DRV-7',
+        last_shift_end: 330,
+      }),
+    ]);
+  });
 
   it('usa modo persistido quando nao ha override e cai para balanced quando nao existe persisted', async () => {
     mockedAxios.post.mockReset();

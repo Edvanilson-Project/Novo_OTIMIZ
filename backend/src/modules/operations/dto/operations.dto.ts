@@ -11,8 +11,46 @@ import {
   IsObject,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+function isBlank(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+function transformInt(value: unknown): unknown {
+  if (isBlank(value)) return value;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : value;
+}
+
+function transformFloat(value: unknown): unknown {
+  if (isBlank(value)) return value;
+  const parsed = Number(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+function transformBoolean(value: unknown): unknown {
+  if (isBlank(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') return true;
+    if (normalized === 'false') return false;
+  }
+  return value;
+}
+
+function transformMinutes(value: unknown): unknown {
+  if (isBlank(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    const match = /^(\d+):(\d{2})(?::\d{2})?$/.exec(normalized);
+    if (match) {
+      return Number(match[1]) * 60 + Number(match[2]);
+    }
+  }
+  return transformInt(value);
+}
 
 export class RunOptimizationDto {
   @ApiPropertyOptional({ example: 'hybrid_pipeline' })
@@ -64,11 +102,13 @@ export class AiChatDto {
 export class CreateTripDto {
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   tripId?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   lineId?: number;
 
@@ -84,6 +124,7 @@ export class CreateTripDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   tripGroupId?: number;
 
@@ -93,89 +134,154 @@ export class CreateTripDto {
   direction?: string;
 
   @ApiProperty({ description: 'Minutos desde meia-noite' })
+  @Transform(({ value }) => transformMinutes(value))
   @IsInt()
   @Min(0)
-  @Max(1439)
   startTime: number;
 
   @ApiProperty()
+  @Transform(({ value }) => transformMinutes(value))
   @IsInt()
   @Min(0)
-  @Max(1439)
   endTime: number;
 
   @ApiProperty()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   originId: number;
 
   @ApiProperty()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   destinationId: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   @Min(0)
   distanceKm?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   @Min(0)
   duration?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   originLatitude?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   originLongitude?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   destinationLatitude?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   destinationLongitude?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   reliefPointId?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformBoolean(value))
   @IsBoolean()
   isReliefPoint?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   midTripReliefPointId?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   @Min(0)
   midTripReliefOffsetMinutes?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   depotId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformBoolean(value))
+  @IsBoolean()
+  roundTrip?: boolean;
+
+  @ApiPropertyOptional({ description: 'Aceita minutos absolutos ou HH:MM' })
+  @IsOptional()
+  @Transform(({ value }) => transformMinutes(value))
+  @IsInt()
+  @Min(0)
+  returnStartTime?: number;
+
+  @ApiPropertyOptional({ description: 'Aceita minutos absolutos ou HH:MM' })
+  @IsOptional()
+  @Transform(({ value }) => transformMinutes(value))
+  @IsInt()
+  @Min(0)
+  returnEndTime?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  @Min(0)
+  returnDuration?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  returnOriginId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  returnDestinationId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
+  @IsNumber()
+  @Min(0)
+  returnDistanceKm?: number;
 }
 
 export class UpdateTripDto {
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   lineId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  lineCode?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -184,42 +290,86 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformMinutes(value))
   @IsInt()
   @Min(0)
-  @Max(1439)
   startTime?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformMinutes(value))
   @IsInt()
   @Min(0)
-  @Max(1439)
   endTime?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  originId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  destinationId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
   @IsNumber()
   @Min(0)
   distanceKm?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  @Min(0)
+  duration?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  reliefPointId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformBoolean(value))
   @IsBoolean()
   isReliefPoint?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   midTripReliefPointId?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   @Min(0)
   midTripReliefOffsetMinutes?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
+  @IsNumber()
+  @Min(0)
+  midTripReliefDistanceRatio?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformFloat(value))
+  @IsNumber()
+  @Min(0)
+  midTripReliefElevationRatio?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   depotId?: number;
 }
@@ -240,13 +390,26 @@ export class CreateDriverDto {
 
   @ApiPropertyOptional({ default: 480 })
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   @Min(60)
   @Max(840)
   maxHoursPerDay?: number;
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  @Min(0)
+  lastShiftEnd?: number;
 }
 
 export class UpdateDriverDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  driverId?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -259,10 +422,18 @@ export class UpdateDriverDto {
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Transform(({ value }) => transformInt(value))
   @IsInt()
   @Min(60)
   @Max(840)
   maxHoursPerDay?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(({ value }) => transformInt(value))
+  @IsInt()
+  @Min(0)
+  lastShiftEnd?: number;
 }
 
 export class EvaluateDeltaDto {

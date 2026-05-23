@@ -8,7 +8,7 @@
  */
 export async function register() {
   const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
-  if (!dsn) return;
+  if (!dsn || process.env.NODE_ENV !== 'production') return;
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     try {

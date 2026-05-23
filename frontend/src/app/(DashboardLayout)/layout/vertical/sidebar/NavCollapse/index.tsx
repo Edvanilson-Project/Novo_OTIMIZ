@@ -21,7 +21,6 @@ import { isNull } from "lodash";
 
 // plugins
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
-import { useTranslation } from "react-i18next";
 
 
 
@@ -82,7 +81,6 @@ export default function NavCollapse({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const theme = useTheme();
   const pathname = usePathname();
-  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
 
@@ -156,7 +154,7 @@ export default function NavCollapse({
           {menuIcon}
         </ListItemIcon>
         <ListItemText color="inherit">
-          {hideMenu ? "" : <>{t(`${menu.title}`)}</>}
+          {hideMenu ? "" : <>{menu.title}</>}
         </ListItemText>
         {!open ? (
           <IconChevronDown size="1rem" />

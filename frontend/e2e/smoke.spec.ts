@@ -1,27 +1,19 @@
 /**
  * Smoke tests — pages load, core UI elements render, no JS crashes.
- * Requires the dev server running at E2E_BASE_URL (default: localhost:3000)
+ * Requires the dev server running at E2E_BASE_URL (default: http://127.0.0.1:3005)
  * and a seeded backend at localhost:3001 with credentials admin/admin123.
  *
  * Run: npx playwright install chromium && npx playwright test
  */
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
-const BASE = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
-const USER = process.env.E2E_USER ?? 'admin@empresa.com';
-const PASS = process.env.E2E_PASS ?? 'admin123';
-
-async function login(page: Page) {
-  await page.goto(`${BASE}/auth/login`);
-  await page.locator('input[type="email"], input[name="email"]').fill(USER);
-  await page.locator('input[type="password"]').fill(PASS);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForURL(/dashboard|planner|operations/, { timeout: 10_000 });
-}
+const BASE = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3005';
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 test.describe('Auth', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test('login page renders and has email + password inputs', async ({ page }) => {
     await page.goto(`${BASE}/auth/login`);
     await expect(page.locator('input[type="email"], input[name="email"]')).toBeVisible();
@@ -42,10 +34,6 @@ test.describe('Auth', () => {
 // ─── Navigation ──────────────────────────────────────────────────────────────
 
 test.describe('Navigation (authenticated)', () => {
-  test.beforeEach(async ({ page }) => {
-    await login(page);
-  });
-
   test('dashboard loads with a heading', async ({ page }) => {
     await page.goto(`${BASE}/dashboard`);
     await expect(page.locator('h1, h2, h3, h4, h5, h6').first()).toBeVisible({ timeout: 8_000 });
@@ -91,7 +79,6 @@ test.describe('Navigation (authenticated)', () => {
 
 test.describe('Planner controls', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/planner`);
     await page.locator('button').filter({ hasText: /Otimiza|Executar|Atualizar/i }).first().waitFor({ timeout: 10_000 });
   });
@@ -120,7 +107,6 @@ test.describe('Planner controls', () => {
 
 test.describe('GTFS import', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/data`);
   });
 
@@ -139,7 +125,6 @@ test.describe('GTFS import', () => {
 
 test.describe('Custom reports page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/reporting/custom`);
   });
 
@@ -153,7 +138,6 @@ test.describe('Custom reports page', () => {
 
 test.describe('Terminals page (isDepot)', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/terminals`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -190,7 +174,6 @@ test.describe('Terminals page (isDepot)', () => {
 
 test.describe('Fleet management page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/settings/fleet`);
     await page.locator('body').waitFor({ timeout: 8_000 });
   });
@@ -218,7 +201,6 @@ test.describe('Fleet management page', () => {
 
 test.describe('Advanced optimization page', () => {
   test.beforeEach(async ({ page }) => {
-    await login(page);
     await page.goto(`${BASE}/operations/advanced-optimization`);
     await page.locator('body').waitFor({ timeout: 10_000 });
   });

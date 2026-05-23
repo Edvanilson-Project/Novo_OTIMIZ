@@ -114,7 +114,7 @@ function parseMinutes(val: unknown): number | null {
   const s = String(val).trim();
 
   // Suporte ao formato HH:MM ou HH:MM:SS
-  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) {
+  if (/^\d+:\d{2}(:\d{2})?$/.test(s)) {
     const parts = s.split(':').map(Number);
     return (parts[0] || 0) * 60 + (parts[1] || 0);
   }
@@ -139,6 +139,19 @@ function safeInt(val: unknown, fallback = 0): number {
 function safeFloat(val: unknown, fallback = 0): number {
   const n = Number(String(val ?? '').replace(',', '.'));
   return isNaN(n) || !isFinite(n) ? fallback : n;
+}
+
+function normalizeTimeWindow(startTime: number, endTime: number) {
+  let adjustedEndTime = endTime;
+  while (adjustedEndTime < startTime) {
+    adjustedEndTime += 1440;
+  }
+
+  return {
+    startTime,
+    endTime: adjustedEndTime,
+    duration: adjustedEndTime - startTime,
+  };
 }
 
 @Injectable()
@@ -270,12 +283,11 @@ export class OperationsService {
         return;
       }
 
-      // Nota: endTime pode ser < startTime para viagens que atravessam meia-noite ou múltiplos dias
-      // Isso é tratado corretamente no banco de dados e frontend
+      const normalizedWindow = normalizeTimeWindow(startTime, endTime);
 
       const duration = item.duration
         ? safeInt(item.duration)
-        : endTime - startTime;
+        : normalizedWindow.duration;
 
       tripsToSave.push(
         this.tripRepository.create({
@@ -284,8 +296,8 @@ export class OperationsService {
           lineCode: item.lineCode ? String(item.lineCode) : undefined,
           lineId: item.lineId ? safeInt(item.lineId) : undefined,
           pairId: item.pairId ? String(item.pairId) : undefined,
-          startTime,
-          endTime,
+          startTime: normalizedWindow.startTime,
+          endTime: normalizedWindow.endTime,
           originId: safeInt(item.originId),
           destinationId: safeInt(item.destinationId),
           distanceKm: safeFloat(item.distanceKm),
@@ -430,13 +442,9 @@ export class OperationsService {
     const startTime = parseMinutes(data.startTime) ?? safeInt(data.startTime);
     const endTime = parseMinutes(data.endTime) ?? safeInt(data.endTime);
 
-    if (endTime < startTime) {
-      throw new BadRequestException(
-        `Hora de fim não pode ser anterior à hora de início (início: ${data.startTime}, fim: ${data.endTime})`,
-      );
-    }
+    const normalizedWindow = normalizeTimeWindow(startTime, endTime);
 
-    const calcDuration = endTime - startTime;
+    const calcDuration = normalizedWindow.duration;
     const duration = data.duration ? safeInt(data.duration) : calcDuration;
 
     const roundTrip = data.roundTrip === true || data.roundTrip === 'true';
@@ -453,8 +461,8 @@ export class OperationsService {
       lineId: data.lineId ? safeInt(data.lineId) : undefined,
       lineCode: data.lineCode != null ? String(data.lineCode) : undefined,
       pairId,
-      startTime,
-      endTime,
+      startTime: normalizedWindow.startTime,
+      endTime: normalizedWindow.endTime,
       originId: safeInt(data.originId),
       destinationId: safeInt(data.destinationId),
       distanceKm: safeFloat(data.distanceKm),
@@ -510,13 +518,13 @@ export class OperationsService {
         data.returnStartTime !== undefined
           ? (parseMinutes(data.returnStartTime) ??
             safeInt(data.returnStartTime))
-          : endTime;
+          : normalizedWindow.endTime;
       const retEnd =
         data.returnEndTime !== undefined
           ? (parseMinutes(data.returnEndTime) ?? safeInt(data.returnEndTime))
-          : endTime + duration;
-      const retCalcDuration =
-        retEnd >= retStart ? retEnd - retStart : 1440 + retEnd - retStart;
+          : normalizedWindow.endTime + duration;
+      const normalizedReturnWindow = normalizeTimeWindow(retStart, retEnd);
+      const retCalcDuration = normalizedReturnWindow.duration;
       const retDuration = data.returnDuration
         ? safeInt(data.returnDuration)
         : retCalcDuration;
@@ -528,8 +536,8 @@ export class OperationsService {
         lineId: trip.lineId,
         lineCode: trip.lineCode,
         pairId,
-        startTime: retStart,
-        endTime: retEnd,
+        startTime: normalizedReturnWindow.startTime,
+        endTime: normalizedReturnWindow.endTime,
         originId: data.returnOriginId
           ? safeInt(data.returnOriginId)
           : safeInt(data.destinationId),
@@ -565,11 +573,7 @@ export class OperationsService {
         ? (parseMinutes(data.endTime) ?? safeInt(data.endTime))
         : trip.endTime;
 
-    if (newEndTime < newStartTime) {
-      throw new BadRequestException(
-        `Hora de fim não pode ser anterior à hora de início`,
-      );
-    }
+    const normalizedWindow = normalizeTimeWindow(newStartTime, newEndTime);
 
     const numOrNull = (v: unknown): number | null =>
       v === undefined || v === null || v === '' ? null : safeInt(v);
@@ -584,8 +588,8 @@ export class OperationsService {
             : null
           : trip.lineId,
       lineCode: data.lineCode !== undefined ? data.lineCode : trip.lineCode,
-      startTime: newStartTime,
-      endTime: newEndTime,
+      startTime: normalizedWindow.startTime,
+      endTime: normalizedWindow.endTime,
       originId:
         data.originId !== undefined ? safeInt(data.originId) : trip.originId,
       destinationId:
@@ -597,7 +601,9 @@ export class OperationsService {
           ? safeFloat(data.distanceKm)
           : trip.distanceKm,
       duration:
-        data.duration !== undefined ? safeInt(data.duration) : trip.duration,
+        data.duration !== undefined
+          ? safeInt(data.duration)
+          : normalizedWindow.duration,
       direction: data.direction !== undefined ? data.direction : trip.direction,
       isReliefPoint:
         data.isReliefPoint !== undefined

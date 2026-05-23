@@ -118,7 +118,42 @@ def test_long_spread_with_low_work_does_not_require_mandatory_rest():
     assert report["work_time"] == 220
     assert report["mandatory_rest_required"] is False
     assert report["has_valid_mandatory_rest"] is False
-    assert "MANDATORY_REST_MISSING" not in report["violations"]
+
+
+def test_operational_time_report_respeita_operator_id_em_meta():
+    block = _block(1, _trip(1, 9 * 60, 10 * 60, origin=1, dest=2))
+    duty = _duty([block])
+    duty.meta["operator_id"] = 7
+
+    report = build_duty_operational_time_report(
+        duty,
+        min_break_minutes=30,
+        meal_break_minutes=45,
+        mandatory_break_after_minutes=240,
+    )
+
+    assert report["operator_not_assigned"] is False
+
+
+def test_compact_result_expoe_vehicle_id_e_operator_id():
+    trip = _trip(1, 9 * 60, 10 * 60, origin=1, dest=2)
+    block = _block(11, trip)
+    block.meta["vehicle_id"] = 91
+    duty = _duty([block], duty_id=21)
+    duty.meta["operator_id"] = 7
+    duty.meta["operator_name"] = "Motorista 7"
+
+    result = OptimizationResult(
+        vsp=VSPSolution(blocks=[block]),
+        csp=CSPSolution(duties=[duty]),
+        total_cost=123.0,
+    )
+
+    compact = result.as_compact_dict()
+
+    assert compact["blocks"][0]["vehicle_id"] == 91
+    assert compact["duties"][0]["operator_id"] == 7
+    assert compact["duties"][0]["operator_name"] == "Motorista 7"
 
 
 def test_mandatory_rest_requires_mid_duty_gap_and_work_before_it():

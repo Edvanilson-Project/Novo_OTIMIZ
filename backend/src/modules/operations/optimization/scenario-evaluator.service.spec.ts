@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScenarioEvaluatorService } from './scenario-evaluator.service';
 import { Schedule } from '../../database/entities/schedule.entity';
 import { BlockAssignment } from '../../database/entities/block-assignment.entity';
+import { Trip } from '../../database/entities/trip.entity';
 import {
   OptimizationRun,
   OptimizationRunStatus,
@@ -48,6 +49,7 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
   let service: ScenarioEvaluatorService;
   let scheduleRepo: any;
   let blockRepo: any;
+  let tripRepo: any;
   let optimizationRunRepo: any;
   let optimizationService: any;
   let tenantContext: any;
@@ -57,6 +59,7 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
       findOne: jest.fn(),
     };
     blockRepo = { find: jest.fn() };
+    tripRepo = { count: jest.fn().mockResolvedValue(10) };
 
     optimizationRunRepo = {
       createQueryBuilder: jest.fn(),
@@ -76,6 +79,7 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
         ScenarioEvaluatorService,
         { provide: getRepositoryToken(Schedule), useValue: scheduleRepo },
         { provide: getRepositoryToken(BlockAssignment), useValue: blockRepo },
+        { provide: getRepositoryToken(Trip), useValue: tripRepo },
         {
           provide: getRepositoryToken(OptimizationRun),
           useValue: optimizationRunRepo,
@@ -246,6 +250,56 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
       }
       expect(optimizationService.runOptimization).not.toHaveBeenCalled();
     });
+
+    it('throws bad request without enqueuing when there are no trips loaded', async () => {
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 1000,
+        cctViolations: 0,
+        blocks: [],
+        createdAt: new Date(),
+      });
+      tripRepo.count.mockResolvedValue(0);
+
+      await expect(service.generateScenarios(1)).rejects.toThrow(
+        'Nenhuma viagem disponível para gerar cenários.',
+      );
+      expect(optimizationService.runOptimization).not.toHaveBeenCalled();
+    });
+
+    it('lists only baseline and existing runs without enqueuing new ones', async () => {
+      scheduleRepo.findOne.mockResolvedValue({
+        id: 1,
+        totalCost: 5000,
+        cctViolations: 0,
+        blocks: [{}, {}],
+        createdAt: new Date(),
+      });
+      optimizationRunRepo.findOne
+        .mockResolvedValueOnce(COMPLETED_RUN(51, 'cost-optimized', 4500, 2))
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 52,
+          scenarioId: 'maintenance-aware',
+          status: OptimizationRunStatus.RUNNING,
+          metrics: null,
+          errorMessage: null,
+          resultScheduleId: 1052,
+          inputFingerprint: 'hash-52',
+          algorithm: 'hybrid_pipeline',
+          createdAt: new Date(),
+          completedAt: null,
+        });
+
+      const scenarios = await service.listScenarios(1);
+
+      expect(scenarios.map((scenario) => scenario.id)).toEqual([
+        'current',
+        'cost-optimized',
+        'maintenance-aware',
+      ]);
+      expect(optimizationService.runOptimization).not.toHaveBeenCalled();
+    });
   });
 
   describe('compareScenarios', () => {
@@ -257,41 +311,11 @@ describe('ScenarioEvaluatorService (real optimizer integration)', () => {
         blocks: [{}, {}, {}, {}, {}],
         createdAt: new Date(),
       });
-      const completed = COMPLETED_RUN(60, 'cost-optimized', 4500, 4);
-      const qbCompleted = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(completed),
-      };
-      const qbEmpty = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(null),
-      };
-      optimizationRunRepo.createQueryBuilder
-        .mockReturnValueOnce(qbCompleted)
-        .mockReturnValueOnce(qbEmpty)
-        .mockReturnValueOnce(qbEmpty);
-      optimizationRunRepo.findOne.mockResolvedValue(null);
-      optimizationService.runOptimization.mockResolvedValue({
-        scheduleId: 999,
-        taskId: 'task',
-        optimizationRunId: 61,
-      });
-      optimizationRunRepo.findOne.mockResolvedValueOnce({
-        id: 61,
-        scenarioId: 'service-optimized',
-        status: OptimizationRunStatus.RUNNING,
-        metrics: null,
-        errorMessage: null,
-        resultScheduleId: 999,
-        inputFingerprint: 'pending',
-        algorithm: 'mcnf',
-        createdAt: new Date(),
-        completedAt: null,
-      });
+      // listScenarios usa findOne (não createQueryBuilder); mockear corretamente.
+      optimizationRunRepo.findOne
+        .mockResolvedValueOnce(COMPLETED_RUN(60, 'cost-optimized', 4500, 4))
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
 
       const result = await service.compareScenarios(
         1,

@@ -411,6 +411,7 @@ class OptimizeRequest(BaseModel):
 
 class BlockOutput(BaseModel):
     block_id: int
+    vehicle_id: Optional[int] = None
     trips: List[int]
     num_trips: int
     start_time: int
@@ -427,6 +428,8 @@ class BlockOutput(BaseModel):
 
 class DutyOutput(BaseModel):
     duty_id: int
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
     blocks: List[int]
     trip_ids: List[int] = Field(default_factory=list)
     trips: List[Any] = Field(default_factory=list)

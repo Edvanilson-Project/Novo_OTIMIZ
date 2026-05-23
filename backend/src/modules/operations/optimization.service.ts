@@ -227,7 +227,7 @@ export class OptimizationService implements OnModuleInit {
 
     try {
       // 2. Coletar Dados para o Solver
-      const [trips, _drivers, params, vehicleTypes, _vehicles] =
+      const [trips, drivers, params, vehicleTypes, _vehicles] =
         await Promise.all([
           this.tripRepo.find({
             where: { companyId },
@@ -297,42 +297,20 @@ export class OptimizationService implements OnModuleInit {
           'Nenhuma viagem válida para otimização após filtro de terminal loop.',
         );
 
+      const operatorProfiles = this.buildOperatorProfilesPayload(drivers);
+      if (operatorProfiles.length > 0) {
+        cctParams.operator_profiles = operatorProfiles;
+      }
+
+      const tripPayload = this.buildTripPayload(validTrips);
+      const vehicleTypesPayload = this.buildVehicleTypesPayload(
+        vehicleTypes,
+        params,
+      );
+
       const payload = {
-        trips: validTrips.map((t) => {
-          const st = Number(t.startTime);
-          // Normaliza virada de meia-noite: se end < start, soma 1440
-          const et =
-            Number(t.endTime) < st
-              ? Number(t.endTime) + 1440
-              : Number(t.endTime);
-          return {
-            id: t.id,
-            line_id: this.resolveLineId(t.lineId, t.lineCode, 0),
-            trip_group_id: this.normalizeTripGroupId(t.tripGroupId),
-            direction: t.direction ?? null,
-            start_time: st,
-            end_time: et,
-            origin_id: Number(t.originId),
-            destination_id: Number(t.destinationId),
-            origin_latitude: t.originLatitude ?? null,
-            origin_longitude: t.originLongitude ?? null,
-            destination_latitude: t.destinationLatitude ?? null,
-            destination_longitude: t.destinationLongitude ?? null,
-            duration: Number(t.duration ?? 0),
-            distance_km: Number(t.distanceKm ?? 0),
-            relief_point_id: t.reliefPointId ?? null,
-            is_relief_point: t.isReliefPoint ?? false,
-            mid_trip_relief_point_id: t.midTripReliefPointId ?? null,
-            mid_trip_relief_offset_minutes:
-              t.midTripReliefOffsetMinutes ?? null,
-            mid_trip_relief_distance_ratio:
-              t.midTripReliefDistanceRatio ?? null,
-            mid_trip_relief_elevation_ratio:
-              t.midTripReliefElevationRatio ?? null,
-            depot_id: t.depotId ?? null,
-          };
-        }),
-        vehicle_types: this.buildVehicleTypesPayload(vehicleTypes, params),
+        trips: tripPayload,
+        vehicle_types: vehicleTypesPayload,
         cct_params: Object.assign({}, cctParams, { force_round_trip: forceRoundTrip }),
         optimization_params: {
           cost_vehicle: params?.cost_vehicle ?? DEFAULT_COST_VEHICLE,
@@ -409,10 +387,12 @@ export class OptimizationService implements OnModuleInit {
         scenarioId: options?.scenarioId ?? 'default',
         baselineScheduleId: options?.baselineScheduleId ?? null,
         algorithm: payload.algorithm,
+        trips: tripPayload,
+        vehicleTypes: vehicleTypesPayload,
         optimizationParams: payload.optimization_params,
-        cctParams,
+        cctParams: payload.cct_params,
         vspParams,
-        tripIds: validTrips.map((t) => t.id),
+        depotIds: payload.depot_ids,
       });
       const optimizationRun = await this.optimizationRunRepo.save({
         companyId,
@@ -497,10 +477,12 @@ export class OptimizationService implements OnModuleInit {
     scenarioId: string;
     baselineScheduleId: number | null;
     algorithm: string;
+    trips: Record<string, any>[];
+    vehicleTypes: Record<string, any>[];
     optimizationParams: Record<string, any>;
     cctParams: Record<string, any>;
     vspParams: Record<string, any>;
-    tripIds: number[];
+    depotIds: number[] | null;
   }): string {
     // Sort por estabilidade — ordem do hash não pode depender da ordem de inserção.
     const stableStringify = (obj: any): string => {
@@ -514,12 +496,63 @@ export class OptimizationService implements OnModuleInit {
       s: parts.scenarioId,
       b: parts.baselineScheduleId,
       a: parts.algorithm,
+      trips: parts.trips,
+      vehicle_types: parts.vehicleTypes,
       op: parts.optimizationParams,
       cct: parts.cctParams,
       vsp: parts.vspParams,
-      t: [...parts.tripIds].sort((a, b) => a - b),
+      depots: [...(parts.depotIds ?? [])].sort((left, right) => left - right),
     });
     return crypto.createHash('sha256').update(payload).digest('hex');
+  }
+
+  private buildTripPayload(trips: Trip[]): Record<string, any>[] {
+    return trips.map((t) => {
+      const st = Number(t.startTime);
+      const et =
+        Number(t.endTime) < st ? Number(t.endTime) + 1440 : Number(t.endTime);
+
+      return {
+        id: t.id,
+        line_id: this.resolveLineId(t.lineId, t.lineCode, 0),
+        trip_group_id: this.normalizeTripGroupId(t.tripGroupId),
+        direction: t.direction ?? null,
+        start_time: st,
+        end_time: et,
+        origin_id: Number(t.originId),
+        destination_id: Number(t.destinationId),
+        origin_latitude: t.originLatitude ?? null,
+        origin_longitude: t.originLongitude ?? null,
+        destination_latitude: t.destinationLatitude ?? null,
+        destination_longitude: t.destinationLongitude ?? null,
+        duration: Number(t.duration ?? 0),
+        distance_km: Number(t.distanceKm ?? 0),
+        relief_point_id: t.reliefPointId ?? null,
+        is_relief_point: t.isReliefPoint ?? false,
+        mid_trip_relief_point_id: t.midTripReliefPointId ?? null,
+        mid_trip_relief_offset_minutes: t.midTripReliefOffsetMinutes ?? null,
+        mid_trip_relief_distance_ratio: t.midTripReliefDistanceRatio ?? null,
+        mid_trip_relief_elevation_ratio:
+          t.midTripReliefElevationRatio ?? null,
+        depot_id: t.depotId ?? null,
+      };
+    });
+  }
+
+  private buildOperatorProfilesPayload(drivers: Driver[]): Record<string, any>[] {
+    return drivers
+      .map((driver) => ({
+        id: String(driver.id),
+        name: driver.name,
+        cp: driver.driverId,
+        last_shift_end: Number(driver.lastShiftEnd ?? 0),
+        metadata: {
+          role: driver.role ?? null,
+          max_hours_per_day: Number(driver.maxHoursPerDay ?? 0),
+          ...(driver.metadata || {}),
+        },
+      }))
+      .sort((left, right) => Number(left.id) - Number(right.id));
   }
 
   /**
@@ -1206,25 +1239,37 @@ export class OptimizationService implements OnModuleInit {
         for (let i = 0; i < blocksRaw.length; i += BATCH_SIZE) {
           const chunk = blocksRaw.slice(i, i + BATCH_SIZE);
           const blocks = chunk.map((b: any) =>
-            manager.create(BlockAssignment, {
-              companyId,
-              scheduleId,
-              blockId: b.block_id ?? b.id ?? 0,
-              tripIds: (b.trips || []).map((t: any) =>
-                typeof t === 'number' ? t : t.id,
-              ),
-              cost: b.total_cost ?? b.activation_cost ?? 0,
-              // CORREÇÃO: Apenas os campos essenciais, sem usar "...b"
-              metadata: {
-                start_time: b.start_time,
-                end_time: b.end_time,
-                activation_cost: b.activation_cost,
-                deadhead_minutes: b.deadhead_minutes,
-                idle_minutes: b.idle_minutes,
-                start_depot_id: b.start_depot_id,
-                end_depot_id: b.end_depot_id,
-              },
-            }),
+            (() => {
+              const blockId = this.toPositiveInteger(b.block_id ?? b.id) ?? 0;
+              const explicitVehicleId = this.toPositiveInteger(
+                b.vehicle_id ?? b.meta?.vehicle_id,
+              );
+              const resolvedVehicleId = explicitVehicleId ?? blockId;
+              return manager.create(BlockAssignment, {
+                companyId,
+                scheduleId,
+                blockId,
+                vehicleId: resolvedVehicleId,
+                tripIds: (b.trips || []).map((t: any) =>
+                  typeof t === 'number' ? t : t.id,
+                ),
+                cost: b.total_cost ?? b.activation_cost ?? 0,
+                metadata: {
+                  start_time: b.start_time,
+                  end_time: b.end_time,
+                  activation_cost: b.activation_cost,
+                  deadhead_minutes: b.deadhead_minutes,
+                  idle_minutes: b.idle_minutes,
+                  start_depot_id: b.start_depot_id,
+                  end_depot_id: b.end_depot_id,
+                  vehicle_id: resolvedVehicleId,
+                  vehicle_id_is_fallback: explicitVehicleId == null,
+                  vehicle_id_source:
+                    explicitVehicleId == null ? 'block_id_fallback' : 'optimizer',
+                  source_block_id: b.meta?.source_block_id ?? b.block_id ?? b.id ?? null,
+                },
+              });
+            })(),
           );
           await manager.save(BlockAssignment, blocks);
         }
@@ -1239,10 +1284,16 @@ export class OptimizationService implements OnModuleInit {
               : (d.trips || []).map((t: any) =>
                   typeof t === 'number' ? t : (t.trip_id ?? t.id),
                 );
+            const explicitDriverId = this.toPositiveInteger(
+              d.operator_id ?? d.meta?.operator_id,
+            );
+            const dutyId = this.toPositiveInteger(d.duty_id ?? d.id) ?? 0;
+            const resolvedDriverId = explicitDriverId ?? dutyId;
             return manager.create(DutyAssignment, {
               companyId,
               scheduleId,
-              dutyId: d.duty_id ?? d.id ?? 0,
+              dutyId,
+              driverId: resolvedDriverId,
               tripIds: dutyTripIds
                 .filter(
                   (id: any) => Number.isFinite(Number(id)) && Number(id) > 0,
@@ -1266,6 +1317,17 @@ export class OptimizationService implements OnModuleInit {
                 cct_penalties: d.cct_penalties_cost ?? d.cct_penalties,
                 shift_violations: d.shift_violations,
                 rest_violations: d.rest_violations,
+                operator_id: explicitDriverId,
+                operator_name: d.operator_name ?? d.meta?.operator_name ?? null,
+                operator_not_assigned:
+                  d.meta?.operational_time_report?.operator_not_assigned ??
+                  explicitDriverId == null,
+                driver_id: resolvedDriverId,
+                driver_id_is_fallback: explicitDriverId == null,
+                explanation:
+                  explicitDriverId == null
+                    ? `Motorista real não atribuído; usando duty_id ${dutyId} como fallback operacional.`
+                    : null,
                 duty_time_segments:
                   d.meta?.duty_time_segments ?? d.segments ?? null,
                 operational_time_report:
@@ -2133,6 +2195,7 @@ export class OptimizationService implements OnModuleInit {
         const meta = block.metadata || {};
         const st = meta.start_time ?? 0;
         const et = meta.end_time ?? 0;
+        const vehicleId = this.resolveBlockVehicleId(block);
 
         const hydratedTrips = (block.tripIds || [])
           .map((id) => tripMap.get(id))
@@ -2164,6 +2227,7 @@ export class OptimizationService implements OnModuleInit {
         return {
           id: block.id,
           block_id: block.blockId,
+          vehicle_id: vehicleId,
           scheduleId: block.scheduleId,
           companyId: block.companyId,
           start_time: st,
@@ -2177,6 +2241,12 @@ export class OptimizationService implements OnModuleInit {
             idle_minutes: meta.idle_minutes,
             start_depot_id: meta.start_depot_id,
             end_depot_id: meta.end_depot_id,
+            vehicle_id: vehicleId,
+            vehicle_id_is_fallback:
+              meta.vehicle_id_is_fallback ?? block.vehicleId == null,
+            vehicle_id_source:
+              meta.vehicle_id_source ??
+              (block.vehicleId == null ? 'block_id_fallback' : 'persisted'),
             start_buffer_minutes: meta.start_buffer_minutes ?? 0,
             end_buffer_minutes: meta.end_buffer_minutes ?? 0,
             // ...meta // Comentado para evitar carregar dumps pesados do solver no Gantt
@@ -2193,7 +2263,7 @@ export class OptimizationService implements OnModuleInit {
           source_trip_id: trip.id,
           public_trip_id: trip.trip_id ?? trip.id,
           block_id: block.block_id,
-          vehicle_id: block.block_id,
+          vehicle_id: block.vehicle_id,
           sequence_in_block: index + 1,
         };
         const sourceTripId = this.toPositiveInteger(trip.id);
@@ -2286,6 +2356,12 @@ export class OptimizationService implements OnModuleInit {
       duties: duties.map((d) => {
         const dm = d.metadata || {};
         const dutyId = d.dutyId;
+        const driverId = this.resolveDutyDriverId(d);
+        const operatorNotAssigned = Boolean(
+          dm.operator_not_assigned ??
+            dm.operational_time_report?.operator_not_assigned ??
+            dm.driver_id_is_fallback,
+        );
         const dutyTripIds = Array.isArray(d.tripIds)
           ? d.tripIds
               .map((tripId) => this.toPositiveInteger(tripId))
@@ -2297,12 +2373,21 @@ export class OptimizationService implements OnModuleInit {
         );
         const detailedTripAssignments = this.buildDetailedDutyTripAssignments(
           dutyId,
+          driverId,
           dutyTripIds,
           dutyTimeSegments,
           tripDetailsById,
         );
         return {
           duty_id: dutyId,
+          driver_id: driverId,
+          operator_name: dm.operator_name ?? null,
+          operator_not_assigned: operatorNotAssigned,
+          explanation:
+            dm.explanation ??
+            (dm.driver_id_is_fallback
+              ? `Motorista real não atribuído; usando duty_id ${driverId} como fallback operacional.`
+              : null),
           work_time: dm.work_time ?? 0,
           spread_time: dm.spread_time ?? 0,
           start_time: dm.start_time ?? 0,
@@ -2391,6 +2476,11 @@ export class OptimizationService implements OnModuleInit {
           .filter((trip): trip is Record<string, any> => !!trip),
       );
       const inferredBlockId = this.resolveSegmentBlockId(segment, tripDetails);
+      const inferredVehicleId = this.resolveSegmentVehicleId(
+        segment,
+        tripDetails,
+        inferredBlockId,
+      );
       const directions = [
         ...new Set(tripDetails.map((trip) => trip.direction).filter(Boolean)),
       ];
@@ -2418,7 +2508,7 @@ export class OptimizationService implements OnModuleInit {
         type,
         event_type: type,
         block_id: inferredBlockId,
-        vehicle_id: inferredBlockId,
+        vehicle_id: inferredVehicleId,
         event_scope: eventScope,
         trip_ids: tripIds,
         trip_count: tripCount,
@@ -2506,6 +2596,7 @@ export class OptimizationService implements OnModuleInit {
 
   private buildDetailedDutyTripAssignments(
     dutyId: number,
+    driverId: number,
     dutyTripIds: number[],
     dutyTimeSegments: Record<string, any>[],
     tripDetailsById: Map<number, any>,
@@ -2531,7 +2622,7 @@ export class OptimizationService implements OnModuleInit {
         ...trip,
         trip_id: trip.trip_id ?? trip.id,
         duty_id: dutyId,
-        driver_id: dutyId,
+        driver_id: driverId,
         event_scope: 'trip',
         sequence_in_duty: detailedTrips.length + 1,
         segment_sequence: segmentSequence,
@@ -2636,6 +2727,45 @@ export class OptimizationService implements OnModuleInit {
     }
 
     return null;
+  }
+
+  private resolveSegmentVehicleId(
+    segment: Record<string, any>,
+    tripDetails: Record<string, any>[],
+    fallbackBlockId: number | null,
+  ): number | null {
+    const explicitVehicleId = this.toPositiveInteger(segment.vehicle_id);
+    if (explicitVehicleId != null) {
+      return explicitVehicleId;
+    }
+
+    for (const trip of tripDetails) {
+      const tripVehicleId = this.toPositiveInteger(trip.vehicle_id);
+      if (tripVehicleId != null) {
+        return tripVehicleId;
+      }
+    }
+
+    return fallbackBlockId;
+  }
+
+  private resolveBlockVehicleId(block: BlockAssignment): number {
+    return (
+      this.toPositiveInteger(block.vehicleId) ??
+      this.toPositiveInteger(block.metadata?.vehicle_id) ??
+      this.toPositiveInteger(block.blockId) ??
+      0
+    );
+  }
+
+  private resolveDutyDriverId(duty: DutyAssignment): number {
+    return (
+      this.toPositiveInteger(duty.driverId) ??
+      this.toPositiveInteger(duty.metadata?.driver_id) ??
+      this.toPositiveInteger(duty.metadata?.operator_id) ??
+      this.toPositiveInteger(duty.dutyId) ??
+      0
+    );
   }
 
   private sortOperationalTrips(

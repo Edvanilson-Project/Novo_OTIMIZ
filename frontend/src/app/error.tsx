@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import * as Sentry from '@sentry/nextjs';
 
 export default function Error({
   error,
@@ -11,10 +10,19 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error, {
-      tags: { errorDigest: error.digest },
-      level: 'error',
-    });
+    if (process.env.NODE_ENV !== 'production') {
+      console.error(error);
+      return;
+    }
+
+    void import('@sentry/nextjs')
+      .then((Sentry) => {
+        Sentry.captureException(error, {
+          tags: { errorDigest: error.digest },
+          level: 'error',
+        });
+      })
+      .catch(() => undefined);
   }, [error]);
 
   return (

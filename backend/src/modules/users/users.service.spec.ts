@@ -103,16 +103,23 @@ describe('UsersService', () => {
     expect(result).toMatchObject({ name: 'Bob' });
   });
 
-  it('create uses empty string when password not provided', async () => {
+  it('create throws BadRequestException when password not provided', async () => {
     repo.findOne.mockResolvedValue(null);
-    await service.create({ name: 'Bob', email: 'bob@test.com' });
-    const saved = repo.create.mock.calls[0][0];
-    expect(saved.passwordHash).toBe('');
+    await expect(
+      service.create({ name: 'Bob', email: 'bob@test.com' }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('create throws BadRequestException when password is blank', async () => {
+    repo.findOne.mockResolvedValue(null);
+    await expect(
+      service.create({ name: 'Bob', email: 'bob@test.com', password: '   ' }),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('create defaults role to OPERATOR', async () => {
     repo.findOne.mockResolvedValue(null);
-    await service.create({ name: 'Bob', email: 'bob@test.com' });
+    await service.create({ name: 'Bob', email: 'bob@test.com', password: 'secret' });
     const saved = repo.create.mock.calls[0][0];
     expect(saved.role).toBe(UserRole.OPERATOR);
   });
@@ -120,27 +127,27 @@ describe('UsersService', () => {
   it('create throws ConflictException when email already exists', async () => {
     repo.findOne.mockResolvedValue(baseUser);
     await expect(
-      service.create({ name: 'Bob', email: 'ana@test.com' }),
+      service.create({ name: 'Bob', email: 'ana@test.com', password: 'secret' }),
     ).rejects.toThrow(ConflictException);
   });
 
   it('create throws BadRequestException when companyId diverges', async () => {
     repo.findOne.mockResolvedValue(null);
     await expect(
-      service.create({ name: 'Bob', email: 'b@t.com', companyId: 99 }),
+      service.create({ name: 'Bob', email: 'b@t.com', password: 'secret', companyId: 99 }),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('create throws UnprocessableEntityException for invalid role', async () => {
     repo.findOne.mockResolvedValue(null);
     await expect(
-      service.create({ name: 'Bob', email: 'b@t.com', role: 'god' }),
+      service.create({ name: 'Bob', email: 'b@t.com', password: 'secret', role: 'god' }),
     ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('create sets isActive false when status is inactive', async () => {
     repo.findOne.mockResolvedValue(null);
-    await service.create({ name: 'Bob', email: 'b@t.com', status: 'inactive' });
+    await service.create({ name: 'Bob', email: 'b@t.com', password: 'secret', status: 'inactive' });
     const saved = repo.create.mock.calls[0][0];
     expect(saved.isActive).toBe(false);
   });

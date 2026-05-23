@@ -294,9 +294,11 @@ def build_duty_operational_time_report(
     else:
         suggestion = "Aceitar com warning se os tempos estiverem aderentes a operacao real."
 
+    operator_id = duty.meta.get("operator_id") if isinstance(duty.meta, dict) else None
+
     return {
         "duty_id": int(duty.id),
-        "operator_not_assigned": not getattr(duty, "operator_id", None),
+        "operator_not_assigned": operator_id is None,
         "duty_start": duty_start,
         "duty_end": duty_end,
         "window_time": window_total,

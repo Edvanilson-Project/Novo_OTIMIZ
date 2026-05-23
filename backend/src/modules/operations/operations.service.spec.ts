@@ -211,6 +211,15 @@ describe('OperationsService', () => {
       expect(saved[0].endTime).toBe(570);
     });
 
+    it('normalizes overnight HH:MM rows into next-day endTime', async () => {
+      const csv = `tripId,lineCode,startTime,endTime,originId,destinationId\n202,L2,23:00,02:00,1,2`;
+      await service.processUpload(Buffer.from(csv), 'trips');
+      const saved = tripRepo.save.mock.calls[0][0];
+      expect(saved[0].startTime).toBe(1380);
+      expect(saved[0].endTime).toBe(1560);
+      expect(saved[0].duration).toBe(180);
+    });
+
     it('parses integer minute times correctly', async () => {
       const csv = `tripId,lineCode,startTime,endTime,originId,destinationId\n301,L3,600,660,3,4`;
       await service.processUpload(Buffer.from(csv), 'trips');
@@ -281,6 +290,17 @@ describe('OperationsService', () => {
         BadRequestException,
       );
     });
+
+    it('normalizes overnight createTrip payloads', async () => {
+      await service.createTrip({ startTime: '23:00', endTime: '02:00' }, 16);
+      expect(tripRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startTime: 1380,
+          endTime: 1560,
+          duration: 180,
+        }),
+      );
+    });
   });
 
   // ── createDriver ──────────────────────────────────────────────────────────
@@ -289,6 +309,16 @@ describe('OperationsService', () => {
     it('creates driver with required fields', async () => {
       await service.createDriver({ driverId: 'M001', name: 'João' }, 16);
       expect(driverRepo.save).toHaveBeenCalled();
+    });
+
+    it('persists lastShiftEnd when provided', async () => {
+      await service.createDriver(
+        { driverId: 'M001', name: 'João', lastShiftEnd: 1500 },
+        16,
+      );
+      expect(driverRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ lastShiftEnd: 1500 }),
+      );
     });
 
     it('throws when driverId missing', async () => {
@@ -318,6 +348,28 @@ describe('OperationsService', () => {
       expect(driverRepo.save).toHaveBeenCalled();
     });
 
+    it('updates driverId and lastShiftEnd', async () => {
+      driverRepo.findOne.mockResolvedValue({
+        id: 3,
+        companyId: 16,
+        driverId: 'M001',
+        name: 'Old',
+        role: 'Motorista',
+        maxHoursPerDay: 480,
+        lastShiftEnd: 0,
+      });
+
+      await service.updateDriver(
+        3,
+        { driverId: 'M009', lastShiftEnd: 90 },
+        16,
+      );
+
+      expect(driverRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ driverId: 'M009', lastShiftEnd: 90 }),
+      );
+    });
+
     it('throws NotFoundException when driver not found', async () => {
       driverRepo.findOne.mockResolvedValue(null);
       await expect(
@@ -340,16 +392,26 @@ describe('OperationsService', () => {
       expect(tripRepo.save).toHaveBeenCalled();
     });
 
-    it('throws BadRequestException when endTime < startTime', async () => {
+    it('normalizes overnight updates when endTime < startTime', async () => {
       tripRepo.findOne.mockResolvedValue({
         id: 1,
         companyId: 16,
         startTime: 480,
         endTime: 540,
+        originId: 1,
+        destinationId: 2,
+        duration: 60,
       });
-      await expect(
-        service.updateTrip(1, { startTime: 600, endTime: 500 }, 16),
-      ).rejects.toThrow(BadRequestException);
+
+      await service.updateTrip(1, { startTime: '23:00', endTime: '02:00' }, 16);
+
+      expect(tripRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startTime: 1380,
+          endTime: 1560,
+          duration: 180,
+        }),
+      );
     });
 
     it('throws NotFoundException when trip not found', async () => {

@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test e2e/smoke.spec.ts --reporter=line",
+    "test:e2e:flows": "playwright test e2e/flows.spec.ts --reporter=line",
+    "test:e2e:operations-import-export": "playwright test e2e/operations-import-export-regression.spec.ts --reporter=line",
+    "test:e2e:operations-real-user": "playwright test e2e/operations-real-user-flow.spec.ts --reporter=line",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {

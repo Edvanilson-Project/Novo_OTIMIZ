@@ -70,9 +70,18 @@ async function bootstrap() {
 
   // CORS: combinar `origin: true` (refletir Origin) com `credentials: true` permite que qualquer
   // site exfiltre cookies/headers autenticados. Lemos a allowlist da env CORS_ALLOWED_ORIGINS
-  // (separada por vírgula). Em dev, default permissivo para localhost:3000.
+  // (separada por vírgula). Se ausente, reaproveitamos FRONTEND_URL e, em dev, cobrimos as
+  // origens locais usadas pela UI e pelos testes E2E.
+  const devDefaultOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:3005',
+    'http://127.0.0.1:3005',
+  ].join(',');
   const allowedOrigins = (
-    process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000'
+    process.env.CORS_ALLOWED_ORIGINS ||
+    process.env.FRONTEND_URL ||
+    (process.env.NODE_ENV === 'production' ? '' : devDefaultOrigins)
   )
     .split(',')
     .map((o) => o.trim())
