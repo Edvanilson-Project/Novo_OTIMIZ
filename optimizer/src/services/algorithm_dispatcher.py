@@ -352,11 +352,14 @@ def _run_regional(
     csp_factory: CSPFactory,
 ) -> OptimizationResult:
     csp = csp_factory(cct_params, vsp_params, optimization_params)
-    sub_algo = (optimization_params or {}).get("regional_sub_algorithm", "tabu")
+    sub_algo = vsp_params.get("regional_sub_algorithm") or (optimization_params or {}).get("regional_sub_algorithm", "tabu")
+    # window_minutes: explícito via params ou None (auto-escala no solver)
+    window_minutes = (optimization_params or {}).get("regional_window_minutes") or vsp_params.get("regional_window_minutes")
     solver = RegionalDecompositionSolver(
         sub_algorithm=sub_algo,
         vsp_params=vsp_params,
         time_budget_s=time_budget_s,
+        window_minutes=int(window_minutes) if window_minutes is not None else None,
     )
     vsp_sol = solver.solve(trips, vehicle_types, depot_id)
     return OptimizationResult(vsp=vsp_sol, csp=csp.solve(vsp_sol.blocks, trips))
@@ -448,6 +451,29 @@ def dispatch_algorithm(
         vsp_params=vsp_params,
         optimization_params=optimization_params,
     )
+
+    # Auto-escala: redireciona para Regional Decomposition em instâncias grandes.
+    # Threshold configurável via vsp_params["auto_regional_threshold"] (padrão: 1000).
+    # Algoritmos já preparados para larga-escala são excluídos do auto-redirect.
+    _auto_regional_threshold = int(vsp_params.get("auto_regional_threshold", 1000) or 1000)
+    _large_scale_algorithms = frozenset([
+        AlgorithmType.REGIONAL,
+        AlgorithmType.BUNDLE_METHOD,
+        AlgorithmType.HYBRID_PIPELINE,
+        AlgorithmType.JOINT_TIMETABLE,  # já limitado a 150 trips internamente
+    ])
+    if len(trips) >= _auto_regional_threshold and algorithm not in _large_scale_algorithms:
+        _sub = "mcnf" if len(trips) < 5000 else "tabu"
+        logger.warning(
+            "[AlgorithmDispatcher] AUTO_REGIONAL: %d trips >= threshold=%d — %s→regional (sub=%s) budget=%.0fs",
+            len(trips),
+            _auto_regional_threshold,
+            algorithm.value if hasattr(algorithm, "value") else algorithm,
+            _sub,
+            effective_time_budget_s,
+        )
+        algorithm = AlgorithmType.REGIONAL
+        vsp_params.setdefault("regional_sub_algorithm", _sub)
 
     if algorithm == AlgorithmType.GREEDY:
         result = _run_greedy(**common_kwargs, csp_factory=csp_factory)

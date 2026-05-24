@@ -438,8 +438,9 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         for did, cap in depot_caps.items():
             prob += pulp.lpSum(P_out_vars[(did, i)] for i in range(N)) <= cap, f"depot_cap_{did}"
 
-        # Configurar o tempo limite do solver MCNF
-        ilp_timeout = int(self.vsp_params.get("mcnf_ilp_timeout_seconds", min(60, int(self.time_budget_s))))
+        # Timeout dinâmico: instâncias menores têm mais tempo proporcional (CBC é mais lento em MILPs densos)
+        _size_timeout = 120 if N <= 200 else (90 if N <= 500 else (60 if N <= 800 else 40))
+        ilp_timeout = int(self.vsp_params.get("mcnf_ilp_timeout_seconds", min(_size_timeout, int(self.time_budget_s))))
 
         _log.info(f"MCNFVSP: Resolvendo matriz {N}x{N} (timeout={ilp_timeout}s)")
 

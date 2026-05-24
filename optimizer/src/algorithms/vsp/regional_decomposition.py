@@ -97,12 +97,15 @@ def _group_by_depot(trips: List[Trip]) -> Dict[str, List[Trip]]:
     return dict(groups)
 
 
-def _group_by_time_window(trips: List[Trip]) -> Dict[str, List[Trip]]:
+def _group_by_time_window(trips: List[Trip], window_minutes: int = _WINDOW_MINUTES) -> Dict[str, List[Trip]]:
     """
-    Agrupa por janela temporal de _WINDOW_MINUTES com overlap de _OVERLAP_MINUTES.
+    Agrupa por janela temporal com overlap de _OVERLAP_MINUTES.
 
     Uma trip aparece em um grupo quando:
         window_start - overlap ≤ trip.start_time < window_start + window_size
+
+    Para instâncias grandes, usar window_minutes menor (ex: 120) cria mais grupos
+    menores, melhorando o paralelismo.
     """
     if not trips:
         return {}
@@ -111,9 +114,9 @@ def _group_by_time_window(trips: List[Trip]) -> Dict[str, List[Trip]]:
     max_t = max(t.start_time for t in trips)
     groups: Dict[str, List[Trip]] = defaultdict(list)
 
-    window_start = (min_t // _WINDOW_MINUTES) * _WINDOW_MINUTES
+    window_start = (min_t // window_minutes) * window_minutes
     while window_start <= max_t:
-        window_end = window_start + _WINDOW_MINUTES
+        window_end = window_start + window_minutes
         key = f"w{window_start}"
         lower = window_start - _OVERLAP_MINUTES
         for t in trips:
@@ -165,11 +168,13 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
     decomposição regional paralela.
 
     Parâmetros:
-        sub_algorithm: algoritmo filho por grupo ("tabu", "greedy", "sa", "branch_and_price")
-        max_workers:   n.° máximo de processos paralelos (None = n.° CPUs)
-        use_processes: True → ProcessPoolExecutor (mais isolamento, evita GIL)
-                       False → ThreadPoolExecutor (mais rápido em payloads pequenos)
-        vsp_params:    repassados ao solver filho
+        sub_algorithm:  algoritmo filho por grupo ("tabu", "greedy", "sa", "branch_and_price", "mcnf")
+        max_workers:    n.° máximo de processos paralelos (None = n.° CPUs)
+        use_processes:  True → ProcessPoolExecutor (mais isolamento, evita GIL)
+                        False → ThreadPoolExecutor (mais rápido em payloads pequenos)
+        window_minutes: tamanho da janela temporal quando não há depot_id.
+                        None → auto: 120 para n≥5000, 180 para n≥2000, 240 para demais.
+        vsp_params:     repassados ao solver filho
     """
 
     def __init__(
@@ -179,6 +184,7 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         use_processes: bool = True,
         vsp_params: Optional[dict] = None,
         time_budget_s: Optional[float] = None,
+        window_minutes: Optional[int] = None,
     ):
         from ...core.config import get_settings
 
@@ -191,6 +197,7 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         self.max_workers = max_workers
         self.use_processes = use_processes
         self.vsp_params = dict(vsp_params or {})
+        self.window_minutes = window_minutes  # None = auto-scale
 
     def solve(
         self,
@@ -202,21 +209,36 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         if not trips:
             return VSPSolution(algorithm=self.name)
 
+        n_trips = len(trips)
+        # Janela temporal adaptativa: instâncias maiores → janelas menores → mais grupos → mais paralelismo
+        if self.window_minutes is not None:
+            effective_window = self.window_minutes
+        elif n_trips >= 5000:
+            effective_window = 120
+        elif n_trips >= 2000:
+            effective_window = 180
+        else:
+            effective_window = _WINDOW_MINUTES  # 240 min padrão
+
         # 1. Agrupa
         has_depot = any(t.depot_id is not None for t in trips)
+        grouping_strategy: str
         if has_depot:
             groups = _group_by_depot(trips)
+            grouping_strategy = "depot"
             logger.info(
                 "regional_decomposition: %d trips → %d grupos por depot",
-                len(trips),
+                n_trips,
                 len(groups),
             )
         else:
-            groups = _group_by_time_window(trips)
+            groups = _group_by_time_window(trips, window_minutes=effective_window)
+            grouping_strategy = f"temporal_{effective_window}min"
             logger.info(
-                "regional_decomposition: %d trips → %d janelas temporais",
-                len(trips),
+                "regional_decomposition: %d trips → %d janelas temporais (%dmin)",
+                n_trips,
                 len(groups),
+                effective_window,
             )
 
         # Garante ao menos 1 grupo
@@ -276,12 +298,13 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
             unassigned.extend(sol.unassigned_trips)
             total_iters += sol.iterations or 0
 
+        elapsed = self._elapsed()
         logger.info(
             "regional_decomposition: %d grupos → %d blocos, %d não atribuídas, %.1fs",
             n_groups,
             len(all_blocks),
             len(unassigned),
-            self._elapsed(),
+            elapsed,
         )
 
         return VSPSolution(
@@ -290,6 +313,13 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
             algorithm=self.name,
             iterations=total_iters,
             elapsed_ms=self._elapsed_ms(),
+            meta={
+                "regional_groups_count": n_groups,
+                "regional_grouping_strategy": grouping_strategy,
+                "regional_sub_algorithm": self.sub_algorithm,
+                "regional_n_trips": n_trips,
+                "regional_elapsed_s": round(elapsed, 2),
+            },
         )
 
     def _remaining_budget_s(self) -> float:
