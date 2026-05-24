@@ -14,15 +14,29 @@ import * as dropdownData from './data';
 import { IconMail } from '@tabler/icons-react';
 import { Stack } from '@mui/material';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { apiClient, clearSession } from '@/lib/api';
 
 
 const Profile = () => {
+  const router = useRouter();
   const [anchorEl2, setAnchorEl2] = useState<HTMLElement | null>(null);
   const handleClick2 = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl2(event.currentTarget);
   };
   const handleClose2 = () => {
     setAnchorEl2(null);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiClient.post('/auth/logout');
+    } catch (err) {
+      console.error('Erro ao fazer logout:', err);
+    } finally {
+      clearSession();
+      router.push('/auth/login');
+    }
   };
 
   return (
@@ -156,7 +170,7 @@ const Profile = () => {
               <Image src={"/images/backgrounds/unlimited-bg.png"} width={150} height={183} style={{ height: 'auto', width: 'auto' }} alt="unlimited" className="signup-bg" />
             </Box>
           </Box>
-          <Button href="/auth/login" variant="outlined" color="primary" fullWidth>
+          <Button onClick={handleLogout} variant="outlined" color="primary" fullWidth>
             Logout
           </Button>
         </Box>
