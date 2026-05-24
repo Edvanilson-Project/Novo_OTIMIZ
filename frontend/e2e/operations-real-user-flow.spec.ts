@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test, expect, request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test';
 
 const BASE = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3005';
-const API_BASE = process.env.E2E_API_URL ?? 'http://127.0.0.1:3001/api/v1/';
+const API_BASE = process.env.E2E_API_URL ?? 'http://localhost:3001/api/v1/';
 const AUTH_FILE = path.join(__dirname, '.auth/user.json');
 
 type TripRow = {

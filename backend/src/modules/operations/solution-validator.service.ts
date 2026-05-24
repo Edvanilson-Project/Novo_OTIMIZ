@@ -316,7 +316,7 @@ export class SolutionValidatorService {
 
     const trips = allTripIds.length
       ? await this.tripRepo.find({
-          where: { id: In(allTripIds) },
+          where: { id: In(allTripIds), companyId },
           select: {
             id: true,
             startTime: true,
@@ -390,7 +390,7 @@ export class SolutionValidatorService {
     return {
       totalTrips,
       allocatedTrips: allocated.size,
-      unallocatedTrips: totalTrips - allocated.size,
+      unallocatedTrips: Math.max(0, totalTrips - allocated.size),
       allocationPercentage:
         totalTrips > 0 ? (allocated.size / totalTrips) * 100 : 0,
       totalVehicles: blocks.length,

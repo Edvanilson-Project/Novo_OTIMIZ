@@ -7,7 +7,7 @@ import {
   DialogActions, TextField, IconButton, Tooltip,
   MenuItem, Select, FormControl, InputLabel, Chip, FormControlLabel, Switch, Divider, Typography,
 } from "@mui/material";
-import { DataGrid, GridColDef, GridRenderCellParams } from "@mui/x-data-grid";
+import { DataGrid, GridColDef, GridRenderCellParams, GridSortModel } from "@mui/x-data-grid";
 import {
   IconUpload, IconFileSpreadsheet, IconUsers, IconPlus,
   IconEdit, IconTrash, IconRefresh, IconEraser, IconArrowBack,
@@ -129,6 +129,7 @@ function normalizeLegWindow(startTime: string, endTime: string) {
 export default function OperationsDataPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [uploading, setUploading] = useState(false);
   const [gtfsUploading, setGtfsUploading] = useState(false);
   const [trips, setTrips] = useState<Trip[]>([]);
@@ -264,6 +265,7 @@ export default function OperationsDataPage() {
         ? `Importados: ${r.inserted} registros${r.skipped ? `, ignorados: ${r.skipped}` : ""}`
         : "Upload concluído!";
       notify(msg);
+      setSortModel([{ field: activeTab === 0 ? 'tripId' : 'driverId', sort: 'desc' }]);
       fetchData();
     } catch (error: unknown) {
       const errData = (error as { response?: { data?: { errors?: string[]; message?: string } } })?.response?.data;
@@ -720,6 +722,8 @@ export default function OperationsDataPage() {
                 loading={loading}
                 pageSizeOptions={[25, 50, 100]}
                 initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+                sortModel={sortModel}
+                onSortModelChange={setSortModel}
                 disableRowSelectionOnClick
                 sx={{ border: 0, "& .MuiDataGrid-columnHeaders": { backgroundColor: "action.hover" } }}
               />

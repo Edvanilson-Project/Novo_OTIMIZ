@@ -463,11 +463,15 @@ export class OptimizationService implements OnModuleInit {
         inputFingerprint,
       };
     } catch (error) {
-      this.logger.error(`Falha ao iniciar otimização: ${error.message}`);
+      const axiosDetail = error?.response?.data;
+      const errorMsg = axiosDetail
+        ? `${error.message}: ${JSON.stringify(axiosDetail)}`
+        : error.message;
+      this.logger.error(`Falha ao iniciar otimização: ${errorMsg}`);
       await this.scheduleRepo.update(schedule.id, {
         status: ScheduleStatus.FAILED,
       });
-      throw new InternalServerErrorException(error.message);
+      throw new InternalServerErrorException(errorMsg);
     }
   }
 
