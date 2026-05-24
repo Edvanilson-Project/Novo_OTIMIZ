@@ -26,7 +26,7 @@ import {
   ListItem,
   ListItemText,
 } from "@mui/material";
-import { IconSettings, IconBolt, IconRefresh, IconRobot, IconShieldCheck } from "@tabler/icons-react";
+import { IconSettings, IconBolt, IconRefresh, IconRobot, IconShieldCheck, IconHelp } from "@tabler/icons-react";
 import DashboardCard from "@/app/components/shared/DashboardCard";
 import { linesApi, terminalsApi, operationsApi, parametersApi, auditApi } from "@/lib/api";
 import type {
@@ -555,23 +555,44 @@ export default function PlannerPage() {
                   </FormControl>
                 </Tooltip>
 
-                <Tooltip title="Define como o produto escolhe entre o plano atual e o cenário com +1 jornada/motorista.">
-                  <FormControl size="small" sx={{ minWidth: 240, maxWidth: 300, flex: { xs: 1, md: 'none' } }}>
-                    <InputLabel>Qualidade Operacional</InputLabel>
-                    <Select
-                      value={selectedOperationalQualityMode}
-                      label="Qualidade Operacional"
-                      onChange={(e) => setSelectedOperationalQualityMode(e.target.value as OperationalQualityMode)}
-                      disabled={optimizing}
-                    >
-                      {OPERATIONAL_QUALITY_MODES.map((mode) => (
-                        <MenuItem key={mode.value} value={mode.value}>
-                          {mode.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Tooltip>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                  <Tooltip title="Define como o produto escolhe entre o plano atual e o cenário com +1 jornada/motorista.">
+                    <FormControl size="small" sx={{ minWidth: 240, maxWidth: 300, flex: { xs: 1, md: 'none' } }}>
+                      <InputLabel>Qualidade Operacional</InputLabel>
+                      <Select
+                        value={selectedOperationalQualityMode}
+                        label="Qualidade Operacional"
+                        onChange={(e) => setSelectedOperationalQualityMode(e.target.value as OperationalQualityMode)}
+                        disabled={optimizing}
+                      >
+                        {OPERATIONAL_QUALITY_MODES.map((mode) => (
+                          <MenuItem key={mode.value} value={mode.value}>
+                            {mode.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Tooltip>
+                  <Tooltip
+                    title={
+                      <Box sx={{ p: 1 }}>
+                        <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, mb: 0.5 }}>Modos de Qualidade Operacional:</Typography>
+                        <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+                          <strong>Sem exceções críticas:</strong> Hard Issues = 0. Plano com ZERO violações obrigatórias (CCT, segurança, continuidade).
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+                          <strong>Equilibrado:</strong> Balanço entre custo e qualidade operacional. Pode ter soft issues (preferências não críticas).
+                        </Typography>
+                        <Typography variant="caption" sx={{ display: 'block' }}>
+                          <strong>Mais barato:</strong> Prioriza custo mínimo. Pode ter soft issues e restrições relaxadas.
+                        </Typography>
+                      </Box>
+                    }
+                    arrow
+                  >
+                    <IconHelp size={18} style={{ marginTop: 4, cursor: 'help', opacity: 0.6 }} />
+                  </Tooltip>
+                </Box>
 
                 {depots.length > 0 && (
                   <Tooltip title="Selecione garagens específicas para otimização multi-depot. Vazio = todas as garagens.">
