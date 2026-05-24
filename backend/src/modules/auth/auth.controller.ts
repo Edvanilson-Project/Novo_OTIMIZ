@@ -62,7 +62,7 @@ const isProd = () => process.env.NODE_ENV === 'production';
 const cookieOpts = () => ({
   httpOnly: true,
   secure: isProd(),
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
 });
 
 @ApiTags('auth')
