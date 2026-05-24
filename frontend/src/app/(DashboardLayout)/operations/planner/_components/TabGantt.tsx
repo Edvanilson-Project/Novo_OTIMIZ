@@ -1378,7 +1378,7 @@ function EventSubRow({ event }: { event: PlanEvent }) {
         <Typography variant="caption">{event.destinoName}</Typography>
       </TableCell>
       <TableCell sx={{ py: 0.5 }} align="right">
-        <Typography variant="caption">{isDescanso ? minToDuration(event.duracao) : `${event.km}`}</Typography>
+        <Typography variant="caption">{isDescanso ? '—' : `${event.km}`}</Typography>
       </TableCell>
     </TableRow>
   );
@@ -2442,7 +2442,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
                     <TableCell><Typography variant="caption">{ev.origemName}</Typography></TableCell>
                     <TableCell><Typography variant="caption">{ev.destinoName}</Typography></TableCell>
                     <TableCell align="right">
-                      <Typography variant="caption">{ev.kind === 'descanso' ? minToDuration(ev.duracao) : ev.km}</Typography>
+                      <Typography variant="caption">{ev.kind === 'descanso' ? '—' : ev.km}</Typography>
                     </TableCell>
                     <TableCell><Typography variant="caption">{ev.vehicleId != null ? `V${ev.vehicleId}` : '—'}</Typography></TableCell>
                     <TableCell><Typography variant="caption">{formatDutyReference(ev.dutyId)}</Typography></TableCell>

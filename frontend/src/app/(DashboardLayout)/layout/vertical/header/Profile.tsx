@@ -16,10 +16,12 @@ import { Stack } from '@mui/material';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { apiClient, clearSession } from '@/lib/api';
+import { useAuth } from '@/app/hooks/useAuth';
 
 
 const Profile = () => {
   const router = useRouter();
+  const { user } = useAuth();
   const [anchorEl2, setAnchorEl2] = useState<HTMLElement | null>(null);
   const handleClick2 = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl2(event.currentTarget);
@@ -85,17 +87,17 @@ const Profile = () => {
           <Avatar src={"/images/profile/user-1.jpg"} alt={"ProfileImg"} sx={{ width: 95, height: 95 }} />
           <Box>
             <Typography variant="subtitle2" sx={{ color: "textPrimary", fontWeight: 600 }}>
-              Mathew Anderson
+              {user?.name ?? '—'}
             </Typography>
             <Typography variant="subtitle2" sx={{ color: "textSecondary" }}>
-              Designer
+              {user?.role ?? '—'}
             </Typography>
             <Typography
               variant="subtitle2"
               sx={{ display: "flex", alignItems: "center", gap: 1, color: "textSecondary" }}
             >
               <IconMail width={15} height={15} />
-              info@modernize.com
+              {user?.email ?? '—'}
             </Typography>
           </Box>
         </Stack>

@@ -648,6 +648,10 @@ class CostEvaluator(ICostEvaluator):
                     ),
                     "is_nocturnal": getattr(duty, "nocturnal_minutes", 0) > 0,
                     "has_overtime": (getattr(duty, "overtime_minutes", 0) or 0) > 0,
+                    # Aliases para compatibilidade com nomes do frontend (DynamicRulesEditor)
+                    "work_minutes": getattr(duty, "work_time", 0),
+                    "spread_minutes": getattr(duty, "spread_time", 0),
+                    "nocturnal": getattr(duty, "nocturnal_minutes", 0) > 0,
                     # Contagens (protegidas com fallbacks para diferentes nomes de atributos)
                     "num_blocks": len(getattr(duty, "tasks", getattr(duty, "blocks", []))),
                     "num_trips": len(getattr(duty, "all_trips", getattr(duty, "trips", []))),
