@@ -1407,7 +1407,7 @@ const GanttTimeHeader = React.memo(({ scale, theme }: { scale: number; theme: Th
   return (
     <Box sx={{ position: 'relative', height: HEADER_HEIGHT, borderBottom: `1px solid ${theme.palette.divider}`, bgcolor: 'background.default', overflow: 'hidden' }}>
       <Box sx={{ position: 'absolute', left: SIDEBAR_WIDTH + OVERNIGHT_START_MIN * ppm, top: 0, bottom: 0, right: 0, bgcolor: alpha(theme.palette.warning.main, 0.07), pointerEvents: 'none' }} />
-      <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, bgcolor: 'background.paper', borderRight: `1px solid ${theme.palette.divider}`, zIndex: 1 }} />
+      <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: SIDEBAR_WIDTH, bgcolor: 'background.paper', borderRight: `1px solid ${theme.palette.divider}`, zIndex: 1, transform: 'translateX(var(--gantt-sl, 0px))' }} />
       {marks}
     </Box>
   );
@@ -1421,23 +1421,28 @@ const GanttRowItem = React.memo(({
   const left = item.start_time * scale * BASE_PIXELS_PER_MINUTE;
   const width = (item.end_time - item.start_time) * scale * BASE_PIXELS_PER_MINUTE;
   const isApoio = item.kind === 'apoio' || (!item.lineId && !item.lineCode);
+  const dir = ((item.direction ?? item.sentido ?? '') as string).toUpperCase();
+  const isVolta = dir === 'VOLTA';
+  // Use design-token IDA/VOLTA colors so direction is visually distinct
+  const barColor = isApoio ? colors.deadhead : (isVolta ? colors.volta : colors.ida);
+  const dirArrow = isVolta ? ' ←' : ' →';
 
   return (
     <Tooltip arrow title={
       <Box sx={{ p: 0.5 }}>
         <Typography variant="caption" sx={{ display: 'block', fontWeight: 700 }}>
-          {isApoio ? 'Apoio / Ociosa' : `Viagem ${item.tripId} — Linha ${item.lineCode || item.lineId}`}
+          {isApoio ? 'Apoio / Ociosa' : `Viagem ${item.tripId} — Linha ${item.lineCode || item.lineId} (${dir || 'IDA'})`}
         </Typography>
         <Typography variant="caption" sx={{ display: 'block' }}>
           {minToHHMM(item.start_time)} → {minToHHMM(item.end_time)} ({minToDuration(item.end_time - item.start_time)})
         </Typography>
-        {!isApoio && item.origemName && (
+        {!isApoio && !!item.origemName && (
           <>
             <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-              📍 {item.origemName} → {item.destinoName}
+              📍 {String(item.origemName)} → {String(item.destinoName ?? '')}
             </Typography>
             <Typography variant="caption" sx={{ display: 'block' }}>
-              📏 {item.km} km
+              📏 {Number(item.km ?? 0)} km
             </Typography>
           </>
         )}
@@ -1449,8 +1454,8 @@ const GanttRowItem = React.memo(({
         onDragStart={(e) => !isApoio && onDragStart(e, item)}
         sx={{
           position: 'absolute', left, width: Math.max(width, 4), height: 34, top: 17, borderRadius: 1,
-          backgroundColor: isApoio ? colors.deadhead : item.color,
-          border: '1px solid', borderColor: isApoio ? colors.deadheadBorder : alpha(item.color, 0.5),
+          backgroundColor: barColor,
+          border: '1px solid', borderColor: isApoio ? colors.deadheadBorder : alpha(barColor, 0.5),
           cursor: isApoio ? 'default' : 'grab',
           display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
           transition: 'transform 0.1s, box-shadow 0.1s',
@@ -1464,7 +1469,7 @@ const GanttRowItem = React.memo(({
       >
         {!isApoio && width > 40 && (
           <Typography variant="caption" sx={{ color: 'white', fontWeight: 800, fontSize: '0.65rem', textShadow: '0px 1px 2px rgba(0,0,0,0.5)', userSelect: 'none' }}>
-            {item.lineCode || item.lineId}
+            {item.lineCode || item.lineId}{width > 80 ? dirArrow : ''}
           </Typography>
         )}
       </Box>
@@ -1502,6 +1507,35 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     const offset = container.clientWidth / 2;
     container.scrollTo({ left: Math.max(0, targetX - offset), behavior: 'smooth' });
   }, [scale]);
+
+  // Boost page-wrapper stacking context when fullscreen so it paints above the sidebar (z=100).
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const pageWrapper = document.querySelector('.page-wrapper') as HTMLElement | null;
+    if (!pageWrapper) return;
+    pageWrapper.style.zIndex = fullscreen ? '9998' : '';
+    return () => { pageWrapper.style.zIndex = ''; };
+  }, [fullscreen]);
+
+  // Scroll to the first trip on initial load so the user doesn't see empty midnight hours.
+  useEffect(() => {
+    const container = ganttScrollRef.current;
+    if (!container) return;
+    // Wait one tick for the List to render before scrolling.
+    const id = setTimeout(() => {
+      const ppmNow = scale * BASE_PIXELS_PER_MINUTE;
+      // Find earliest startTime across all blocks
+      const earliest = effectiveBlocks.reduce<number>((min, b) => {
+        const first = (b.items ?? []).reduce<number>((m, it) => Math.min(m, it.start_time), Infinity);
+        return Math.min(min, first);
+      }, Infinity);
+      if (earliest === Infinity) return;
+      const targetX = Math.max(0, earliest * ppmNow - SIDEBAR_WIDTH - 30);
+      container.scrollTo({ left: targetX, behavior: 'smooth' });
+    }, 150);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [filterLine, setFilterLine] = useState<string>('');
   const [filterSearch, setFilterSearch] = useState('');
@@ -1635,9 +1669,12 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       if (filterLine && !block.items?.some((t) => (t.lineCode ?? (t.line_code as string | undefined)) === filterLine)) return false;
       if (filterSearch) {
         const q = filterSearch.toLowerCase();
-        return String(block.block_id).includes(q) || block.items?.some((t) =>
-          String(t.tripId ?? '').includes(q) || String(t.lineCode ?? '').toLowerCase().includes(q)
-        );
+        return String(block.block_id).includes(q)
+          || `veículo ${block.block_id}`.includes(q)
+          || `veiculo ${block.block_id}`.includes(q)
+          || block.items?.some((t) =>
+              String(t.tripId ?? '').includes(q) || String(t.lineCode ?? '').toLowerCase().includes(q)
+            );
       }
       return true;
     });
@@ -2120,7 +2157,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
             '&:hover': { bgcolor: isDropTarget ? alpha(theme.palette.primary.main, 0.12) : alpha(theme.palette.primary.main, 0.02) },
           }}
         >
-          <Box sx={{ width: 140, minWidth: 140, borderRight: `1px solid ${theme.palette.divider}`, p: 1.5, bgcolor: 'background.paper', zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <Box sx={{ width: 140, minWidth: 140, flexShrink: 0, borderRight: `1px solid ${theme.palette.divider}`, p: 1.5, bgcolor: 'background.paper', zIndex: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center', transform: 'translateX(var(--gantt-sl, 0px))' }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'primary.main' }}>Veículo {block.block_id}</Typography>
             <Typography variant="caption" color="text.secondary">
               {(block.items || []).filter((t) => t.lineCode || t.lineId).length} viagens
@@ -2221,7 +2258,7 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
   return (
     <Paper variant="outlined" sx={{
       borderRadius: 2, overflow: 'hidden',
-      ...(fullscreen && { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1300, overflow: 'auto', bgcolor: 'background.paper', borderRadius: 0 }),
+      ...(fullscreen && { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, overflow: 'auto', bgcolor: 'background.paper', borderRadius: 0, margin: '0 !important' }),
     }}>
       {toolbarControls}
 
@@ -2234,7 +2271,13 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
       {/* ─── Tab 0: Gantt ─── */}
       {activeTab === 0 && (
-        <Box ref={ganttScrollRef} sx={{ width: '100%', overflowX: 'auto', bgcolor: 'background.paper' }}>
+        <Box
+          ref={ganttScrollRef}
+          sx={{ width: '100%', overflowX: 'auto', bgcolor: 'background.paper' }}
+          onScroll={(e: React.UIEvent<HTMLDivElement>) => {
+            (e.currentTarget as HTMLElement).style.setProperty('--gantt-sl', `${e.currentTarget.scrollLeft}px`);
+          }}
+        >
           <Box sx={{ width: totalWidth, minWidth: '100%' }}>
             <GanttTimeHeader scale={scale} theme={theme} />
             {/* Vehicle Legend */}
