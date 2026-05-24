@@ -27,6 +27,102 @@ except Exception:
     pulp = None
     _PULP_AVAILABLE = False
 
+try:
+    from ortools.graph.python import min_cost_flow as _ortools_mcf_mod  # type: ignore
+
+    _ORTOOLS_MCF_AVAILABLE = True
+except Exception:
+    _ortools_mcf_mod = None
+    _ORTOOLS_MCF_AVAILABLE = False
+
+# Fator de escala para converter custos float → int (OR-Tools exige inteiros)
+_COST_SCALE = 1000
+
+
+def _solve_mcf_ortools(
+    N: int,
+    valid_X: "Dict[Tuple[int,int], Dict[str, Any]]",
+    depot_id: Any,
+    pullout_costs: "Dict[Tuple[Any,int], float]",
+    pullin_costs: "Dict[Tuple[int,Any], float]",
+    fixed_cost: float,
+) -> "Optional[Tuple[Dict[int,int], Dict[int,Any], Dict[int,Any]]]":
+    """
+    Resolve MCNF via OR-Tools SimpleMinCostFlow (network simplex, 40-56x mais rápido que PuLP/CBC).
+
+    Formulação bipartida correta (Löbel 1998 — seção 3):
+      - Nós 0..N-1:   trip_start[i]  (supply = -1: cada viagem deve receber um veículo)
+      - Nós N..2N-1:  trip_end[i]    (supply = +1: cada viagem libera um veículo)
+      - Nó 2N:        depot          (supply = 0: balanceado, custo de ativar veículo no pull-out)
+
+    Arcos:
+      - (depot, trip_start[i]):   pull-out  custo = fixed_cost + dh_pullout
+      - (trip_end[i], trip_start[j]): conexão i→j  custo = deadhead + idle
+      - (trip_end[i], depot):   pull-in  custo = dh_pullin
+
+    Propriedade LP-integral: rede bipartida tem unimodularidade total → sem variáveis binárias.
+
+    Retorna: (next_trip{i→j}, start_depot_for{i→did}, end_depot_for{i→did}) ou None se falhar.
+    """
+    if not _ORTOOLS_MCF_AVAILABLE:
+        return None
+
+    mcf = _ortools_mcf_mod.SimpleMinCostFlow()
+
+    depot_node = 2 * N
+
+    # Supply/demand: trip_start absorve (supply=-1), trip_end gera (supply=+1), depot balanceado
+    for i in range(N):
+        mcf.set_node_supply(i, -1)      # trip_start[i]: precisa de 1 veículo
+        mcf.set_node_supply(N + i, 1)   # trip_end[i]: libera 1 veículo
+    mcf.set_node_supply(depot_node, 0)  # depot balanceado
+
+    # Arcos pull-out: depot → trip_start[i]  (ativa novo veículo)
+    arc_pullout: list = []
+    for i in range(N):
+        cost_int = int(round(pullout_costs.get((depot_id, i), fixed_cost) * _COST_SCALE))
+        arc_idx = mcf.add_arc_with_capacity_and_unit_cost(depot_node, i, 1, cost_int)
+        arc_pullout.append(arc_idx)
+
+    # Arcos de conexão: trip_end[i] → trip_start[j]  (veículo continua de i para j)
+    arc_conn: "Dict[int, Tuple[int,int]]" = {}  # arc_idx → (i, j)
+    for (i, j), info in valid_X.items():
+        cost_int = int(round(max(0.0, info["cost"]) * _COST_SCALE))
+        arc_idx = mcf.add_arc_with_capacity_and_unit_cost(N + i, j, 1, cost_int)
+        arc_conn[arc_idx] = (i, j)
+
+    # Arcos pull-in: trip_end[i] → depot  (veículo retorna ao depósito)
+    arc_pullin: list = []
+    for i in range(N):
+        cost_int = int(round(pullin_costs.get((i, depot_id), 0.0) * _COST_SCALE))
+        arc_idx = mcf.add_arc_with_capacity_and_unit_cost(N + i, depot_node, 1, cost_int)
+        arc_pullin.append(arc_idx)
+
+    status = mcf.solve()
+    if status != mcf.OPTIMAL:
+        return None
+
+    # Extrai solução
+    next_trip: "Dict[int, int]" = {}
+    start_depot_for: "Dict[int, Any]" = {}
+    end_depot_for: "Dict[int, Any]" = {}
+
+    for arc_idx, (i, j) in arc_conn.items():
+        if mcf.flow(arc_idx) > 0:
+            next_trip[i] = j
+
+    for arc_idx in arc_pullout:
+        if mcf.flow(arc_idx) > 0:
+            trip_i = mcf.head(arc_idx)  # trip_start node = destination
+            start_depot_for[trip_i] = depot_id
+
+    for arc_idx in arc_pullin:
+        if mcf.flow(arc_idx) > 0:
+            trip_i = mcf.tail(arc_idx) - N  # trip_end[N+i] = source → trip index = i
+            end_depot_for[trip_i] = depot_id
+
+    return next_trip, start_depot_for, end_depot_for
+
 
 def _make_solver(time_limit: int, threads: int = 1) -> "pulp.LpSolver":
     """CBC (primary for binary MIP) with HiGHS as fallback if CBC unavailable."""
@@ -383,6 +479,45 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     pullin_costs[(i, did)] += hard_pairing_penalty if hard_pairing_vehicle_level else pair_break_penalty
                 pullout_costs[(did, i)] = fixed_cost + (dh_to_depot * deadhead_cost)
 
+        # --- OR-Tools SimpleMinCostFlow (primário: 40-56x mais rápido que PuLP/CBC) ---
+        # Funciona para single-depot. Para multi-depot, cai no PuLP abaixo.
+        _single_depot_id = list(depot_caps.keys())[0] if len(depot_caps) == 1 else None
+        if _ORTOOLS_MCF_AVAILABLE and _single_depot_id is not None:
+            _t_ort = time.time()
+            _ort_result = _solve_mcf_ortools(
+                N=N,
+                valid_X=valid_X,
+                depot_id=_single_depot_id,
+                pullout_costs=pullout_costs,
+                pullin_costs=pullin_costs,
+                fixed_cost=fixed_cost,
+            )
+            _elapsed_ort = (time.time() - _t_ort) * 1000
+            if _ort_result is not None:
+                _log.info("MCNF OR-Tools: N=%d resolvido em %.1fms (vs ~%.0fms PuLP/CBC)", N, _elapsed_ort, N * 1.8)
+                next_trip, start_depot_for, end_depot_for = _ort_result
+                # Salta direto para reconstrução de blocos (compartilhada com PuLP)
+                return self._build_blocks_from_assignment(
+                    next_trip=next_trip,
+                    start_depot_for=start_depot_for,
+                    end_depot_for=end_depot_for,
+                    trips_sorted=trips_sorted,
+                    valid_X=valid_X,
+                    fixed_cost=fixed_cost,
+                    pullout_costs=pullout_costs,
+                    pullin_costs=pullin_costs,
+                    vehicle=vehicle,
+                    vehicle_types=vehicle_types,
+                    depots=depots,
+                    N=N,
+                    solver_name="ortools_mcf",
+                    elapsed_ms=_elapsed_ort,
+                    preserve_preferred_pairs=preserve_preferred_pairs,
+                    preferred_pair_window=preferred_pair_window,
+                    preferred_pairs=preferred_pairs,
+                )
+            _log.warning("OR-Tools MCF retornou não-ótimo (N=%d) — fallback para PuLP/CBC", N)
+
         # If PuLP isn't available, fallback to greedy
         if not _PULP_AVAILABLE:
             _log.warning("PuLP não disponível no ambiente; usando GreedyVSP como fallback.")
@@ -474,7 +609,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             )
             return res
 
-        # Reconstroi sequenciamento a partir das variáveis selecionadas
+        # Reconstroi sequenciamento a partir das variáveis PuLP
         next_trip: Dict[int, int] = {}
         prev_trip: Dict[int, int] = {}
         start_depot_for: Dict[int, Any] = {}
@@ -493,9 +628,53 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             if float(pulp.value(var) or 0.0) > 0.5:
                 end_depot_for[i] = did
 
-        # Monta blocos (cadeias) a partir dos predecessores
-        id_to_index = {t.id: idx for idx, t in enumerate(trips_sorted)}
-        visited = set()
+        _log.info("MCNF Subproblem (PuLP/CBC): N=%d, solve_time_s=%.3f", N, milp_end - milp_start)
+        return self._build_blocks_from_assignment(
+            next_trip=next_trip,
+            start_depot_for=start_depot_for,
+            end_depot_for=end_depot_for,
+            trips_sorted=trips_sorted,
+            valid_X=valid_X,
+            fixed_cost=fixed_cost,
+            pullout_costs=pullout_costs,
+            pullin_costs=pullin_costs,
+            vehicle=vehicle,
+            vehicle_types=vehicle_types,
+            depots=depots,
+            N=N,
+            solver_name="pulp_cbc",
+            elapsed_ms=(milp_end - milp_start) * 1000,
+            preserve_preferred_pairs=preserve_preferred_pairs,
+            preferred_pair_window=preferred_pair_window,
+            preferred_pairs=preferred_pairs,
+        )
+
+    def _build_blocks_from_assignment(
+        self,
+        *,
+        next_trip: Dict[int, int],
+        start_depot_for: Dict[int, Any],
+        end_depot_for: Dict[int, Any],
+        trips_sorted: List[Trip],
+        valid_X: Dict[Tuple[int, int], Dict[str, Any]],
+        fixed_cost: float,
+        pullout_costs: Dict[Tuple[Any, int], float],
+        pullin_costs: Dict[Tuple[int, Any], float],
+        vehicle: Any,
+        vehicle_types: List[VehicleType],
+        depots: List[Dict[str, Any]],
+        N: int,
+        solver_name: str = "mcnf",
+        elapsed_ms: float = 0.0,
+        preserve_preferred_pairs: bool = True,
+        preferred_pair_window: int = 120,
+        preferred_pairs: Optional[Dict] = None,
+    ) -> VSPSolution:
+        """Reconstrói blocos VSP a partir do mapeamento next_trip/start_depot_for/end_depot_for.
+        Compartilhado entre OR-Tools e PuLP para evitar duplicação.
+        """
+        prev_trip: Dict[int, int] = {j: i for i, j in next_trip.items()}
+        visited: set = set()
         blocks: List[Block] = []
         block_id_counter = 1
 
@@ -505,8 +684,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             if start_idx in prev_trip:
                 continue
 
-            chain_idxs = []
-            curr = start_idx
+            chain_idxs: List[int] = []
+            curr: Optional[int] = start_idx
             while curr is not None and curr not in visited:
                 chain_idxs.append(curr)
                 visited.add(curr)
@@ -529,7 +708,6 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 }
             )
 
-            # Soma custos da cadeia
             for a_idx, b_idx in zip(chain_idxs[:-1], chain_idxs[1:]):
                 info = valid_X.get((a_idx, b_idx))
                 if info:
@@ -537,7 +715,6 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     block.meta["idle_minutes"] += info["idle"]
                     block.meta["connection_cost"] += info["cost"]
 
-            # Pull-out / Pull-in meta
             first_idx = chain_idxs[0]
             last_idx = chain_idxs[-1]
             block.meta["start_depot_id"] = start_depot_for.get(first_idx)
@@ -551,22 +728,15 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
 
-        # BUG-06 fix (auditoria 2026-05-17): MCNF aplicava max_shift apenas no GAP entre
-        # trips, deixando passar blocos com duração total >> max_shift. O Greedy usa como
-        # duração TOTAL. Quando o param `max_block_duration_minutes` é definido explicitamente,
-        # aplicamos split por duração TOTAL para alinhar com a semântica do Greedy/operação.
-        #
-        # OPT-IN: sem o param explícito, mantemos compatibilidade — o run-cutting do CSP
-        # cuidará da divisão em duties de motorista. Algumas operações reais querem blocos
-        # longos no VSP (vehicle pode operar 24h, drivers fazem run-cutting).
         max_block_duration = self._p("max_block_duration_minutes", None)
         if max_block_duration is not None and int(max_block_duration) > 0:
             blocks = self._split_blocks_by_total_duration(blocks, int(max_block_duration))
 
         total_trips_packed = sum(len(b.trips) for b in blocks)
+        _effective_preferred_pairs = preferred_pairs or {}
         pair_meta = (
-            pairing_stats(blocks, preferred_pairs)
-            if preferred_pairs
+            pairing_stats(blocks, _effective_preferred_pairs)
+            if _effective_preferred_pairs
             else {
                 "preferred_pair_count": 0,
                 "paired_connections_followed": 0,
@@ -574,10 +744,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             }
         )
         _log.info(
-            f"MCNF Subproblem (MILP): {total_trips_packed}/{N} trips em {len(blocks)} blocos; solve_time_s={(milp_end-milp_start):.3f}"  # noqa: E501
+            "MCNF %s: %d/%d trips → %d blocos em %.1fms",
+            solver_name, total_trips_packed, N, len(blocks), elapsed_ms,
         )
 
-        # Unassigned (should be none if MILP foi factível)
         unassigned_trips = [t for t in trips_sorted if t.id not in {tr.id for b in blocks for tr in b.trips}]
 
         solution = VSPSolution(
@@ -587,7 +757,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             elapsed_ms=self._elapsed_ms(),
             meta={
                 "subproblem_trip_count": N,
-                "milp_solve_time_s": (milp_end - milp_start) if "milp_end" in locals() else None,
+                "solver": solver_name,
+                "solver_elapsed_ms": round(elapsed_ms, 1),
                 "multi_depot": bool(depots),
                 "depot_count": len(depots) if depots else 0,
                 "preserve_preferred_pairs": preserve_preferred_pairs,

@@ -95,16 +95,26 @@ class ReliefVehicleEstimator:
         )
 
     def _find_relief_events(self, duties: List[Duty]) -> List[ReliefEvent]:
-        """Para cada bloco, detecta transições entre motoristas distintos."""
-        # block_id → [(handoff_time, duty_id, segment_start, segment_end, location_id)]
+        """Para cada bloco VSP original, detecta transições entre motoristas distintos.
+
+        Usa `duty.tasks` com `meta["source_block_id"]` para identificar o bloco VSP
+        original, ignorando os IDs sintéticos criados pelo CSP durante o run-cutting.
+        """
+        # source_block_id → [(start_time, end_time, duty_id, location_id)]
         block_segments: Dict[int, List] = {}
 
         for duty in duties:
-            for seg in duty.segments:
-                if not seg.trips:
+            # Usa tasks (Block objects) que preservam source_block_id do VSP
+            for task in duty.tasks:
+                if not task.trips:
                     continue
-                block_segments.setdefault(seg.block_id, []).append(
-                    (seg.start_time, seg.end_time, duty.id, seg.trips[0].origin_id if seg.trips else 0)
+                source_bid = int(task.meta.get("source_block_id", task.id))
+                task_trips_sorted = sorted(task.trips, key=lambda t: t.start_time)
+                start_t = task_trips_sorted[0].start_time
+                end_t = task_trips_sorted[-1].end_time
+                loc_id = task_trips_sorted[0].origin_id
+                block_segments.setdefault(source_bid, []).append(
+                    (start_t, end_t, duty.id, loc_id)
                 )
 
         events: List[ReliefEvent] = []
