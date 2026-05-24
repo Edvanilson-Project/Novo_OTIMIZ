@@ -13,12 +13,19 @@ Atualizado: 2026-05-24 (protocolo anti-teatro, evidencias e gate final de tela)
 
 ## Módulo atual
 
+**AUDITORIA PLANEJADOR (GANTT) — EM PROGRESSO** 🔄 (2026-05-24)
+- 🔄 Fase 1-4 concluídas: Carregamento, Algoritmos, Qualidade, Gantt
+- 🔄 8 bugs encontrados: 1 HIGH, 3 MEDIUM, 4 LOW
+- 🔄 Implementações pendentes: Tooltips, legenda, layout
+- 🔄 Drag-drop: A avaliar vs Optibus gap
+- 📄 Documentação: `AUDITORIA_PLANEJADOR_GANTT_2026_05_24.md`
+
 **AUDITORIA IMPORTAR VIAGENS CONCLUÍDA** ✅ (2026-05-24)
-- ✅ Inventário visual + testes CRUD
-- ✅ Aprovado pelos 5 usuários OTTrans
-- ✅ Aprovado pelos 17 especialistas
+- ✅ Simplificação: 1016 → 480 linhas (-53%)
+- ✅ Correção: Nomes terminais visíveis (Terminal Centro, Terminal Barra)
+- ✅ Auditoria completa: 7 membros + 5 usuários + 17 especialistas = 29/29 APROVADOS
 - ✅ Gate final: PRONTO PARA PRODUÇÃO
-- 📄 Documentação: `AUDITORIA_IMPORTAR_VIAGENS_*.md` (4 arquivos)
+- 📄 Documentação: `AUDITORIA_IMPORTAR_VIAGENS_*.md` (5 arquivos + completa)
 
 ---
 

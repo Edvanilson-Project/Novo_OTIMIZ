@@ -226,33 +226,90 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
         />
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        <KPICard
-          title="Hard Issues"
-          value={`${hardIssueCount}`}
-          changeKey={`hard-issues-${hardIssueCount}-${scheduleVersion}`}
-          icon={<IconAlertTriangle size="24" />}
-          color={hardIssueCount > 0 ? theme.palette.error.main : theme.palette.text.secondary}
-          isError={hardIssueCount > 0}
-        />
+        <Tooltip
+          arrow
+          title={
+            <Box>
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                <strong>Hard Issues</strong> — Violações obrigatórias das restrições.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                Exemplos: jornada acima do CCT máximo, viagem sem cobertura de veículo, conflito de horário.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                0 = agendamento viável e válido.
+              </Typography>
+            </Box>
+          }
+        >
+          <Box>
+            <KPICard
+              title="Hard Issues"
+              value={`${hardIssueCount}`}
+              changeKey={`hard-issues-${hardIssueCount}-${scheduleVersion}`}
+              icon={<IconAlertTriangle size="24" />}
+              color={hardIssueCount > 0 ? theme.palette.error.main : theme.palette.text.secondary}
+              isError={hardIssueCount > 0}
+            />
+          </Box>
+        </Tooltip>
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        <KPICard
-          title="Soft Issues"
-          value={`${softIssueCount}`}
-          changeKey={`soft-issues-${softIssueCount}-${scheduleVersion}`}
-          icon={<IconAlertTriangle size="24" />}
-          color={softIssueCount > 0 ? theme.palette.warning.main : theme.palette.text.secondary}
-        />
+        <Tooltip
+          arrow
+          title={
+            <Box>
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                <strong>Soft Issues</strong> — Violações de preferências e heurísticas.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                Exemplos: pausa de repouso desconfortável, rodízio desequilibrado, custo marginal alto.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                Não invalidam a solução, mas indicam oportunidades de melhoria.
+              </Typography>
+            </Box>
+          }
+        >
+          <Box>
+            <KPICard
+              title="Soft Issues"
+              value={`${softIssueCount}`}
+              changeKey={`soft-issues-${softIssueCount}-${scheduleVersion}`}
+              icon={<IconAlertTriangle size="24" />}
+              color={softIssueCount > 0 ? theme.palette.warning.main : theme.palette.text.secondary}
+            />
+          </Box>
+        </Tooltip>
       </Grid>
       <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
-        <KPICard
-          title="Trip Groups Split"
-          value={`${splitGroups}`}
-          changeKey={`split-groups-${splitGroups}-${scheduleVersion}`}
-          icon={<IconRoute size="24" />}
-          color={splitGroups > 0 ? theme.palette.error.main : theme.palette.success.main}
-          isError={splitGroups > 0}
-        />
+        <Tooltip
+          arrow
+          title={
+            <Box>
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                <strong>Trip Groups Split</strong> — Quantidade de viagens fragmentadas.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                Uma viagem "split" é aquela que deveria ser um grupo contíguo, mas foi dividida entre múltiplas jornadas.
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                0 = todas as viagens mantêm continuidade. Mais splits = menos eficiência operacional.
+              </Typography>
+            </Box>
+          }
+        >
+          <Box>
+            <KPICard
+              title="Trip Groups Split"
+              value={`${splitGroups}`}
+              changeKey={`split-groups-${splitGroups}-${scheduleVersion}`}
+              icon={<IconRoute size="24" />}
+              color={splitGroups > 0 ? theme.palette.error.main : theme.palette.success.main}
+              isError={splitGroups > 0}
+            />
+          </Box>
+        </Tooltip>
       </Grid>
       {fairnessGini !== null && (
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
