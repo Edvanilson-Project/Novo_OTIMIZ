@@ -1253,7 +1253,7 @@ export class OptimizationService implements OnModuleInit {
                 companyId,
                 scheduleId,
                 blockId,
-                vehicleId: resolvedVehicleId,
+                vehicleId: explicitVehicleId ?? null,
                 tripIds: (b.trips || []).map((t: any) =>
                   typeof t === 'number' ? t : t.id,
                 ),
@@ -2448,6 +2448,7 @@ export class OptimizationService implements OnModuleInit {
       rosterCount: Number(meta.roster_count || 0),
       totalBlocks: blocks.length,
       totalTrips: uniqueTripIds.length,
+      algorithm: meta.algorithm ?? meta.run_snapshot?.algorithm ?? null,
     };
 
     // 4. Salvar no Cache antes de retornar

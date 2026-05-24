@@ -88,9 +88,7 @@ import { RequestLoggingInterceptor } from './common/interceptors/request-logging
           RefreshToken,
           PasswordResetToken,
         ],
-        // synchronize=true permite TypeORM dropar/alterar colunas a partir das entities. Em produção
-        // isso pode causar perda silenciosa de dados em deploy. Mantemos auto-sync apenas em dev.
-        synchronize: configService.get<string>('NODE_ENV') !== 'production',
+        synchronize: false,
         // Migrations explícitas: glob aceita .ts (dev) e .js (após build).
         migrations: [__dirname + '/modules/database/migrations/*{.ts,.js}'],
         // Auto-aplicar migrations pendentes ao subir. Idempotente — só roda as que faltam.

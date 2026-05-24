@@ -30,7 +30,7 @@ function KPICard({ title, value, subtitle, icon, color = "primary", loading }: K
     error: "#c62828", info: "#0277bd",
   };
   return (
-    <Card variant="outlined" sx={{ height: "100%" }}>
+    <Card variant="outlined" sx={{ height: "100%", borderTop: `3px solid ${colorMap[color]}`, overflow: "hidden" }}>
       <CardContent>
         <Stack direction="row" sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
           <Box>
@@ -171,6 +171,14 @@ export default function DashboardPage() {
     return "default";
   };
 
+  const statusLabel = (s: string) => {
+    if (s === "completed") return "Concluído";
+    if (s === "failed") return "Falhou";
+    if (s === "running") return "Em andamento";
+    if (s === "pending") return "Pendente";
+    return s;
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <DashboardCard
@@ -183,7 +191,7 @@ export default function DashboardPage() {
         }
       >
         <Stack spacing={3}>
-          {error && <Alert severity="error">{error}</Alert>}
+          {error && <Alert severity="error" variant="filled">{error}</Alert>}
 
           {/* ── KPIs principais ── */}
           <Grid container spacing={2}>
@@ -220,8 +228,8 @@ export default function DashboardPage() {
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <KPICard
                 title="Motoristas Necessários"
-                value={schedule?.rosterCount ?? schedule?.totalBlocks ?? "—"}
-                subtitle={schedule ? `Frota: ${schedule.totalBlocks} veículos` : "escala otimizada"}
+                value={schedule?.rosterCount || schedule?.totalBlocks || "—"}
+                subtitle={schedule ? `Frota: ${schedule.totalBlocks} ${schedule.totalBlocks === 1 ? 'veículo' : 'veículos'}` : "escala otimizada"}
                 icon={<IconUsers size={24} />}
                 color="warning"
                 loading={loading}
@@ -238,7 +246,7 @@ export default function DashboardPage() {
                     Última Otimização
                   </Typography>
                   <Chip
-                    label={schedule.status}
+                    label={statusLabel(schedule.status)}
                     color={statusColor(schedule.status) as 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'}
                     size="small"
                   />

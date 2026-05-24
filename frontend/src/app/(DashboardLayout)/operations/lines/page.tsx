@@ -5,7 +5,8 @@ import {
   IconButton, Snackbar, Alert, Stack, TextField, Tooltip, Switch,
   FormControlLabel, FormControl, InputLabel, Select, MenuItem, Divider, Typography, Grid,
 } from '@mui/material';
-import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import { type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import AppDataGrid from '@/components/AppDataGrid';
 import { IconEdit, IconPlus, IconRefresh, IconTrash, IconRoute, IconBusStop, IconCarGarage } from '@tabler/icons-react';
 import DashboardCard from '@/app/components/shared/DashboardCard';
 import { linesApi, terminalsApi } from '@/lib/api';
@@ -200,7 +201,7 @@ export default function LinesPage() {
         }
       >
         <Box sx={{ height: 520, mt: 1 }}>
-          <DataGrid rows={rows} columns={columns} loading={loading}
+          <AppDataGrid searchable rows={rows} columns={columns} loading={loading}
             pageSizeOptions={[10, 25, 50]} initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
             disableRowSelectionOnClick localeText={{ noRowsLabel: 'Nenhuma linha cadastrada.' }} />
         </Box>
@@ -213,7 +214,7 @@ export default function LinesPage() {
         </DialogTitle>
         <DialogContent dividers>
           <Stack spacing={3} sx={{ mt: 1 }}>
-            {formError && <Alert severity="error">{formError}</Alert>}
+            {formError && <Alert severity="error" variant="filled">{formError}</Alert>}
 
             {/* ── Identificação ── */}
             <Grid container spacing={2}>

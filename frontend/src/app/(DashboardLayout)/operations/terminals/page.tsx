@@ -4,7 +4,8 @@ import {
   Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControlLabel, IconButton, Snackbar, Alert, Stack, Switch, TextField, Tooltip,
 } from '@mui/material';
-import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import { type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import AppDataGrid from '@/components/AppDataGrid';
 import { IconEdit, IconPlus, IconRefresh, IconTrash, IconMapPin } from '@tabler/icons-react';
 import DashboardCard from '@/app/components/shared/DashboardCard';
 import { terminalsApi } from '@/lib/api';
@@ -89,7 +90,7 @@ export default function TerminalsPage() {
           </Stack>
         }>
         <Box sx={{ height: 520, mt: 1 }}>
-          <DataGrid rows={rows} columns={columns} loading={loading} pageSizeOptions={[10, 25, 50]}
+          <AppDataGrid searchable rows={rows} columns={columns} loading={loading} pageSizeOptions={[10, 25, 50]}
             initialState={{ pagination: { paginationModel: { pageSize: 10 } } }} disableRowSelectionOnClick
             localeText={{ noRowsLabel: 'Nenhum terminal cadastrado.' }} />
         </Box>
@@ -101,7 +102,7 @@ export default function TerminalsPage() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            {formError && <Alert severity="error">{formError}</Alert>}
+            {formError && <Alert severity="error" variant="filled">{formError}</Alert>}
             <TextField label="Código do Terminal *" size="small" fullWidth value={form.terminalId}
               onChange={e => setForm(f => ({ ...f, terminalId: e.target.value }))} helperText="Ex: TER-001, GARAGEM-SP" />
             <TextField label="Nome do Terminal *" size="small" fullWidth value={form.name}

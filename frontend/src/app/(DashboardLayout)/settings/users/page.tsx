@@ -7,7 +7,8 @@ import {
   Grid, IconButton, MenuItem, Select, Snackbar, Alert, Stack,
   TextField, Tooltip, InputLabel, FormControl, InputAdornment,
 } from '@mui/material';
-import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import { type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import AppDataGrid from '@/components/AppDataGrid';
 import {
   IconEdit, IconEye, IconEyeOff, IconPlus, IconRefresh, IconTrash, IconUser,
 } from '@tabler/icons-react';
@@ -196,16 +197,14 @@ export default function UsersPage() {
         }
       >
         <Box sx={{ height: 520, width: '100%', mt: 1 }}>
-          <DataGrid
+          <AppDataGrid searchable
             rows={rows}
             columns={columns}
             loading={loading}
             pageSizeOptions={[10, 25, 50]}
             initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
             disableRowSelectionOnClick
-            localeText={{
-              noRowsLabel: 'Nenhum usuário cadastrado.',
-            }}
+            localeText={{ noRowsLabel: 'Nenhum usuário cadastrado.' }}
           />
         </Box>
       </DashboardCard>
@@ -217,7 +216,7 @@ export default function UsersPage() {
           {editing ? `Editar: ${editing.name}` : 'Novo Usuário'}
         </DialogTitle>
         <DialogContent dividers>
-          {formError && <Alert severity="error" sx={{ mx: 2, mt: 2 }}>{formError}</Alert>}
+          {formError && <Alert severity="error" variant="filled" sx={{ mx: 2, mt: 2 }}>{formError}</Alert>}
           <Grid container spacing={2} sx={{ pt: 1 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <Tooltip title="Nome completo do usuário." arrow placement="top">

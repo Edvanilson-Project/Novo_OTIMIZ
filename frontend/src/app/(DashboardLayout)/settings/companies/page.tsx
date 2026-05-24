@@ -7,7 +7,8 @@ import {
   Grid, IconButton, MenuItem, Select, Snackbar, Alert, Stack,
   TextField, Tooltip, InputLabel, FormControl,
 } from '@mui/material';
-import { DataGrid, type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import { type GridColDef, type GridRenderCellParams } from '@mui/x-data-grid';
+import AppDataGrid from '@/components/AppDataGrid';
 import {
   IconBuilding, IconEdit, IconPlus, IconTrash, IconRefresh,
 } from '@tabler/icons-react';
@@ -170,16 +171,14 @@ export default function CompaniesPage() {
         }
       >
         <Box sx={{ height: 520, width: '100%', mt: 1 }}>
-          <DataGrid
+          <AppDataGrid searchable
             rows={rows}
             columns={columns}
             loading={loading}
             pageSizeOptions={[10, 25, 50]}
             initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
             disableRowSelectionOnClick
-            localeText={{
-              noRowsLabel: 'Nenhuma empresa cadastrada.',
-            }}
+            localeText={{ noRowsLabel: 'Nenhuma empresa cadastrada.' }}
           />
         </Box>
       </DashboardCard>

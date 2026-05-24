@@ -15,7 +15,7 @@ export class BlockAssignment extends TenantBaseEntity {
   schedule: Schedule;
 
   @Column({ nullable: true })
-  vehicleId: number; // FK para Vehicle
+  vehicleId: number | null; // FK para Vehicle
 
   @ManyToOne(() => Vehicle, (vehicle) => vehicle.blocks, {
     onDelete: 'SET NULL',

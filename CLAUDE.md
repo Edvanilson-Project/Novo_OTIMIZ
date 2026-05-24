@@ -2,6 +2,13 @@
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
+## 0. Mandatory Project Memory
+
+Before doing any work in this repository, read `CLAUDE_OPERATIONAL_MEMORY.md`.
+For ongoing operational validation work, also read and update
+`CLAUDE_OPERATIONAL_STATUS.md` so the current module, evidence, bugs, fixes,
+tests, commits, and next steps stay persistent.
+
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
 ## 1. Think Before Coding

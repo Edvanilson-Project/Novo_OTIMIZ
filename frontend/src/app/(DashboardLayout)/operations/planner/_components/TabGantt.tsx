@@ -323,7 +323,7 @@ function normalizeExportSegments(rawSegments: OptimizationDutyTimeSegment[], tri
 }
 
 // ─── Event Kind Config ────────────────────────────────────────────────────────
-const EVENT_CONFIG: Record<EventKind, { label: string; description: string; color: 'success' | 'primary' | 'error' | 'warning' | 'default' | 'info' | 'secondary'; icon: React.ReactNode }> = {
+const EVENT_CONFIG: Record<EventKind, { label: string; description: string; color: 'success' | 'primary' | 'error' | 'warning' | 'default' | 'info' | 'secondary'; icon: React.ReactElement }> = {
   inicio_jornada:  { label: 'Início de jornada', description: 'Marca o começo da jornada do motorista.', color: 'info', icon: <IconCoffee size={14} /> },
   fim_jornada:     { label: 'Fim de jornada', description: 'Marca o término da jornada do motorista.', color: 'info', icon: <IconCoffee size={14} /> },
   soltura:         { label: 'Soltura', description: 'Saída do veículo da garagem para o terminal de início da operação.', color: 'success', icon: <IconMapPin size={14} /> },
@@ -1215,7 +1215,7 @@ function EventKindChip({ kind, gap, intervalKind }: { kind: EventKind; gap?: num
     <Tooltip title={cfg.description} arrow placement="top">
       <Chip
         size="small"
-        icon={<>{cfg.icon}</>}
+        icon={cfg.icon}
         label={cfg.label}
         color={cfg.color}
         variant="outlined"
