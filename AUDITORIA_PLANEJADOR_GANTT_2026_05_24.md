@@ -733,18 +733,55 @@ Aprovação preliminar: CONDICIONAL (após corrigir HIGH priority bugs)
 - Adicionado Tooltip para "Trip Groups Split"
   - Explica: viagens fragmentadas entre múltiplas jornadas
 
-**Código adicionado:** ~40 linhas de Tooltip wrapping
+**Status:** ✅ IMPLEMENTADO  
+**Build:** ✅ SEM ERROS  
+
+---
+
+### ✅ 2. Tooltip no Gantt ao Hover (Expandido)
+
+**Arquivo modificado:** `frontend/src/app/(DashboardLayout)/operations/planner/_components/TabGantt.tsx` (lines 1425-1436)
+
+**O que foi feito:**
+- Expandido o Tooltip existente do Gantt para mostrar:
+  - **Origem → Destino** (com ícone 📍)
+  - **Quilometragem** (com ícone 📏)
+  - Horários já existentes (preservados)
+  - Instrução de drag-drop (preservada)
+
+**Benefício:** Usuário vê informação completa da viagem ao passar mouse sobre o bloco do Gantt
 
 **Status:** ✅ IMPLEMENTADO  
 **Build:** ✅ SEM ERROS  
-**Validação:** ⏳ Pendente (interface não está acessível no momento)
+
+---
+
+### ✅ 3. Legenda de Cores dos Veículos
+
+**Arquivo modificado:** `frontend/src/app/(DashboardLayout)/operations/planner/_components/TabGantt.tsx` (added after line 2239)
+
+**O que foi feito:**
+- Adicionado Box visual com legenda de veículos
+- Mostra cada veículo (V1, V2, etc.) com:
+  - Quadrado colorido indicando a cor do veículo
+  - Label "V{n}" para identificação rápida
+- Posicionado logo abaixo do cabeçalho do Gantt (GanttTimeHeader)
+- Flex layout com gap e wrapping para se adaptar a qualquer número de veículos
+
+**Benefício:** Usuário consegue identificar facilmente qual cor é qual veículo
+
+**Status:** ✅ IMPLEMENTADO  
+**Build:** ✅ SEM ERROS  
+
+**Git commit:** `feat(ui-ux): planejador visual improvements — tooltips, gantt legends, expanded info`
+
+---
 
 ### ⏳ Implementações Pendentes
 
-2. **Tooltip no Gantt ao hover** — adicionar detalhes da viagem (Trip ID, Origem, Destino, Horário)
-3. **Legenda de cores dos veículos** — box mostrando V1 (cor), V2 (cor)
-4. **Reorganização de layout** — separar controles, cenários e Gantt em seções
-5. **Drag-drop de viagens** (HIGH PRIORITY) — permitir mover viagem entre veículos
+4. **Reorganização de layout** — separar controles, cenários e Gantt em seções (reduzir densidade)
+5. **Tooltip no "Plano sem excessos críticos"** — explicar o que significa "excessos críticos"
+6. **Drag-drop de viagens** (HIGH PRIORITY) — permitir mover viagem entre veículos (vs Optibus)
 
 ---
 
