@@ -1431,6 +1431,16 @@ const GanttRowItem = React.memo(({
         <Typography variant="caption" sx={{ display: 'block' }}>
           {minToHHMM(item.start_time)} → {minToHHMM(item.end_time)} ({minToDuration(item.end_time - item.start_time)})
         </Typography>
+        {!isApoio && item.origemName && (
+          <>
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+              📍 {item.origemName} → {item.destinoName}
+            </Typography>
+            <Typography variant="caption" sx={{ display: 'block' }}>
+              📏 {item.km} km
+            </Typography>
+          </>
+        )}
         {!isApoio && <Typography variant="caption" sx={{ display: 'block', mt: 0.5, opacity: 0.8 }}>Clique e arraste para reatribuir</Typography>}
       </Box>
     }>
@@ -2227,6 +2237,16 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
         <Box ref={ganttScrollRef} sx={{ width: '100%', overflowX: 'auto', bgcolor: 'background.paper' }}>
           <Box sx={{ width: totalWidth, minWidth: '100%' }}>
             <GanttTimeHeader scale={scale} theme={theme} />
+            {/* Vehicle Legend */}
+            <Box sx={{ p: 1.5, bgcolor: 'background.default', borderBottom: `1px solid ${theme.palette.divider}`, display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', mr: 1 }}>Veículos:</Typography>
+              {filteredBlocks.map((block) => (
+                <Box key={block.block_id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: '2px', bgcolor: block.items?.[0]?.color ?? theme.palette.info.main, border: `1px solid ${alpha(theme.palette.divider, 0.5)}` }} />
+                  <Typography variant="caption">V{block.block_id}</Typography>
+                </Box>
+              ))}
+            </Box>
             <Box sx={{ height: ganttHeight, width: '100%', position: 'relative' }}>
               {loading && (
                 <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, bgcolor: 'rgba(255,255,255,0.7)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
