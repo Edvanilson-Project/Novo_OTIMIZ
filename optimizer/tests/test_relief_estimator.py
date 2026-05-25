@@ -19,14 +19,22 @@ def make_trip(id_, start, end, origin_id=1, destination_id=2):
     return t
 
 
-def make_segment(block_id, trips):
-    seg = DutySegment(block_id=block_id, trips=trips)
-    return seg
+def make_block(block_id, trips):
+    """Cria um Block com source_block_id no meta — igual ao que o CSP produz."""
+    b = Block(id=block_id, trips=trips)
+    b.meta["source_block_id"] = block_id
+    return b
 
 
-def make_duty(id_, segments):
+# Alias legado para os testes que chamam make_segment
+make_segment = make_block
+
+
+def make_duty(id_, blocks):
+    """Cria Duty via add_task para popular tanto .tasks quanto .segments."""
     d = Duty(id=id_)
-    d.segments = segments
+    for block in blocks:
+        d.add_task(block)
     return d
 
 
