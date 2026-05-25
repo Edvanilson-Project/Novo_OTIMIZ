@@ -1337,16 +1337,20 @@ function EventSubRow({ event }: { event: PlanEvent }) {
   const theme = useTheme();
   const isDescanso = event.kind === 'descanso';
   const isShortWait = isDescanso && event.intervalKind === 'espera';
+  const isTrocaMotorista = event.kind === 'troca_motorista';
 
   return (
     <TableRow sx={{
-      bgcolor: isDescanso
+      bgcolor: isTrocaMotorista
+        ? alpha(theme.palette.secondary.main, 0.14)
+        : isDescanso
         ? alpha(isShortWait ? theme.palette.text.secondary : theme.palette.warning.main, 0.06)
         : event.kind === 'soltura'
         ? alpha(theme.palette.success.main, 0.05)
         : event.kind === 'recolhimento'
         ? alpha(theme.palette.error.main, 0.05)
         : 'inherit',
+      ...(isTrocaMotorista && { borderLeft: `3px solid ${theme.palette.secondary.main}` }),
     }}>
       <TableCell sx={{ py: 0.5, minWidth: 160 }}>
         <EventKindChip kind={event.kind} gap={event.gapMinutes} intervalKind={event.intervalKind} />
@@ -1864,6 +1868,28 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
     return map;
   }, [duties]);
 
+  // Handoff times per block_id extracted from driver_change segments — used by rendição markers on the Gantt
+  const blockHandoffTimes = useMemo(() => {
+    const map = new Map<number, number[]>();
+    duties.forEach((duty) => {
+      (duty.duty_time_segments ?? []).forEach((seg) => {
+        const type = String(seg.type ?? (seg as Record<string, unknown>).event_type ?? '');
+        if (type !== 'driver_change') return;
+        const t = Number((seg as Record<string, unknown>).start ?? 0);
+        const blockId = Number(
+          (seg as Record<string, unknown>).from_vehicle_id ??
+          (seg as Record<string, unknown>).block_id ??
+          (seg as Record<string, unknown>).vehicle_id ?? 0,
+        );
+        if (!blockId || !t) return;
+        const arr = map.get(blockId) ?? [];
+        arr.push(t);
+        map.set(blockId, arr);
+      });
+    });
+    return map;
+  }, [duties]);
+
   const dutyGroups = useMemo((): PlanGroup[] => {
     return duties.map((duty) => {
       const dutyId = duty.duty_id ?? duty.id;
@@ -2169,11 +2195,25 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
             {(block.items || []).map((item, i) => (
               <GanttRowItem key={`${item.tripId}-${i}`} item={item} scale={scale} onDragStart={handleDragStart} colors={colors} />
             ))}
+            {(blockHandoffTimes.get(block.block_id) ?? []).map((t, hi) => (
+              <Tooltip key={`handoff-${hi}`} title={`Rendição motorista — ${minToHHMM(t)}`} arrow>
+                <Box sx={{
+                  position: 'absolute',
+                  left: t * scale * BASE_PIXELS_PER_MINUTE - 1,
+                  top: 0, bottom: 0, width: 3,
+                  bgcolor: 'secondary.main',
+                  opacity: 0.8,
+                  zIndex: 4,
+                  cursor: 'pointer',
+                  '&:hover': { opacity: 1, width: 4 },
+                }} />
+              </Tooltip>
+            ))}
           </Box>
         </Box>
       );
     },
-    [filteredBlocks, scale, theme, colors, handleDragStart, handleDragOver, handleDragEnter, handleDragLeave, handleWhatIfDrop, hoverBlockId]
+    [filteredBlocks, scale, theme, colors, handleDragStart, handleDragOver, handleDragEnter, handleDragLeave, handleWhatIfDrop, hoverBlockId, blockHandoffTimes]
   );
 
   // ─── Common toolbar controls ───
@@ -2182,6 +2222,25 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
       <Typography variant="h6" sx={{ fontWeight: 700 }}>Planejador Interativo</Typography>
       <Divider orientation="vertical" flexItem />
       <OperationalConflictIndicator res={resWithLocalBlocks} />
+      {(() => {
+        const algo = (res as Record<string, unknown>)?.algorithm as string | undefined;
+        if (!algo?.includes('regional')) return null;
+        const meta = ((res?.meta ?? res?.metadata) ?? {}) as Record<string, unknown>;
+        const groupCount = meta.regional_groups_count as number | undefined;
+        const label = groupCount != null ? `Regional · ${groupCount} grupos` : 'Regional';
+        return (
+          <Tooltip title="Decomposição regional paralela — instância particionada em subgrupos e resolvida em paralelo" arrow>
+            <Chip
+              size="small"
+              icon={<IconRoute size={13} />}
+              label={label}
+              color="secondary"
+              variant="outlined"
+              sx={{ fontWeight: 700, fontSize: '0.68rem' }}
+            />
+          </Tooltip>
+        );
+      })()}
       <Box sx={{ flexGrow: 1 }} />
 
       {activeTab === 0 && (
