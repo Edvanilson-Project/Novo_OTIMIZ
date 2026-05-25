@@ -25,7 +25,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d otimiz_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -155,7 +155,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d otimiz_e2e"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -220,8 +220,11 @@ jobs:
           DB_NAME: otimiz_e2e
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/otimiz_e2e
           JWT_SECRET: ci-e2e-jwt-secret-change-in-production-min32
+          JWT_EXPIRES_IN: 1d
           INTERNAL_OPTIMIZER_KEY: ci-test-strong-key-32chars-minimum
           OPTIMIZER_URL: http://localhost:8000
+          REDIS_URL: redis://localhost:6379/0
+          FRONTEND_URL: http://localhost:3000
           THROTTLE_LOGIN_LIMIT: '1000'
 
       # ── Optimizer ─────────────────────────────────────────────────────────────
@@ -350,7 +353,7 @@ jobs:
 
           echo ""
           echo "=== Postgres Status ==="
-          psql -h localhost -U postgres -d postgres -c "SELECT version();" 2>&1 || echo "Postgres unreachable"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d otimiz_e2e -c "SELECT version();" 2>&1 || echo "Postgres unreachable"
 
           echo ""
           echo "=== Redis Status ==="

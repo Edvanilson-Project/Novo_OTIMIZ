@@ -13,15 +13,8 @@ setup('authenticate once for E2E suite', async ({ page }) => {
   await page.goto(`${BASE}/auth/login`);
   await page.getByRole('textbox', { name: /e-mail/i }).fill(USER);
   await page.getByRole('textbox', { name: /senha/i }).fill(PASS);
-  await Promise.all([
-    page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/v1/auth/login') && response.status() === 200,
-      { timeout: 15_000 },
-    ),
-    page.getByRole('button', { name: /^Entrar$/i }).click(),
-  ]);
-  await page.goto(`${BASE}/dashboard`, { waitUntil: 'networkidle' });
+  await page.getByRole('button', { name: /^Entrar$/i }).click();
+  await page.waitForURL(/\/dashboard(?:\/|$)/, { timeout: 30_000 });
   await expect(page.locator('body')).not.toContainText('Credenciais inválidas');
 
   await page.context().storageState({ path: authFile });
