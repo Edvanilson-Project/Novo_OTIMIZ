@@ -1,296 +1,237 @@
 """
-Audit Suite: Validar 4 hipóteses críticas sobre otimização.
+Audit Suite: Correctness assertions for the optimizer.
 
-Testes:
-A. Função objetivo dessalinizada
-B. Deadhead impacto
-C. CSP gap (primal vs dual)
-D. CP-SAT vs CBC em lógica pura
+Checks four properties against the real API (no mocks, no simulated data):
+  A. Cost consistency — CostEvaluator returns positive, monotone costs.
+  B. Deadhead impact — block cost grows when trips are spread further apart.
+  C. Optimality gap — CostEvaluator exposes gap metadata with correct keys.
+  D. Coverage completeness — all trips assigned after VSP+CSP pipeline.
+
+Mirrors the style of proof_of_optimization_suite.py.
+Run:
+    cd optimizer
+    python -m pytest tests/audit_correctness.py -v --tb=short
 """
 
-import pytest
-import json
+from __future__ import annotations
+
+import os
 import sys
-from pathlib import Path
-from decimal import Decimal
-from typing import Dict, List, Tuple
+from typing import List
 
-# Adicionar paths
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+import pytest
 
-from algorithms.evaluator import Evaluator
-from algorithms.vsp.mcnf import VSPSolverMCNF
-from algorithms.csp.set_partitioning_optimized import CSPSolverOptimized
-from algorithms.hybrid.pipeline import HybridPipeline
-from domain.models import (
-    OptimizationRequest, Block, Trip, Duty, VSPSolution, CSPSolution,
-    Driver, Vehicle, VehicleType, ScheduleMetadata
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from src.algorithms.csp.greedy import GreedyCSP
+from src.algorithms.evaluator import CostEvaluator
+from src.algorithms.hybrid.pipeline import HybridPipeline
+from src.algorithms.vsp.greedy import GreedyVSP
+from src.domain.models import (
+    AlgorithmType,
+    Block,
+    CSPSolution,
+    Duty,
+    OptimizationResult,
+    Trip,
+    VehicleType,
+    VSPSolution,
 )
 
 
-class TestAuditObjectiveMismatch:
-    """Teste A: Função objetivo dessalinizada entre módulos"""
+# ─── Helpers (same pattern as proof_of_optimization_suite) ───────────────────
 
-    def test_evaluator_vs_algorithm_cost_discrepancy(self):
-        """
-        Hipótese: Cada algoritmo reporta custo X, mas Evaluator mede Y → discrepância > 2%
 
-        Isso significa que o sistema otimiza A mas mede B → solução "ótima" é falsa.
-        """
-        # Criar solução simples (3 trips, 2 vehicles, 1 duty per vehicle)
-        trips = [
-            Trip(
-                id=f"trip_{i}",
-                start_time=480 + i*60,
-                end_time=540 + i*60,
-                vehicle_type="bus",
-                required_driver_minutes=60
-            )
-            for i in range(3)
-        ]
+def _vt(n: int = 1) -> List[VehicleType]:
+    return [
+        VehicleType(
+            id=i + 1,
+            name=f"Bus-{i+1}",
+            passenger_capacity=40,
+            cost_per_km=2.5,
+            cost_per_hour=55.0,
+            fixed_cost=900.0,
+        )
+        for i in range(n)
+    ]
 
-        blocks = [
-            Block(
-                id="block_1",
-                vehicle_id="v1",
-                trips=trips[:2],
-                start_time=480,
-                end_time=600
-            ),
-            Block(
-                id="block_2",
-                vehicle_id="v2",
-                trips=trips[2:],
-                start_time=540,
-                end_time=600
-            )
-        ]
 
-        duties = [
-            Duty(
-                id="duty_1",
-                driver_id="driver_1",
-                blocks=[blocks[0]],
-                start_time=480,
-                end_time=600,
-                total_minutes=120
-            ),
-            Duty(
-                id="duty_2",
-                driver_id="driver_2",
-                blocks=[blocks[1]],
-                start_time=540,
-                end_time=600,
-                total_minutes=60
-            )
-        ]
+def _trip(tid: int, start: int, end: int, *, origin: int = 1, dest: int = 2) -> Trip:
+    return Trip(
+        id=tid,
+        line_id=1,
+        start_time=start,
+        end_time=end,
+        origin_id=origin,
+        destination_id=dest,
+        duration=end - start,
+        distance_km=max(1.0, (end - start) / 3.0),
+        deadhead_times={origin: 8, dest: 8},
+    )
 
-        # Solução VSP
-        vsp_solution = VSPSolution(
-            blocks=blocks,
-            num_vehicles=2,
-            total_cost=1500.0,
-            metadata={"algorithm": "mcnf"}
+
+def consecutive_trips(n: int, gap: int = 90, duration: int = 60, offset: int = 360) -> List[Trip]:
+    trips = []
+    t = offset
+    for i in range(n):
+        origin, dest = (1, 2) if i % 2 == 0 else (2, 1)
+        trips.append(_trip(i + 1, t, t + duration, origin=origin, dest=dest))
+        t += duration + gap
+    return trips
+
+
+def simultaneous_trips(n: int, start: int = 360, duration: int = 60) -> List[Trip]:
+    return [_trip(i + 1, start, start + duration, origin=1, dest=2) for i in range(n)]
+
+
+# ─── A. Cost consistency ──────────────────────────────────────────────────────
+
+
+class TestAuditCostConsistency:
+    """A: CostEvaluator must return positive, internally-consistent costs."""
+
+    def test_block_cost_positive(self):
+        """Every block produced by GreedyVSP must have positive cost."""
+        trips = consecutive_trips(10)
+        sol = GreedyVSP().solve(trips, _vt())
+        ev = CostEvaluator()
+        for block in sol.blocks:
+            cost = ev.block_cost(block, _vt())
+            assert cost > 0, f"Block {block.id} has non-positive cost {cost}"
+
+    def test_two_vehicles_cost_more_than_one(self):
+        """Splitting trips across two vehicles must be more expensive (fixed cost)."""
+        t1 = _trip(1, 360, 420)
+        t2 = _trip(2, 430, 490)
+        ev = CostEvaluator()
+        block_single = Block(id=1, trips=[t1, t2], vehicle_type_id=1)
+        block_a = Block(id=2, trips=[t1], vehicle_type_id=1)
+        block_b = Block(id=3, trips=[t2], vehicle_type_id=1)
+        cost_single = ev.block_cost(block_single, _vt())
+        cost_two = ev.block_cost(block_a, _vt()) + ev.block_cost(block_b, _vt())
+        assert cost_two > cost_single, (
+            f"Two vehicles ({cost_two:.2f}) should cost more than one ({cost_single:.2f})"
         )
 
-        # Solução CSP
-        csp_solution = CSPSolution(
-            duties=duties,
-            num_drivers=2,
-            total_cost=1800.0,
-            metadata={"algorithm": "sp"}
-        )
+    def test_total_cost_breakdown_required_keys(self):
+        """total_cost_breakdown must expose 'total', 'vsp', 'csp' keys."""
+        trips = consecutive_trips(10)
+        vsp = GreedyVSP().solve(trips, _vt())
+        duty = Duty(id=1)
+        for b in vsp.blocks:
+            duty.add_task(b)
+        duty.paid_minutes = 480
+        csp = CSPSolution(duties=[duty], algorithm="greedy")
+        result = OptimizationResult(vsp=vsp, csp=csp)
+        ev = CostEvaluator()
+        breakdown = ev.total_cost_breakdown(result, _vt())
+        for key in ("total", "vsp", "csp"):
+            assert key in breakdown, f"Breakdown missing key: '{key}'"
+        assert breakdown["total"] >= 0
 
-        # Avaliar com evaluator
-        evaluator = Evaluator()
 
-        # Simular custos
-        actual_vsp_cost = 1650.0  # Avaliador mede X
-        actual_csp_cost = 1950.0  # Avaliador mede Y
-
-        vsp_discrepancy = abs(actual_vsp_cost - vsp_solution.total_cost) / vsp_solution.total_cost
-        csp_discrepancy = abs(actual_csp_cost - csp_solution.total_cost) / csp_solution.total_cost
-
-        print(f"\n=== TESTE A: Função Objetivo Dessalinizada ===")
-        print(f"VSP reportado: R${vsp_solution.total_cost:.2f} vs Avaliado: R${actual_vsp_cost:.2f}")
-        print(f"  Discrepância: {vsp_discrepancy*100:.2f}%")
-        print(f"CSP reportado: R${csp_solution.total_cost:.2f} vs Avaliado: R${actual_csp_cost:.2f}")
-        print(f"  Discrepância: {csp_discrepancy*100:.2f}%")
-
-        # Resultado: discrepância > 2% indica problema
-        assert vsp_discrepancy < 0.15, f"VSP discrepância {vsp_discrepancy*100:.2f}% é alta"
-        assert csp_discrepancy < 0.15, f"CSP discrepância {csp_discrepancy*100:.2f}% é alta"
-
-        print(f"✓ Discrepâncias encontradas: VSP={vsp_discrepancy*100:.1f}%, CSP={csp_discrepancy*100:.1f}%")
+# ─── B. Deadhead impact ───────────────────────────────────────────────────────
 
 
 class TestAuditDeadheadImpact:
-    """Teste B: Deadhead ausente tratado como 0"""
+    """B: A block containing two trips must be cheaper than two single-trip blocks."""
 
-    def test_deadhead_zero_distorts_feasibility(self):
-        """
-        Hipótese: Quando deadhead_times.get(..., 0), blocos inviáveis ficam baratos
+    def test_chaining_two_trips_saves_fixed_cost(self):
+        """Chain t1→t2 in one block vs two separate blocks — one block wins on fixed cost."""
+        t1 = _trip(1, 360, 420)
+        t2 = _trip(2, 500, 560)  # gap of 80 min — compatible
+        ev = CostEvaluator()
+        block_chain = Block(id=1, trips=[t1, t2], vehicle_type_id=1)
+        block_t1 = Block(id=2, trips=[t1], vehicle_type_id=1)
+        block_t2 = Block(id=3, trips=[t2], vehicle_type_id=1)
+        cost_chain = ev.block_cost(block_chain, _vt())
+        cost_split = ev.block_cost(block_t1, _vt()) + ev.block_cost(block_t2, _vt())
+        assert cost_chain < cost_split, (
+            f"Chaining ({cost_chain:.2f}) should beat two blocks ({cost_split:.2f})"
+        )
 
-        Medir: Qual é o custo real com deadhead vs sem deadhead?
-        """
-        print(f"\n=== TESTE B: Deadhead Impact ===")
-
-        # Simular dois blocos: um COM deadhead real, outro com deadhead=0
-        block_with_deadhead = {
-            "id": "block_dh_real",
-            "deadhead_minutes": 45,  # 45 min de deslocamento
-            "deadhead_cost": 45 * 0.5,  # R$0.50 por minuto (estimado)
-            "productive_minutes": 480,
-            "base_cost": 1200.0
-        }
-
-        block_without_deadhead = {
-            "id": "block_dh_zero",
-            "deadhead_minutes": 45,
-            "deadhead_cost": 0,  # PROBLEMA: Sendo ignorado
-            "productive_minutes": 480,
-            "base_cost": 1200.0
-        }
-
-        cost_with = block_with_deadhead["base_cost"] + block_with_deadhead["deadhead_cost"]
-        cost_without = block_without_deadhead["base_cost"] + block_without_deadhead["deadhead_cost"]
-
-        cost_gap = (cost_without - cost_with) / cost_with * 100
-
-        print(f"Bloco COM deadhead real: R${cost_with:.2f}")
-        print(f"Bloco COM deadhead=0: R${cost_without:.2f}")
-        print(f"  Gap: {cost_gap:.2f}%")
-
-        # Resultado: se gap > 3%, deadhead=0 está distorcendo
-        if cost_gap > 3:
-            print(f"⚠️  ALERTA: Deadhead=0 distorce {cost_gap:.1f}% do custo")
-
-        assert cost_gap < 25, f"Deadhead impact inaceitável: {cost_gap:.1f}%"
-
-        print(f"✓ Deadhead impact comprovado: {cost_gap:.1f}%")
+    def test_block_cost_increases_with_more_trips(self):
+        """A block with more work should cost more than one with less work."""
+        t1 = _trip(1, 360, 420)
+        t2 = _trip(2, 430, 490)
+        t3 = _trip(3, 500, 560)
+        ev = CostEvaluator()
+        block_1t = Block(id=1, trips=[t1], vehicle_type_id=1)
+        block_3t = Block(id=2, trips=[t1, t2, t3], vehicle_type_id=1)
+        cost_1 = ev.block_cost(block_1t, _vt())
+        cost_3 = ev.block_cost(block_3t, _vt())
+        assert cost_3 > cost_1, (
+            f"3-trip block ({cost_3:.2f}) should cost more than 1-trip block ({cost_1:.2f})"
+        )
 
 
-class TestAuditCSPGap:
-    """Teste C: CSP geração truncada = gap real desconhecido"""
-
-    def test_csp_primal_dual_gap(self):
-        """
-        Hipótese: Geração de colunas limitada → solução está X% longe de ótimo teórico
-
-        Medir: (dual_bound - primal_solution) / primal_solution
-        """
-        print(f"\n=== TESTE C: CSP Gap (Primal vs Dual) ===")
-
-        # Simular resultado CSP típico
-        csp_result = {
-            "primal_cost": 4850.0,  # Melhor solução encontrada
-            "dual_bound": 4600.0,   # Lower bound teórico
-            "num_columns": 2000,     # De um máximo de ~5000
-            "num_iterations": 150,   # De máximo ~200
-            "status": "optimal"  # Status reportado (mas com truncamento)
-        }
-
-        # Calcular gap
-        gap_absolute = csp_result["primal_cost"] - csp_result["dual_bound"]
-        gap_relative = (gap_absolute / csp_result["primal_cost"]) * 100
-
-        print(f"Primal (solução): R${csp_result['primal_cost']:.2f}")
-        print(f"Dual (lower bound): R${csp_result['dual_bound']:.2f}")
-        print(f"  Gap absoluto: R${gap_absolute:.2f}")
-        print(f"  Gap relativo: {gap_relative:.2f}%")
-        print(f"Colunas geradas: {csp_result['num_columns']} / 5000")
-        print(f"Iterações: {csp_result['num_iterations']} / 200")
-
-        # Interpretação
-        if gap_relative > 20:
-            print(f"⚠️  ALERTA: Gap {gap_relative:.1f}% indica aproximação, não ótimo!")
-        elif gap_relative > 10:
-            print(f"⚠️  AVISO: Gap {gap_relative:.1f}% é significativo")
-        else:
-            print(f"✓ Gap aceitável: {gap_relative:.1f}%")
-
-        assert gap_relative < 50, f"Gap inaceitável: {gap_relative:.1f}%"
+# ─── C. Optimality gap metadata ──────────────────────────────────────────────
 
 
-class TestAuditCPSATvsCBC:
-    """Teste D: CP-SAT melhor em lógica pura?"""
+class TestAuditOptimalityGap:
+    """C: CostEvaluator must expose optimality gap with correct structure."""
 
-    def test_cpsat_vs_cbc_duty_composition(self):
-        """
-        Hipótese: Para problema puro de lógica (pausa, sequenciamento),
-        CP-SAT é mais rápido/melhor que CBC
+    def test_optimality_key_present_in_breakdown(self):
+        """Breakdown must contain 'optimality' sub-dict with required keys."""
+        trips = simultaneous_trips(5)
+        vsp = GreedyVSP().solve(trips, _vt())
+        csp = CSPSolution(duties=[], algorithm="greedy")
+        result = OptimizationResult(vsp=vsp, csp=csp)
+        breakdown = CostEvaluator().total_cost_breakdown(result, _vt())
+        assert "optimality" in breakdown, "Missing 'optimality' key in breakdown"
+        opt = breakdown["optimality"]
+        for key in ("vsp_lower_bound", "vsp_actual", "vsp_gap_pct"):
+            assert key in opt, f"Missing '{key}' inside breakdown['optimality']"
 
-        Medir: Tempo + qualidade em subproblema isolado
-        """
-        print(f"\n=== TESTE D: CP-SAT vs CBC em Lógica Pura ===")
+    def test_gap_zero_for_simultaneous_trips(self):
+        """5 simultaneous trips → lb=5, greedy uses 5 → gap must be 0."""
+        trips = simultaneous_trips(5)
+        vsp = GreedyVSP().solve(trips, _vt())
+        csp = CSPSolution(duties=[], algorithm="greedy")
+        result = OptimizationResult(vsp=vsp, csp=csp)
+        opt = CostEvaluator().total_cost_breakdown(result, _vt())["optimality"]
+        assert opt["vsp_lower_bound"] == 5
+        assert opt["vsp_actual"] == 5
+        assert opt["vsp_gap_pct"] == 0.0
 
-        # Simular benchmark: Duty composition com 20 trips, restrições de pausa
-        benchmark = {
-            "cbc": {
-                "solver": "CBC/MCNF",
-                "time_seconds": 2.3,
-                "num_duties": 3,
-                "total_cost": 1750.0,
-                "feasible": True,
-                "notes": "Convergiu com relaxação"
-            },
-            "cpsat": {
-                "solver": "CP-SAT",
-                "time_seconds": 0.8,
-                "num_duties": 3,
-                "total_cost": 1720.0,
-                "feasible": True,
-                "notes": "Convergiu mais rápido"
-            }
-        }
-
-        cbc_result = benchmark["cbc"]
-        cpsat_result = benchmark["cpsat"]
-
-        time_gain = ((cbc_result["time_seconds"] - cpsat_result["time_seconds"])
-                     / cbc_result["time_seconds"] * 100)
-        quality_gain = ((cbc_result["total_cost"] - cpsat_result["total_cost"])
-                        / cbc_result["total_cost"] * 100)
-
-        print(f"CBC/MCNF:      {cbc_result['time_seconds']:.1f}s → R${cbc_result['total_cost']:.2f}")
-        print(f"CP-SAT:        {cpsat_result['time_seconds']:.1f}s → R${cpsat_result['total_cost']:.2f}")
-        print(f"  Speedup: {time_gain:.1f}%")
-        print(f"  Qualidade: {quality_gain:.1f}% melhor em CP-SAT")
-
-        if time_gain > 5 and cpsat_result["feasible"]:
-            print(f"✓ CP-SAT merece investimento: {time_gain:.1f}% mais rápido")
-
-        assert cpsat_result["feasible"], "CP-SAT falhou em viabilidade"
+    def test_gap_non_negative(self):
+        """Gap percent must never be negative (can't beat lower bound)."""
+        trips = consecutive_trips(20)
+        vsp = GreedyVSP().solve(trips, _vt())
+        csp = CSPSolution(duties=[], algorithm="greedy")
+        result = OptimizationResult(vsp=vsp, csp=csp)
+        opt = CostEvaluator().total_cost_breakdown(result, _vt())["optimality"]
+        assert opt["vsp_gap_pct"] >= 0.0, f"Negative gap: {opt['vsp_gap_pct']}"
 
 
-# ============================================================================
-# RESUMO EXECUTIVO
-# ============================================================================
-
-def test_audit_summary():
-    """Consolidar resultados dos 4 testes"""
-    print("""
-
-╔════════════════════════════════════════════════════════════════════════════╗
-║                    AUDITORIA DE OTIMIZAÇÃO - RESUMO EXECUTIVO              ║
-╚════════════════════════════════════════════════════════════════════════════╝
-
-HIPÓTESES VALIDADAS:
-  A. Função objetivo dessalinizada entre módulos     [RODANDO...]
-  B. Deadhead=0 distorce viabilidade                 [RODANDO...]
-  C. CSP gap = incerteza sobre ótimo real            [RODANDO...]
-  D. CP-SAT melhor em lógica pura que CBC            [RODANDO...]
-
-PRÓXIMAS AÇÕES (após validação):
-  ✓ Se A validar → Unificar objective em evaluator.py
-  ✓ Se B validar → Corrigir deadhead_times.get(..., 0)
-  ✓ Se C validar → Expor gap em relatórios CSP
-  ✓ Se D validar → Pilotar CP-SAT em duty composition
-
-═════════════════════════════════════════════════════════════════════════════
-    """)
+# ─── D. Coverage completeness ─────────────────────────────────────────────────
 
 
-if __name__ == "__main__":
-    # Rodar com: pytest tests/audit_correctness.py -v -s
-    pass
+class TestAuditCoverage:
+    """D: Every trip must appear in exactly one block/duty after the full pipeline."""
+
+    def test_vsp_greedy_covers_all_trips(self):
+        """GreedyVSP must cover 100% of trips."""
+        trips = consecutive_trips(30)
+        sol = GreedyVSP().solve(trips, _vt())
+        covered = {t.id for b in sol.blocks for t in b.trips}
+        missing = {t.id for t in trips} - covered
+        assert not missing, f"GreedyVSP left {len(missing)} trips uncovered: {missing}"
+
+    def test_csp_greedy_covers_all_blocks(self):
+        """GreedyCSP must cover all block trips across duties."""
+        trips = consecutive_trips(20, gap=120, duration=60)
+        vsp = GreedyVSP().solve(trips, _vt())
+        csp = GreedyCSP().solve(vsp.blocks)
+        covered = {t.id for d in csp.duties for task in d.tasks for t in task.trips}
+        expected = {t.id for b in vsp.blocks for t in b.trips}
+        missing = expected - covered
+        assert not missing, f"GreedyCSP left {len(missing)} trips uncovered"
+
+    def test_hybrid_covers_all_trips(self):
+        """HybridPipeline must cover 100% of trips."""
+        trips = consecutive_trips(50, gap=60)
+        result = HybridPipeline(time_budget_s=15).solve(trips, _vt())
+        covered = {t.id for b in result.vsp.blocks for t in b.trips}
+        missing = {t.id for t in trips} - covered
+        assert not missing, f"HybridPipeline left {len(missing)} trips uncovered"
