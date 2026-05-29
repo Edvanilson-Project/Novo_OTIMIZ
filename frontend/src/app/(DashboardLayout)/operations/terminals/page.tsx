@@ -130,7 +130,7 @@ export default function TerminalsPage() {
       </Dialog>
 
       <Snackbar open={!!notify} autoHideDuration={4000} onClose={() => setNotify(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
-        <Alert severity={notify?.sev} onClose={() => setNotify(null)}>{notify?.msg}</Alert>
+        <Alert severity={notify?.sev} variant="filled" onClose={() => setNotify(null)}>{notify?.msg}</Alert>
       </Snackbar>
     </Box>
   );

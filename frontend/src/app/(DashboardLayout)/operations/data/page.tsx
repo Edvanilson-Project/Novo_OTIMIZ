@@ -528,7 +528,7 @@ export default function OperationsDataPage() {
         autoHideDuration={6000}
         onClose={() => setNotification((n) => ({ ...n, open: false }))}
       >
-        <Alert severity={notification.severity} sx={{ width: "100%" }}>
+        <Alert severity={notification.severity} variant="filled" sx={{ width: "100%" }}>
           {notification.message}
         </Alert>
       </Snackbar>

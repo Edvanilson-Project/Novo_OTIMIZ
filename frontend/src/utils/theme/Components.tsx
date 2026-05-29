@@ -82,7 +82,15 @@ const components = (theme: Theme): Record<string, unknown> => {
           width: "1px !important",
         },
         " .simplebar-scrollbar:before": {
-          background: `${theme.palette.grey[300]} !important`,
+          background: `${theme.palette.grey[400]} !important`,
+          opacity: 0.7,
+        },
+        " .simplebar-track.simplebar-vertical": {
+          width: "6px",
+        },
+        " .simplebar-track": {
+          background: `${theme.palette.action.hover}`,
+          borderRadius: "4px",
         },
         hr: {
           height: "1px",

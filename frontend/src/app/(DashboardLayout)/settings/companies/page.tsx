@@ -58,6 +58,7 @@ export default function CompaniesPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [notify, setNotify] = useState<{ msg: string; sev: 'success' | 'error' } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -101,8 +102,10 @@ export default function CompaniesPage() {
     }
   };
 
-  const handleDelete = async (id: number, name: string) => {
-    if (!confirm(`Excluir a empresa "${name}"? Esta ação não pode ser desfeita.`)) return;
+  const handleDeleteConfirmed = async () => {
+    if (!deleteTarget) return;
+    const { id } = deleteTarget;
+    setDeleteTarget(null);
     try {
       await companiesApi.delete(id);
       setNotify({ msg: 'Empresa excluída.', sev: 'success' });
@@ -133,7 +136,7 @@ export default function CompaniesPage() {
             <IconButton size="small" onClick={() => openEdit(p.row)}><IconEdit size={16} /></IconButton>
           </Tooltip>
           <Tooltip title="Excluir empresa">
-            <IconButton size="small" color="error" onClick={() => handleDelete(p.row.id, p.row.name)}><IconTrash size={16} /></IconButton>
+            <IconButton size="small" color="error" onClick={() => setDeleteTarget({ id: p.row.id, name: p.row.name })}><IconTrash size={16} /></IconButton>
           </Tooltip>
         </Stack>
       ),
@@ -230,6 +233,18 @@ export default function CompaniesPage() {
           <Button variant="contained" onClick={handleSave} disabled={saving}>
             {saving ? 'Salvando...' : editing ? 'Salvar Alterações' : 'Criar Empresa'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Confirmação de exclusão ── */}
+      <Dialog open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Excluir empresa?</DialogTitle>
+        <DialogContent>
+          Esta ação não pode ser desfeita. A empresa <strong>{deleteTarget?.name}</strong> será removida permanentemente.
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDeleteTarget(null)}>Cancelar</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteConfirmed}>Excluir</Button>
         </DialogActions>
       </Dialog>
 
