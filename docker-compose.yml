@@ -68,6 +68,8 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
       - CELERY_TASK_RESULT_EXPIRES=3600
       - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen3-coder:free}
       - ENVIRONMENT=production
       - PORT=8000
     ports:
@@ -75,7 +77,7 @@ services:
     networks:
       - otimiz-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -115,6 +117,10 @@ services:
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-15m}
       - OPTIMIZER_URL=http://optimizer:8000
       - INTERNAL_OPTIMIZER_KEY=${INTERNAL_OPTIMIZER_KEY:?INTERNAL_OPTIMIZER_KEY must be set}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen3-coder:free}
+      - OPENROUTER_FREE_MODEL_ATTEMPTS=${OPENROUTER_FREE_MODEL_ATTEMPTS:-4}
+      - AI_PROJECT_CONTEXT_ENABLED=${AI_PROJECT_CONTEXT_ENABLED:-true}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     ports:
       - "127.0.0.1:3001:3001"

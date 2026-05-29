@@ -8,16 +8,271 @@ Atualizado: 2026-05-24 (memoria de persistencia, historico e multiempresa)
 Atualizado: 2026-05-24 (mesa operacional OTTrans e ronda dos 17 especialistas)
 Atualizado: 2026-05-24 (validacao previa obrigatoria por area antes de mexer)
 Atualizado: 2026-05-24 (protocolo anti-teatro, evidencias e gate final de tela)
+Atualizado: 2026-05-24 (instrucoes equivalentes para Codex e GitHub Copilot)
+Atualizado: 2026-05-24 (execucao runtime do planejador via Codex)
+Atualizado: 2026-05-25 (AI Cost Copilot Pro com modelos free, snapshot de projeto e rota corrigida)
+Atualizado: 2026-05-25 (OpenRouter key validada e modelo gratuito ajustado)
+Atualizado: 2026-05-28 (Análise profunda do Optimizer e execução completa da suíte de testes verde)
+Atualizado: 2026-05-29 (Validação real ponta a ponta: 3 suítes verdes, prova de otimização, round-trip HTTP+Celery; fix P1 do build do backend)
+Atualizado: 2026-05-29 (Product polish: healthcheck optimizer, limpeza raiz 31→8 md, audit_correctness reescrito, polish UI, auditoria 6 módulos, fix dado Mapa)
+
+---
+
+## Sessão 2026-05-29 (parte 3) — Product polish + auditoria dos módulos restantes
+
+### 4 frentes executadas (2 por subagentes Sonnet, browser por mim)
+- **Limpeza + healthcheck (CONCLUÍDO)**: 23 relatórios de sessão movidos p/ `docs/archive`
+  (raiz 31→8 .md, só essencial de produto). Healthcheck do optimizer `wget`→`python`
+  (`docker-compose.yml:80`) — imagem python não tinha wget. Container recriado:
+  `otimiz-v2-optimizer` agora **healthy** (era unhealthy). Fecha OBS-OPT-HEALTH-01.
+- **audit_correctness.py (CONCLUÍDO)**: suíte apodrecida (API antiga Evaluator/Driver)
+  reescrita contra API atual (CostEvaluator/GreedyVSP/GreedyCSP/HybridPipeline) → **11 passed**.
+  Adicionada ao `pytest.ini` (coleta 678→**689**). Asserts: custo>0/monotônico, deadhead,
+  optimality gap, cobertura 100% em 3 algoritmos.
+- **Polish UI (CONCLUÍDO)**: OBS-EMP-01 `window.confirm`→MUI Dialog em companies/page.tsx;
+  OBS-SIDEBAR-01 scrollbar do simplebar estilizada (track+thumb) em theme/Components.tsx;
+  OBS-GLOBAL-01 `variant="filled"` em Snackbars de terminals/lines/data/map. `tsc` rc=0.
+- **Auditoria 6 módulos (CONCLUÍDO)** — browser (https://localhost via nginx, login real):
+  Escala Semanal, What-If, Analytics, Parâmetros CCT (101 campos), Frota → **renderizam
+  limpos com dados reais, sem marcadores de erro**.
+  - **Mapa Operacional — achado + fix**: código CORRETO (degrada com empty-state honesto e
+    só monta Leaflet com coords). Gap era de DADOS: 10 terminais com `latitude/longitude`
+    NULL. Populadas coords **reais e públicas de Salvador** dos 4 terminais genuínos
+    (Lapa, Pituba, Paripe, Alto de Coutos) no banco dev → mapa agora monta Leaflet com
+    4 marcadores ("4 de 10 terminais com coordenadas"). Tiles OSM cinza = servidor de
+    tiles inacessível no sandbox (ambiente, não bug). Terminais de teste seguem sem coord.
+
+### Validação executada de verdade (esta sessão)
+- Frontend vitest: **26 passed** (2 arquivos). `tsc --noEmit` rc=0.
+- Optimizer coleta: **689 testes** (integridade do pytest.ini OK após +audit_correctness).
+- Suítes de garantia: **37 passed** (audit_correctness 11 + proof_of_optimization 26),
+  exit 0. 1 warning = aviso de qualidade ESPERADO (greedy gap 40%>25% → usar SA/Tabu/Hybrid).
+- Backend Jest NÃO re-rodado: nenhum arquivo backend foi tocado nesta sessão (honesto).
+
+### Notas
+- Ação em dado dev (coords dos terminais) NÃO é versionada; em produção as coords vêm do
+  CRUD de terminais / import GTFS (`fixtures/sunt_salvador/stops.txt` tem coords reais).
+- Artefatos não-commit desta sessão: nenhum novo além dos já listados em sessões anteriores.
+
+## Sessão 2026-05-29 — Validação real de produção + fix de build
+
+### Ground truth de testes (executados de verdade nesta sessão)
+- Optimizer pytest (`tests/`): **630 passed, 10 skipped** (379s) — `venv/bin/python` (Py 3.14.5).
+- Backend Jest (suite completa): **545 passed, 59 suites** — RISK-AI-JEST-01 RESOLVIDO
+  (skew de versões sumiu após reinstalação com pnpm; jest-circus 30.4.2 consistente).
+- Frontend vitest: **26 passed** (2 arquivos).
+- Proof-of-optimization suite (`tests/proof_of_optimization_suite.py`, real, sem mock):
+  **26 passed** — lower bound VSP, cobertura total, sem overlaps, supera baseline naive,
+  gap aceitável, custo positivo/monotônico, SLAs de runtime.
+
+### Correção da otimização verificada em execução real
+- `OptimizerService().run()` in-process (mesmo code path do worker Celery) numa instância
+  Salvador sintética (160 viagens): mcnf=25v e branch_and_price=24v, **160/160 cobertas,
+  0 overlaps, custo positivo**, B&P < MCNF. Gap vs lower bound de concorrência (20) é
+  ESPERADO por restrições de deadhead (ver CLAUDE.md: 14 vs 10 na instância real 298).
+- Script: `optimizer/scratch/verify_correctness_298.py`.
+
+### Caminho de produção HTTP+Celery (limpa parte do RISK-AI-RUNTIME-02)
+- Optimizer FastAPI sobe limpo: `/health/` → status ok, redis ok, 18 algoritmos.
+- Worker Celery ativo (Redis nativo :6379). Round-trip real:
+  `POST /optimize/` → task enfileirada → worker → `GET /optimize/status/{id}` = **completed**,
+  `vehicles=3 crew=3 total_cost=2988.92` (12 viagens, 2 terminais).
+- Nota de ambiente: rodar nativo exige `REDIS_URL=redis://localhost:6379/0` (default do
+  config é hostname docker `redis:6379`). docker-compose cobre produção.
+
+### BUG-BUILD-01 (P1) — CORRIGIDO
+- `nest build` quebrado: 10 erros TS em `backend/src/modules/ai/ai.service.ts` (Dirent
+  `<string>` vs `<NonSharedBuffer>`), regressão do `@types/node@22.19.19` puxado pelo
+  reinstall pnpm. Anotação `Awaited<ReturnType<typeof fs.readdir>>` resolvia overload
+  errado.
+- Fix cirúrgico: `const entries = await fs.readdir(d,{withFileTypes:true}).catch(()=>null);
+  if(!entries) return;` (inferência correta), 2 ocorrências (linhas ~666 e ~714).
+- Validação: `nest build` rc=0; `jest src/modules/ai` 4/4; `tsc --noEmit` frontend rc=0.
+
+### Follow-ups executados (aprovados pelo usuário) — 2026-05-29
+- **CI proof suites**: `pytest.ini` agora coleta `proof_of_optimization_suite.py` (26) e
+  `qa_advanced_2026.py` (12) → 678 testes coletados (era 640). `audit_correctness.py`
+  ficou de fora: está rotado (API antiga — `Evaluator`/`OptimizationRequest`/`Driver`
+  não existem mais); precisa de reescrita, não de patch de import.
+- **sklearn**: `scikit-learn>=1.5.0` adicionado ao `requirements.txt` e instalado no venv
+  (1.8.0, wheel cp314). `_SKLEARN_AVAILABLE=True`, `test_demand_forecaster` 9/9.
+- **RISK-AI-AUDIT-01 — IMPLEMENTADO**: entidade `AiAnalysis` (`ai_analyses`), repo
+  `AiAnalysisRepository` (BaseRepository, filtro por tenant), migração
+  `1716800000000-CreateAiAnalyses`. `AiService.analyze()` persiste best-effort
+  (pula sem companyId, nunca falha a resposta) + `listHistory()`. `GET /ai/history`
+  guardado por `JwtAuthGuard`. app.module/ai.module atualizados.
+  Validação: `nest build` rc=0; `jest src/modules/ai` 9/9; suite backend completa
+  **550 passed** (era 545). Migração aplica no boot (migrationsRun:true) — pendente
+  rodar contra o banco real (bloqueado, ver abaixo).
+
+### BLOQUEIO — Validação de UI no navegador (RISK-AI-RUNTIME-02)
+- Backend não sobe nativo: `.env` aponta DB role `otimiz_admin`, que só existe no
+  Postgres do docker-compose. Postgres nativo (:5432) tem só `postgres` + bancos não
+  relacionados (`otmiz_new` etc.). Backend tentou conectar e falhou: `role
+  "otimiz_admin" não existe`.
+- Docker daemon **inativo** (`systemctl is-active docker` = inactive, socket ausente).
+  `docker`/`docker compose` (v5.1.4) instalados. Subir exige `sudo systemctl start
+  docker` (somente o usuário pode autorizar). NÃO provisionei role/DB nativo à mão
+  para não criar um banco divergente nem adivinhar segredo do `.env`.
+- Desbloqueio limpo: `sudo systemctl start docker` →
+  `docker compose up -d postgres redis optimizer backend frontend` → então validar UI.
+- Já provado nesta sessão sem o stack docker: optimizer FastAPI sobe limpo, round-trip
+  HTTP+Celery completa, e o backend **compila e inicia** (só falta o DB).
+
+### DESBLOQUEADO — Validação de UI no navegador (RISK-AI-RUNTIME-02 FECHADO) — 2026-05-29
+- Usuário iniciou docker (`sudo systemctl start docker`). Stack subido:
+  postgres, redis, optimizer, celery-worker x2, backend, frontend, nginx.
+- Login real (UI form) → Dashboard → Planner(Gantt) → AI Cost Copilot validados no
+  navegador (Puppeteer headless:false). Evidência por screenshots.
+- **Dashboard com dados reais**: 298 viagens, 14 motoristas/veículos necessários,
+  5 motoristas cadastrados. Última otimização: `mcnf_vsp`, 14 blocos, 298 cobertas,
+  R$52.572,47, **0 violações CCT**. → Confirma o ótimo documentado (298 trips → 14v).
+- **Planner**: 14 veículos, 298 viagens, 0 hard/0 soft issues, Gini 0.214.
+  OBS-GAP-01: KPI "Gap de Otimalidade 40%" compara com lower bound de concorrência (10);
+  14 é o ótimo real (deadhead). Métrica pode alarmar usuário — melhorar apresentação.
+- **AI Cost Copilot Pro**: drawer abre com 9 especialistas e dados reais; pergunta
+  enviada pela UI → backend `/ai/analyze` → OpenRouter (`nvidia/nemotron...`) →
+  **persistida em `ai_analyses`** (row id=2, companyId=16). Migração aplicada no boot
+  do backend rebuildado. RISK-AI-AUDIT-01 validado ponta a ponta no navegador.
+  OBS-AICHAT-01: a chamada de chat pela UI exibiu erro 500 (timeout do proxy Next do
+  harness host na chamada lenta do modelo free) ENQUANTO o backend concluiu e persistiu;
+  o frontend degradou de forma honesta (sem alucinar). Em prod (nginx) o /ai/analyze
+  direto retornou 200. Avaliar timeout do axios do chat vs modelos free lentos.
+
+### BUGS/Achados adicionais 2026-05-29 (Docker/deploy)
+- **BUG-LOCK-BE (P1, CORRIGIDO)**: `backend/package-lock.json` dessincronizado
+  (faltava `@nestjs/axios@4.0.1`, jest 30.3.0 vs 30.4.x) → `npm ci` do Dockerfile falhava.
+  Fix: `npm install --package-lock-only`. Imagem backend rebuildou e subiu OK.
+- **BUG-LOCK-FE (P1, ABERTO)**: `frontend/package-lock.json` também dessincronizado →
+  `npm ci` do Dockerfile do frontend falha. `npm install --package-lock-only` quebrou
+  com erro do próprio npm (`Cannot read properties of null (reading 'matches')`).
+  Recomendação: regenerar com npm compatível OU migrar Dockerfile do frontend p/ pnpm
+  (dev já usa pnpm). Não bloqueia dev local (host build OK).
+- **OBS-JWT-01**: backend novo (hardening em main.ts) recusa subir com JWT_SECRET fraco
+  do `.env` (`FATAL: JWT_SECRET ... ≥32 chars`). Correto. Dev precisa de JWT_SECRET forte
+  no `.env`. Workaround local: `docker-compose.override.yml` (NÃO commitar; contém segredo dev).
+- **OBS-PG-VOL-01**: volume do postgres docker estava com senha antiga ≠ `.env`
+  (`your_secure_password_here`). Corrigido via `ALTER USER otimiz_admin PASSWORD ...`
+  (não-destrutivo, preservou dados: 5 empresas, 5 usuários).
+
+## Sessão 2026-05-29 (parte 2) — Correção dos achados abertos + OpenRouter robusto
+
+### OpenRouter — seleção sempre no melhor modelo free disponível (pedido do usuário)
+- `AiService` reescrito: descobre modelos free, ranqueia por contexto+família+modalidade,
+  **cooldown por modelo** (429/cota → 30min; outras falhas 3min) → migra automaticamente
+  para o melhor modelo DISPONÍVEL e se recupera sozinho quando a cota renova. Cache 30min.
+- **Filtro de saída de texto**: só usa modelos que GERAM texto no chat (exclui geradores
+  de música/imagem como lyria); a lista completa (incl. multimodais de entrada) fica
+  exposta em `GET /ai/models` para mostrar as possibilidades (texto/imagem/áudio/vídeo).
+- `OPENROUTER_MODEL` vazio → sem pin, sempre o melhor ranqueado. Chave do usuário no
+  `docker-compose.override.yml` (backend+optimizer+worker). `OPENROUTER_FREE_MODEL_ATTEMPTS=6`.
+- Validado ao vivo: `/ai/models` retornou **27 modelos free** ranqueados (active=qwen3-coder),
+  multimodais aparecem (lyria text+image); `/ai/analyze` escolhe melhor modelo de texto
+  funcionando (owl-alpha) com failover e fallback honesto. Backend 552 testes, AI 11/11.
+
+### Achados corrigidos
+- **BUG-LOCK-FE — CORRIGIDO**: Dockerfile do frontend migrado para pnpm (corepack
+  pnpm@9.15.0, `pnpm install --frozen-lockfile`). Imagem rebuilda e sobe **healthy**.
+  `package-lock.json` npm ficou obsoleto e não regenera — pnpm é o caminho correto.
+- **OBS-GAP-01 — CORRIGIDO (apresentação)**: `DashboardKPIs.tsx` — quando o único LB é
+  Bodin&Golden (concorrência, frouxo), o KPI mostra `≤ X% (teórico)` em cor info (não
+  alarme vermelho) e o tooltip explica que reflete restrição operacional, não subotimalidade.
+- **OBS-AICHAT-01 — MITIGADO**: timeout explícito de 120s na chamada do chat (frontend) +
+  timeout por modelo no backend 45s→30s (limita o tempo total bem abaixo dos 300s do nginx).
+  O 500 visto no harness host era timeout do proxy de rewrite do Next (não é bug de prod;
+  nginx tem proxy_read_timeout 300s e o /ai/analyze direto retorna 200).
+- **OBS-JWT-01 — RESOLVIDO (dev)**: JWT_SECRET forte via `docker-compose.override.yml`.
+  Recomendação permanente: definir JWT_SECRET forte (≥32 chars) no `.env`.
+- **Build context**: adicionados `.dockerignore` em frontend e backend (build estava
+  enviando ~141MB incl. node_modules).
+- **Frontend Dockerfile** agora aceita `ARG NEXT_PUBLIC_API_URL` (default same-origin
+  `https://localhost/api/v1`) — evita CORS/mixed-content do bundle do cliente em prod.
+
+### Validação final no navegador (https://localhost via nginx) — TUDO OK
+- Login (form) → Dashboard (298 viagens, 14 veículos, 0 CCT) → Planner → AI Copilot.
+- **OBS-GAP-01 confirmado na tela**: KPI mostra "≤ 40.0% (teórico)" em azul/info (sem
+  alarme vermelho). Generalizado: lb_method ausente (formato legado) também é tratado
+  como bound frouxo de concorrência.
+- **AI Copilot chat funcionando no navegador** (sem 500): retornou análise real e honesta
+  (cobertura total, 0 CCT, Gini 0.214, custo/viagem) usando o melhor modelo free; análise
+  persistida em `ai_analyses` (8 linhas).
+- Frontend Docker rebuildado com `--build-arg NEXT_PUBLIC_API_URL=https://localhost/api/v1`
+  (same-origin, sem mixed-content).
+
+### Incidentes/achados desta etapa
+- **DISCO 100%**: rebuilds repetidos de imagem encheram o disco (87/89G) → postgres caiu
+  (`No space left on device`). Resolvido com `docker image prune -f` + `docker builder
+  prune -f` (recuperou 19,6GB → 77%). Dados do banco preservados (era só lock-file).
+  Lição: usar `.dockerignore` (adicionado) e limpar imagens antigas após rebuilds.
+- **OBS-OPT-HEALTH-01 (pré-existente)**: healthcheck do container optimizer usa `wget`
+  que não existe na imagem (`wget: not found`) → fica "unhealthy" embora o serviço esteja
+  OK (/health responde status ok, 3 workers, 18 algoritmos). Trocar por python/curl no
+  healthcheck do docker-compose.
+
+### Estado da stack (deixada rodando)
+- docker: postgres :5444, redis :6388, optimizer :8000, backend :3001, nginx :80/:443.
+- host frontend: :3000 (build latest). Login UI: admin@otimiz.com / Otimiz@123 (senha de
+  TESTE setada nesta sessão no banco dev; trocar/remover depois).
+- Artefatos locais NÃO-commit: `docker-compose.override.yml`, `nginx/certs/*.pem`,
+  `optimizer/scratch/verify_correctness_298.py`.
 
 ---
 
 ## Módulo atual
 
-**AUDITORIA PLANEJADOR (GANTT) — EM PROGRESSO** 🔄 (2026-05-24)
-- 🔄 Fase 1-4 concluídas: Carregamento, Algoritmos, Qualidade, Gantt
-- 🔄 8 bugs encontrados: 1 HIGH, 3 MEDIUM, 4 LOW
-- 🔄 Implementações pendentes: Tooltips, legenda, layout
-- 🔄 Drag-drop: A avaliar vs Optibus gap
+**AI COST COPILOT PRO — APROVADO COM OBSERVAÇÕES** ✅ (2026-05-25)
+- ✅ Backend `AiService` atualizado para descobrir modelos OpenRouter gratuitos,
+  ignorar modelos pagos por padrao e tentar failover entre free models antes do fallback.
+- ✅ Fallback local refeito para nao inventar benchmark, economia, km, horas ou regra
+  ausente; campos faltantes viram `nao verificado`.
+- ✅ Snapshot seguro do projeto adicionado para perguntas sobre arquitetura, APIs,
+  testes, frontend, backend, otimizador e sinais de mock/demo.
+- ✅ Frontend `AiCostDrawer` expandido para 9 especialistas: Operacoes, Otimizacao
+  VSP/CSP, CCT/CLT, Custos, Risco, Frota, Arquitetura, Dados/API e QA/Seguranca.
+- ✅ Dados mockados/estimativas no Copilot removidos: sem Ollama, sem "15%",
+  sem benchmark fixo e sem horas estimadas quando nao existem no payload.
+- ✅ BUG-AI-ROUTE-01 corrigido: `@Controller('api/ai')` mapeava
+  `/api/v1/api/ai/analyze`; agora `@Controller('ai')` expõe `/api/v1/ai/analyze`.
+- ✅ Runtime validado: login `admin@empresa.com`, curl autenticado em
+  `/api/v1/ai/analyze` retornou 200; rewrite do Next em
+  `http://127.0.0.1:3000/api/ai/analyze` retornou 200; GET do Planejador em
+  `http://127.0.0.1:3000/operations/planner` retornou 200.
+- ✅ Builds: `pnpm run build` backend e frontend verdes.
+- ✅ Smoke direto: fallback sem chave, failover de modelos gratuitos e snapshot de
+  projeto passaram via `ts-node`.
+- ✅ OpenRouter: chave local presente no `.env` e validada sem exposicao do segredo;
+  `/models` retornou HTTP 200 com 357 modelos.
+- ✅ `OPENROUTER_MODEL` ajustado de `qwen/qwen3-coder:free` para
+  `nvidia/nemotron-3-super-120b-a12b:free` apos evidencia de HTTP 429 no modelo
+  anterior e HTTP 200 no novo modelo.
+- ⚠️ RISK-AI-RUNTIME-02: backend local nao estava acessivel em `127.0.0.1:3001`
+  durante o reteste; Docker daemon indisponivel (`/var/run/docker.sock` ausente),
+  entao falta reiniciar backend e validar `/api/v1/ai/analyze` ponta a ponta.
+- ⚠️ RISK-AI-JEST-01: Jest backend falha antes de executar testes com
+  `this._moduleMocker.clearMocksOnScope is not a function`; confirmado tambem em
+  `app.controller.spec.ts`, portanto bloqueio global do runner, nao do spec novo.
+- ⚠️ RISK-AI-AUDIT-01: historico/auditoria persistente de analises AI ainda nao
+  implementado.
+- URLs ativas: frontend `http://localhost:3000`, backend `http://localhost:3001`.
+- 📄 Documentação: `AUDITORIA_AI_COST_COPILOT_PRO_2026_05_25.md`
+
+**AUDITORIA PLANEJADOR (GANTT) — SPRINT CONCLUÍDO** ✅ (2026-05-24)
+- ✅ feat(gantt) commit 7b0043f: Regional badge + rendição markers + troca_motorista highlight
+- ✅ feat(tests) commit cfce84a: relief estimator tests alinhados com Duty.add_task() API
+- ✅ feat(optimizer) commit c2cac5b: OR-Tools MCF solver (6-9x faster) + relief estimator fix
+- ✅ 631 passed, 9 skipped — suite completa verde
+- ✅ Validação browser: Gantt carrega, 2 veículos, 14 viagens, Viável, sem Regional badge (correto)
+- ✅ EventSubRows: Início Jornada / Soltura (verde) / Viagens IDA+VOLTA / Intervalo normal
+- ✅ No rendição markers (correto — MCNF VSP puro sem run-cutting)
+- ✅ TypeScript: zero erros em TabGantt.tsx (2525 linhas)
+- ✅ 29/29 participantes aprovaram: 7 técnicos + 5 OTTrans + 17 especialistas
+- ✅ Execução runtime Codex: frontend em `http://localhost:3005`, login E2E OK,
+  smoke do planner OK, selectors + aba Gantt OK
+- ✅ Evidência backend: `latest-schedule` retornou schedule `id=4`, `2 veículos`,
+  `10 viagens`, `totalCost=3628.40`, `hardIssues=0`, `softIssues=0`
+- ⚠️ BUG-PLANNER-CORS-01 encontrado: backend dev antigo não aceitava frontend em
+  portas locais como `3003`; fix aplicado em `backend/src/main.ts` e
+  `backend/src/modules/operations/optimization.gateway.ts`
 - 📄 Documentação: `AUDITORIA_PLANEJADOR_GANTT_2026_05_24.md`
 
 **AUDITORIA IMPORTAR VIAGENS CONCLUÍDA** ✅ (2026-05-24)
@@ -31,8 +286,9 @@ Atualizado: 2026-05-24 (protocolo anti-teatro, evidencias e gate final de tela)
 
 ## Ambiente ativo
 
-- Frontend: http://localhost:3000 (Next.js, pid 766758)
-- Backend: http://localhost:3001 (NestJS, pid 945902)
+- Frontend principal da validacao atual: http://localhost:3005
+- Frontend auxiliar observado: http://localhost:3003
+- Backend validado por API: http://localhost:3001
 - PostgreSQL: :5432 ✓
 - Redis: :6379 ✓
 
@@ -64,6 +320,9 @@ Atualizado: 2026-05-24 (protocolo anti-teatro, evidencias e gate final de tela)
 - Cada tela deve passar por gate final com dados testados, perfis, CRUD, persistencia,
   historico, multiempresa, bugs P0/P1, decisoes dos 5 usuarios, decisoes dos 17
   especialistas, testes executados e proxima tela permitida.
+- Codex deve seguir `AGENTS.md`; GitHub Copilot deve seguir
+  `.github/copilot-instructions.md`; ambos devem obedecer tambem
+  `CLAUDE_OPERATIONAL_MEMORY.md` e `CLAUDE_OPERATIONAL_STATUS.md`.
 
 ---
 
@@ -247,3 +506,5 @@ Atualizado: 2026-05-24 (protocolo anti-teatro, evidencias e gate final de tela)
   antes de qualquer correcao ou implementacao.
 - OBS-GATE-01: Toda fase pendente deve usar severidade P0/P1/P2/P3, dono tecnico,
   evidencia, reteste e gate final de tela antes de seguir.
+- OBS-PLANNER-01: pendente retestar o fix de CORS/WebSocket em runtime com backend
+  reiniciado na mesma porta usada pelo frontend alternativo (`3003` ou similar).
