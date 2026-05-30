@@ -34,7 +34,16 @@ export class TerminalsService {
 
   async create(dto: Record<string, unknown>): Promise<Terminal> {
     const companyId = this.tenantContext.getCompanyId();
-    const entity = this.repo.create({ ...dto, companyId });
+    const terminalId: string =
+      (dto['terminalId'] as string) ||
+      'TER-' +
+        String(dto['name'] || '')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, '')
+          .slice(0, 6) +
+        '-' +
+        Math.floor(Math.random() * 900 + 100);
+    const entity = this.repo.create({ ...(dto as Record<string, unknown>), companyId, terminalId });
     return this.repo.save(entity);
   }
 

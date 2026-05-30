@@ -1,9 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import axios from 'axios';
 import { TenantContext } from '../../common/context/tenant-context';
 import { AiAnalysisRepository } from '../database/repositories/ai-analysis.repository';
 import { AiAnalysis } from '../database/entities/ai-analysis.entity';
@@ -135,7 +134,6 @@ export class AiService {
   private modelCooldownUntil = new Map<string, number>();
 
   constructor(
-    private http: HttpService,
     private config: ConfigService,
     private readonly aiAnalysisRepository: AiAnalysisRepository,
     private readonly tenantContext: TenantContext,
@@ -279,24 +277,22 @@ export class AiService {
     let lastError = 'no free model attempted';
     for (const model of selectedModels) {
       try {
-        const response = await firstValueFrom(
-          this.http.post<any>(
-            this.OPENROUTER_API_URL,
-            {
-              model,
-              messages,
-              temperature: 0.25,
-              max_tokens: 1000,
+        const response = await axios.post<any>(
+          this.OPENROUTER_API_URL,
+          {
+            model,
+            messages,
+            temperature: 0.25,
+            max_tokens: 1000,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'HTTP-Referer': 'https://otimiz.app',
+              'X-Title': 'OTIMIZ AI Cost Copilot Pro',
             },
-            {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'HTTP-Referer': 'https://otimiz.app',
-                'X-Title': 'OTIMIZ AI Cost Copilot Pro',
-              },
-              timeout: 30000,
-            },
-          ),
+            timeout: 30000,
+          },
         );
 
         if (response.status && response.status >= 400) {
@@ -373,12 +369,10 @@ export class AiService {
 
   private async fetchFreeModels(apiKey: string): Promise<string[]> {
     try {
-      const response = await firstValueFrom(
-        this.http.get<any>(this.OPENROUTER_MODELS_URL, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          timeout: 10000,
-        }),
-      );
+      const response = await axios.get<any>(this.OPENROUTER_MODELS_URL, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 10000,
+      });
 
       const models = ((response.data as any)?.data ?? []) as OpenRouterModel[];
       const ranked = models
