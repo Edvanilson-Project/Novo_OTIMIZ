@@ -130,6 +130,28 @@ Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctnes
   (W=timetable_slack_minutes, default 10), cada minuto penalizado. Troca fidelidade do
   horário publicado por economia de frota — adequado quando o horário ainda não é fixo.
 
+### Sessão 2026-05-29 (parte 4e) — mcnf perdia otimalidade em escala — CORRIGIDO
+- **Causa-raiz (2 camadas)**:
+  1. `mcnf._CLUSTER_SIZE_LIMIT=800`: acima de 800 trips o mcnf clusterizava
+     temporalmente (subótimo). Na carta real 2696 trips: 736 blocos vs 184 em fluxo único.
+  2. **Auto-regional**: `algorithm_dispatcher` redirecionava mcnf→regional em ≥1000 trips
+     (mcnf não estava em `_large_scale_algorithms`). Por isso mcnf == regional no bench
+     (320=320 a 40 rotas, 780=780 a 100). Rodava em ProcessPool (por isso logs/patch não
+     apareciam).
+- **Fix (2 partes)**:
+  1. `mcnf.py`: `_CLUSTER_SIZE_LIMIT` 800→**3000**, configurável via
+     `vsp_params["mcnf_cluster_size_limit"]`. Fluxo único ótimo até 3000 trips (~24-31s).
+  2. `algorithm_dispatcher`: mcnf NÃO é mais redirecionado para regional quando cabe num
+     fluxo único (`len(trips) <= mcnf_cluster_size_limit`). Acima disso, continua indo para
+     regional (que faz stitch) — porque a clusterização própria do mcnf fragmenta MAIS
+     (6740 trips: mcnf-próprio 1380 vs regional 780).
+- **Resultado real (svc.run, carta real)**:
+  - 2832 trips: mcnf **320→192 blocos, R$1.047M→R$639k** (−40% frota, −39% custo), 29s.
+  - 2900 trips: 197 blocos / R$655k.
+  - 6740 trips: 780 (via regional, sem o regressão de 1380). Sem OOM (70s/34s).
+- OR-Tools 9.15 disponível (MCF rápido); gargalo é construção O(N²) do grafo, tratável
+  até ~3000. SLA budget (2000 trips→600s) folgado para o fluxo único de ~24-31s.
+
 ### Validação executada (de verdade)
 - `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
   **491 passed, 2 skipped, 1 warning** (warning = advisory esperado de greedy-gap).

@@ -145,7 +145,13 @@ from .greedy import build_preferred_pairs, pairing_stats
 _log = logging.getLogger(__name__)
 settings = get_settings()
 
-_CLUSTER_SIZE_LIMIT = 800
+# Limite de trips para resolver o MCNF como um único fluxo (ótimo). Acima disso,
+# particiona em clusters temporais/por linha (subótimo: veículos não são reusados
+# entre clusters). Medido na carta real Salvador: a 2696 trips, limite=800 fragmenta
+# em 736 blocos enquanto limite=3000 resolve em fluxo único = 184 blocos (24s). O MCF
+# OR-Tools é polinomial; o gargalo é a construção O(N²) do grafo, tratável até ~3000.
+# Configurável via vsp_params["mcnf_cluster_size_limit"].
+_CLUSTER_SIZE_LIMIT = 3000
 # 10% de overlap nas fronteiras de cluster. Tentativa de 20% foi revertida porque
 # criava blocos > 780min forçando duties acima do limite legal CCT (test_no_duty_exceeds_legal_max).
 _OVERLAP_RATIO = 0.10
@@ -168,6 +174,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
     def __init__(self, vsp_params: Optional[Dict[str, Any]] = None):
         super().__init__(name="mcnf_vsp", time_budget_s=120.0)
         self.vsp_params = vsp_params or {}
+        self._cluster_limit = int(self.vsp_params.get("mcnf_cluster_size_limit", _CLUSTER_SIZE_LIMIT) or _CLUSTER_SIZE_LIMIT)
 
     def _p(self, key: str, default: Any) -> Any:
         return self.vsp_params.get(key, default)
@@ -190,7 +197,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
 
         allow_multi = bool(self._p("allow_multi_line_block", True))
 
-        if len(trips) <= _CLUSTER_SIZE_LIMIT:
+        if len(trips) <= self._cluster_limit:
             solution = self._solve_subproblem(trips, vehicle_types, depots)
             return self._rescore_vsp_solution(solution, vehicle_types)
 
@@ -220,7 +227,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             _log.debug(f"Processando line_id={line_id} com {len(line_trips)} trips")
             line_trips_sorted = sorted(line_trips, key=lambda t: (t.start_time, t.id))
 
-            if len(line_trips_sorted) <= _CLUSTER_SIZE_LIMIT:
+            if len(line_trips_sorted) <= self._cluster_limit:
                 result = self._solve_subproblem(line_trips_sorted, vehicle_types, depots)
             else:
                 result = self._solve_with_temporal_clustering(line_trips_sorted, vehicle_types, depots)
@@ -326,7 +333,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         """
         chunks: List[List[Trip]] = []
         n = len(trips_sorted)
-        chunk_size = _CLUSTER_SIZE_LIMIT
+        chunk_size = self._cluster_limit
         overlap_size = int(chunk_size * _OVERLAP_RATIO)
 
         start = 0
@@ -395,11 +402,11 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         INF = 1e9
         N = len(trips)
 
-        if N > _CLUSTER_SIZE_LIMIT:
+        if N > self._cluster_limit:
             _log.warning(
                 "Subproblema MCNF com %d trips excede limite %d; redirecionando para chunking.",
                 N,
-                _CLUSTER_SIZE_LIMIT,
+                self._cluster_limit,
             )
             return self._solve_with_temporal_clustering(trips, vehicle_types, depots)
 

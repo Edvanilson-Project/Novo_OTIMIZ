@@ -462,7 +462,20 @@ def dispatch_algorithm(
         AlgorithmType.HYBRID_PIPELINE,
         AlgorithmType.JOINT_TIMETABLE,  # já limitado a 150 trips internamente
     ])
-    if len(trips) >= _auto_regional_threshold and algorithm not in _large_scale_algorithms:
+    # MCNF resolve até mcnf_cluster_size_limit como fluxo único ÓTIMO; redirecioná-lo
+    # para regional nessa faixa o fazia fragmentar (carta real 2832 trips: regional
+    # 320 blocos / R$1.05M vs mcnf fluxo único 192 / R$639k). Acima do limite, porém,
+    # a clusterização temporal do próprio mcnf fragmenta MAIS que o regional (que faz
+    # stitch de veículos entre janelas): 6740 trips → mcnf 1380 vs regional 780. Então
+    # só preservamos o mcnf quando ele cabe num fluxo único.
+    _mcnf_single_flow = algorithm == AlgorithmType.MCNF and len(trips) <= int(
+        vsp_params.get("mcnf_cluster_size_limit", 3000) or 3000
+    )
+    if (
+        len(trips) >= _auto_regional_threshold
+        and algorithm not in _large_scale_algorithms
+        and not _mcnf_single_flow
+    ):
         _sub = "mcnf" if len(trips) < 5000 else "tabu"
         logger.warning(
             "[AlgorithmDispatcher] AUTO_REGIONAL: %d trips >= threshold=%d — %s→regional (sub=%s) budget=%.0fs",
