@@ -710,6 +710,9 @@ def scenario_hard_ev_conflict_rejection() -> CheckResult:
     vsp = tuned_vsp({
         "same_depot_required": True,
         "max_simultaneous_chargers": 1,
+        # Rejeição FATAL exige modo strict; sem isto o conflito de carregador é tratado
+        # como soft (warning visível em vsp.warnings), que é o cenário ev_charger_capacity.
+        "strict_hard_validation": True,
     })
     t0 = time.perf_counter()
     try:
