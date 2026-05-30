@@ -16,8 +16,82 @@ Atualizado: 2026-05-28 (Análise profunda do Optimizer e execução completa da 
 Atualizado: 2026-05-29 (Validação real ponta a ponta: 3 suítes verdes, prova de otimização, round-trip HTTP+Celery; fix P1 do build do backend)
 Atualizado: 2026-05-29 (Product polish: healthcheck optimizer, limpeza raiz 31→8 md, audit_correctness reescrito, polish UI, auditoria 6 módulos, fix dado Mapa)
 Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctness regional + alinhamento de objetivo SA/Tabu)
+Atualizado: 2026-05-30 (parte 4 — re-validação E2E completa das 3 suítes + varredura no navegador das 14 telas + polish profissional do frontend para venda)
+Atualizado: 2026-05-30 (parte 5 — deploy: alinhamento Dockerfile frontend (npm→pnpm) + rebuild container saudável)
 
 ---
+
+## Sessão 2026-05-30 (parte 5) — Deploy: alinhamento frontend Dockerfile + validação final das suítes
+
+### Contexto
+O branch `fix/optimizer-regional-dedup-deadhead-proxy` carrega 9 commits de correções/melhorias no otimizador (regional dedup, deadhead-aware objective, scale robustness, mcnf otimalidade em escala). Dockerfile do frontend estava dessincronizado (npm em vez de pnpm) → `npm ci` falharia em rebuild. Solução: migrar Dockerfile para pnpm, ARG NEXT_PUBLIC_API_URL, rebuildar imagem, validar stack.
+
+### Execução (esta sessão)
+1. **Dockerfile frontend alinhado**: pnpm 9.15 via corepack, `--frozen-lockfile`, ARG NEXT_PUBLIC_API_URL (default same-origin), CMD `pnpm start`. Host build tsc + vitest **verde** (26/26 tests, rc=0).
+2. **Build da imagem**: `docker compose build frontend` → **sucesso**, novo hash da imagem inlined.
+3. **Container recriado**: `docker compose up -d frontend` → **healthy** (porta 3000 respondendo HTML válido).
+4. **Testes optimizer**: `pytest -m "not slow"` rodando — resultado em baixo.
+
+### Validação executada (nesta sessão)
+- Frontend: `tsc --noEmit` rc=0; `vitest run` → **26 passed** ✓
+- Optimizer: `pytest -m "not slow"` → **676 passed, 10 skipped, 4 deselected**, exit 0 (627s) ✓
+- Container frontend: rebuilt com pnpm/frozen-lockfile, healthy, HTTP 200 ✓
+- Backend: sem mudanças neste branch — não re-rodado (honesto)
+
+### Pendentes (próximas tasks)
+- Limpeza dados QA com backup (task #3)
+- E2E real + invariantes pela stack real (task #4)
+- Cross-módulo + caça bugs (task #5)
+
+---
+
+## Sessão 2026-05-30 (parte 4) — Re-validação E2E + polish profissional do frontend (venda)
+
+### Pedido do usuário
+Iniciar/validar o sistema ponta a ponta, garantir tudo conectado sem bug, e deixar o
+frontend mais profissional/vendável (revisar desde o login, sem parar).
+
+### Linha de base RE-VERIFICADA (rodada nesta sessão, sem confiar em logs antigos)
+- Optimizer: `pytest -m "not slow"` → **680 passed, 5 skipped**, exit 0 (560s).
+- Backend: `jest --ci` → **552 passed, 59 suítes**, exit 0.
+- Frontend: `vitest run` → **26 passed**; `tsc --noEmit` rc=0 (antes E depois dos edits).
+- Stack Docker viva: todos containers healthy; optimizer expõe 18 algoritmos, redis/celery ok,
+  3 workers; backend `/api/v1/health` e `/ready` = 200; nginx = 200.
+
+### Varredura E2E real no navegador (Next dev HTTPS :3005, login real admin@otimiz.com)
+- **14/14 telas CONECTADAS a dados reais, renderizam limpas, sem erro de console**:
+  Login, Dashboard (298 viagens/14 veíc/R$52.572,47/0 CCT), Importar Viagens (298), Linhas (2),
+  Terminais (10), Planejador (Gantt VSP+CSP, 0 hard/soft, Gini 0.214), Escala Semanal (5 motoristas,
+  CLT Art.67/44h/CCT 11h), What-If (chama motor Python real), Mapa (tiles OSM de Salvador + 4
+  terminais c/ coords), Analytics (lê optimization_runs reais, empty-state honesto), Relatórios
+  Customizados, Parâmetros CCT (valores reais), Frota, Empresas (5), Usuários (RBAC + último acesso).
+- Mapa: tiles OSM agora CARREGAM (antes cinza por sandbox) — Salvador real.
+
+### Setup de iteração dev (NÃO afeta produção)
+- Cookie JWT é `Secure` → o navegador descarta em HTTP. Subi Next dev em HTTPS (certs do nginx) na
+  :3005, com chamadas same-origin via rewrite (`NEXT_PUBLIC_API_URL=/api` + `BACKEND_PROXY_URL`).
+- Fix retrocompatível em `next.config.ts`: `BACKEND_PROXY_URL` desacopla o baseURL do alvo do rewrite
+  (ausente em produção → comportamento idêntico ao atual).
+
+### Melhorias aplicadas (cirúrgicas; tsc + vitest verdes após cada uma)
+1. `frontend/src/app/auth/login/page.tsx`:
+   - Correção factual: "7 algoritmos" → "18 algoritmos VSP/CSP (exatos e heurísticos)" (bate com /health).
+   - Texto "Conformidade total com CCT e legislação trabalhista".
+   - Linha de confiança "🔒 Conexão criptografada · Dados protegidos (LGPD)" + rodapé © + hover no botão.
+   - **Robustez (bug)**: a mensagem de erro era "Credenciais inválidas" para QUALQUER falha (até rede).
+     Agora distingue credencial (msg do backend) vs. rede (sem response) vs. outro HTTP.
+2. `frontend/src/app/components/shared/DashboardKPIs.tsx` (re-implementa OBS-GAP-01 que sumiu do código):
+   - "Gap de Otimalidade 40%" (vermelho/erro) → "≤ 40.0% (teórico)" em cor info quando o LB é o bound
+     de concorrência frouxo (`lb_method` = bodin_golden/none/ausente=legado) e não-certificado. Tooltip
+     explica que 14 veículos é o ótimo real (deadhead/depósito), não subotimalidade. Verificado na tela.
+   - Dado vivo do schedule #561 está em formato LEGADO de optimality (sem `lb_method`); por isso a
+     condição cobre `null` (legado) como bound frouxo de concorrência.
+
+### Pendente / decisão do usuário
+- **Deploy**: rebuild do container frontend para refletir em https://localhost (disco 86%, 12G livres —
+  pruning leve recomendado antes). O dev :3005 já mostra tudo ao vivo.
+- **Polish visual mais profundo** (redesign "wow") por tela: aguardando direção de escopo do usuário.
+- Pendência antiga ainda aberta: rotacionar chave OpenRouter + destravar push (decisão do usuário).
 
 ## Sessão 2026-05-29 (parte 4) — Bench real de TODOS os algoritmos + 2 correções
 

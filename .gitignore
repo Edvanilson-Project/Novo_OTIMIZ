@@ -78,3 +78,7 @@ skills-lock.json
 generate_token*.js
 gen_token*.py
 optimizer/data/gtfs/
+
+# Local dev overrides — contêm segredos, NÃO commitar
+docker-compose.override.yml
+nginx/certs/
