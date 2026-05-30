@@ -1,7 +1,12 @@
 import path from 'node:path';
 import type { NextConfig } from "next";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://localhost:3001';
+// BACKEND_PROXY_URL lets local dev proxy /api/* to the backend without coupling
+// the client baseURL to the rewrite target. Unset in production → behavior unchanged.
+const BACKEND_URL =
+  process.env.BACKEND_PROXY_URL ||
+  process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') ||
+  'http://localhost:3001';
 const SENTRY_DEV_STUB = path.join(process.cwd(), 'src/lib/sentry-dev-stub.ts');
 
 const nextConfig: NextConfig = {

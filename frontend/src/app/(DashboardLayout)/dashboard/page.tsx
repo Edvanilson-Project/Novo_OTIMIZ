@@ -30,7 +30,19 @@ function KPICard({ title, value, subtitle, icon, color = "primary", loading }: K
     error: "#c62828", info: "#0277bd",
   };
   return (
-    <Card variant="outlined" sx={{ height: "100%", borderTop: `3px solid ${colorMap[color]}`, overflow: "hidden" }}>
+    <Card
+      variant="outlined"
+      sx={{
+        height: "100%",
+        borderTop: `3px solid ${colorMap[color]}`,
+        overflow: "hidden",
+        transition: "transform .18s ease, box-shadow .18s ease, border-color .18s ease",
+        "&:hover": {
+          transform: "translateY(-3px)",
+          boxShadow: `0 14px 30px -14px ${colorMap[color]}80`,
+        },
+      }}
+    >
       <CardContent>
         <Stack direction="row" sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
           <Box>

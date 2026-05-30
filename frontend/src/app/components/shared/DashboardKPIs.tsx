@@ -145,6 +145,15 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
   const optimalityLb = optimality?.vsp_lower_bound ?? null;
   const optimalityUb = optimality?.vsp_actual ?? null;
   const optimalityCertified = optimality?.is_optimal_certified ?? false;
+  // Bodin & Golden é o lower bound de concorrência (trips simultâneas): sempre disponível,
+  // mas frouxo para VSP com deadhead/depot — o ótimo real (ex.: provado por MCNF) fica acima.
+  // Quando o gap é medido só contra ele, é teórico, não subotimalidade real.
+  const optimalityLooseBound =
+    !optimalityCertified &&
+    optimalityGapPct !== null &&
+    (optimalityLbMethod === 'bodin_golden' ||
+      optimalityLbMethod === 'none' ||
+      optimalityLbMethod == null); // formato legado (sem lb_method) = bound de concorrência
 
   // Rendições de motoristas (ReliefVehicleEstimator)
   const reliefEst =
@@ -380,6 +389,13 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                       Calculado usando o melhor lower bound disponível entre Bodin &amp; Golden,
                       Lagrangian e Bundle — quanto menor, mais próximo do ótimo provado.
                     </Typography>
+                    {optimalityLooseBound && (
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 'bold' }}>
+                        Bound teórico (concorrência): a frota mínima viável fica acima dele por
+                        restrições operacionais reais (deadhead, depósito, jornada). Não indica
+                        subotimalidade — é o limite inferior frouxo, não o ótimo alcançável.
+                      </Typography>
+                    )}
                     {optimalityCertified && (
                       <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 'bold' }}>
                         ✓ Ótimo certificado (gap = 0).
@@ -398,6 +414,8 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                     ? 'Desconhecida'
                     : optimalityCertified
                     ? '0% (Ótimo)'
+                    : optimalityLooseBound
+                    ? `≤ ${Number(optimalityGapPct).toFixed(1)}% (teórico)`
                     : `${Number(optimalityGapPct).toFixed(1)}%`
                 }
                 changeKey={`opt-gap-${optimalityGapPct}-${scheduleVersion}`}
@@ -407,11 +425,13 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                     ? theme.palette.text.secondary
                     : optimalityCertified || Number(optimalityGapPct) < 5
                     ? theme.palette.success.main
+                    : optimalityLooseBound
+                    ? theme.palette.info.main
                     : Number(optimalityGapPct) < 15
                     ? theme.palette.warning.main
                     : theme.palette.error.main
                 }
-                isError={optimalityGapPct !== null && Number(optimalityGapPct) >= 15}
+                isError={optimalityGapPct !== null && !optimalityLooseBound && Number(optimalityGapPct) >= 15}
               />
             </Box>
           </Tooltip>

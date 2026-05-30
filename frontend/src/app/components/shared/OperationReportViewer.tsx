@@ -150,7 +150,30 @@ const OperationReportViewer: React.FC<OperationReportViewerProps> = ({ scheduleI
   }
 
   if (!report.metrics || !report.scenarioComparison?.current || !report.scenarioComparison?.optimized) {
-    return <Alert severity="warning">Relatório com dados incompletos. Execute uma nova otimização para gerar métricas completas.</Alert>;
+    return (
+      <Card variant="outlined" sx={{ textAlign: 'center', py: 6 }}>
+        <CardContent>
+          <Box
+            sx={{
+              display: 'inline-flex', p: 2, borderRadius: '50%',
+              bgcolor: 'info.light', color: 'info.main', mb: 2,
+            }}
+          >
+            <IconTrendingDown size={32} />
+          </Box>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
+            Relatório aguardando uma otimização
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 440, mx: 'auto' }}>
+            As métricas comparativas (atual × otimizado) aparecem após rodar um cenário real.
+            Os dados vêm do motor de otimização — nada é fabricado.
+          </Typography>
+          <Button variant="contained" href="/operations/advanced-optimization" startIcon={<IconTrendingDown size={18} />}>
+            Executar otimização
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

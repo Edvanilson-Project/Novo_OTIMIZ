@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { authApi, saveSession } from '@/lib/api';
-import { IconEye, IconEyeOff, IconRoute, IconChartBar, IconShield } from '@tabler/icons-react';
+import { IconEye, IconEyeOff, IconRoute, IconChartBar, IconShield, IconLock } from '@tabler/icons-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,17 +28,23 @@ export default function LoginPage() {
       saveSession('', user);
       router.push('/dashboard');
     } catch (err) {
-      const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr.response?.data?.message || 'Credenciais inválidas. Tente novamente.');
+      const axiosErr = err as { response?: { status?: number; data?: { message?: string } } };
+      if (axiosErr.response?.data?.message) {
+        setError(axiosErr.response.data.message);
+      } else if (axiosErr.response) {
+        setError('Não foi possível entrar agora. Tente novamente em instantes.');
+      } else {
+        setError('Falha de conexão com o servidor. Verifique sua internet e tente novamente.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const features = [
-    { icon: <IconRoute size={20} />, text: 'Otimização VSP/CSP com 7 algoritmos' },
+    { icon: <IconRoute size={20} />, text: '18 algoritmos de otimização VSP/CSP (exatos e heurísticos)' },
     { icon: <IconChartBar size={20} />, text: 'Redução de até 20% nos custos operacionais' },
-    { icon: <IconShield size={20} />, text: 'Conformidade CCT e legislação brasileira' },
+    { icon: <IconShield size={20} />, text: 'Conformidade total com CCT e legislação trabalhista' },
   ];
 
   return (
@@ -134,6 +140,7 @@ export default function LoginPage() {
           justifyContent: 'center',
           px: { xs: 3, sm: 6, md: 8 },
           bgcolor: 'background.default',
+          position: 'relative',
         }}
       >
         <Box sx={{ width: '100%', maxWidth: 400 }}>
@@ -205,12 +212,34 @@ export default function LoginPage() {
                 fontWeight: 700,
                 letterSpacing: 0.5,
                 py: 1.2,
+                boxShadow: '0 8px 20px -8px rgba(97,93,255,0.6)',
+                transition: 'transform .15s ease, box-shadow .15s ease',
+                '&:hover': {
+                  background: 'linear-gradient(135deg, #534fe6 0%, #2ec8db 100%)',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 12px 26px -8px rgba(97,93,255,0.7)',
+                },
               }}
             >
               {loading ? <CircularProgress size={22} color="inherit" /> : 'Entrar'}
             </Button>
+
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', justifyContent: 'center', mt: 2.5 }}>
+              <IconLock size={14} stroke={2} style={{ opacity: 0.55 }} />
+              <Typography variant="caption" color="text.secondary">
+                Conexão criptografada · Dados protegidos (LGPD)
+              </Typography>
+            </Stack>
           </Box>
         </Box>
+
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ position: 'absolute', bottom: 20, left: 0, right: 0, textAlign: 'center', opacity: 0.7 }}
+        >
+          © {new Date().getFullYear()} OTIMIZ · Plataforma de otimização operacional
+        </Typography>
       </Box>
     </Box>
   );
