@@ -98,6 +98,38 @@ Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctnes
   deadhead real (consistente com o documentado 14 vs 10 na instância 298).
 - Validação: regressão ampla **498 passed, 3 skipped, 1 warning** (advisory esperado).
 
+### Sessão 2026-05-29 (parte 4d) — escala grande (carta real) + bug do hybrid
+- Benches reais (`scratch/bench_real_gtfs_deadhead.py`, SUNT real + deadhead Haversine):
+  - **40 rotas / 2696 trips / 80 terminais (LB conc.=160)**: VSP fixo (greedy/mcnf/SA/
+    tabu/genetic/alns/B&P/set_part/joint_solver/vcsp/joint_bp/regional) = **320v / R$1.047M**
+    (mcnf prova ótimo de timetable FIXO). **joint_timetable = 184v / R$922k** (−42%,
+    reotimiza horários ±10min). Todos 2696/2696, 0 overlaps.
+  - **100 rotas / 6740 trips / 200 terminais (LB conc.=400)**: greedy/mcnf/assignment/
+    B&P/SA/regional = **780v / R$3.378M**. **hybrid_pipeline = 656v / R$2.112M** (menor
+    custo). **joint_timetable = 460v / R$2.282M** (−41%). Todos 6740/6740, 0 overlaps.
+- **BUG-HYBRID-SCALE-01 (P1) — CORRIGIDO**: `hybrid_pipeline` abortava com OptimizerError
+  `SCALE_CHUNK_FAILED` a 2696 trips COM deadhead (chunk[3]: `SPREAD_EXCEEDED` em duties —
+  deadhead+pullout inflam o spread do motorista e o CSP por chunk não faz run-cutting
+  suficiente; repair/fallback do chunk não resolve). Sem deadhead não falhava (OK 269).
+  Fix em `optimizer_service.py` (except do `run`): em `SCALE_CHUNK_FAILED`, **degradação
+  graciosa** → re-dispatch monolítico (`disable_scale_decomposition=True`), que reporta
+  issues em vez de abortar (como greedy/mcnf). `MANDATORY_GROUP_SPLIT` continua surfaceado.
+  Verificado: decomposição falha → fallback monolítico → **OK 184v** (meta
+  `scale_decomposition_fallback` gravada). Monolítico a 2696 = 179s; total c/ tentativa
+  de decomposição = 363s.
+- **Achados (documentados, não corrigidos)**:
+  - mcnf perde otimalidade em escala: a 6740 trips hybrid acha 656v < mcnf 780v → mcnf
+    provavelmente esparsifica o grafo de conexões. 780 NÃO é o ótimo real a essa escala.
+  - `scale_decompose_min_trips=2000` parece baixo: monolítico a 2696 dá 184v (ótimo) em
+    179s; decomposição falha/sub-otimiza. Considerar elevar o limiar.
+  - Fallback re-roda do zero (desperdiça a tentativa de decomposição). Perf follow-up.
+- **Completude do modelo verificada**: pull-out/pull-in (mcnf arcos depot↔trip, csp
+  pullout/pullback no spread), deadhead, CCT/CLT, run-cutting, EV/SoC, rendição, multi-depot,
+  joint timetabling — todos presentes. Nada essencial faltando.
+- **joint_timetable é legítimo**: MILP com start_time como variável em [orig−W, orig+W]
+  (W=timetable_slack_minutes, default 10), cada minuto penalizado. Troca fidelidade do
+  horário publicado por economia de frota — adequado quando o horário ainda não é fixo.
+
 ### Validação executada (de verdade)
 - `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
   **491 passed, 2 skipped, 1 warning** (warning = advisory esperado de greedy-gap).

@@ -83,6 +83,9 @@ def main():
     algos = ["greedy", "mcnf", "assignment_vsp", "simulated_annealing", "tabu_search",
              "genetic", "alns", "branch_and_price", "set_partitioning", "hybrid_pipeline",
              "joint_solver", "vcsp_pulp", "joint_bp", "regional", "joint_timetable"]
+    # 3rd arg: comma-separated subset (e.g. "greedy,mcnf,hybrid_pipeline,regional")
+    if len(sys.argv) > 3 and sys.argv[3].strip():
+        algos = [a.strip() for a in sys.argv[3].split(",") if a.strip()]
 
     print(f"\nconcurrency_LB={lb}\n")
     print(f"{'algo':<20}{'s':>6}{'veh':>5}{'cov':>10}{'ovl':>5}{'cost':>13}{'gap%':>6}")

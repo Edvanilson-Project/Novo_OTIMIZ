@@ -417,7 +417,40 @@ class OptimizerService:
                     details.get("failed_chunks") or []
                 )
             exc.details = details
-            raise
+            # Degradação graciosa: se a decomposição em escala falhou por violação dura
+            # num chunk (ex: SPREAD_EXCEEDED — deadhead infla o spread do motorista), o
+            # solver monolítico resolve a instância inteira (reporta issues em vez de
+            # abortar, como greedy/mcnf). MANDATORY_GROUP_SPLIT continua sendo surfaceada
+            # (infeasibility real de grupo, ver CLAUDE.md invariante ==1).
+            exc_code = getattr(exc, "code", None)
+            if (
+                exc_code == "SCALE_CHUNK_FAILED"
+                and not bool(vsp_params.get("disable_scale_decomposition", False))
+                and not bool(vsp_params.get("disable_scale_decomposition_fallback", False))
+            ):
+                logger.warning(
+                    "[OptimizerService] Scale decomposition failed (%s); retrying monolithic.", exc_code
+                )
+                mono_vsp = dict(vsp_params)
+                mono_vsp["disable_scale_decomposition"] = True
+                result = self._dispatch(
+                    algorithm,
+                    trips,
+                    vehicle_types,
+                    depot_id,
+                    cct_params,
+                    mono_vsp,
+                    effective_optimization_params,
+                    normalized_time_budget_s,
+                )
+                result.meta.setdefault("performance", {})
+                result.meta["performance"]["scale_decomposition_fallback"] = {
+                    "reason": exc_code,
+                    "failed_chunks": (details.get("failed_chunks") or [])[:5],
+                    "strategy": "monolithic_retry",
+                }
+            else:
+                raise
         primary_trip_group_audit = self._build_trip_group_audit(result, trips)
 
         def _group_audit_rank(sol: OptimizationResult, audit: Dict[str, Any]) -> tuple:
