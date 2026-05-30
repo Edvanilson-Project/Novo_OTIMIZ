@@ -213,10 +213,26 @@ Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctnes
   1→2 blocos; regional 2696 com deadhead = 311v viáveis (cob. total, 0 overlaps, 5.6s);
   14 testes regional passam. NOTA: nºs anteriores de regional em escala (780@6740) estavam
   OTIMISTAS/inviáveis — mas a recomendação era mcnf/hybrid, então conclusão não muda.
-- **Achados PRÉ-EXISTENTES (não toquei greedy/hybrid/csp — diff vazio 7ec4269..HEAD)**:
-  (a) pares ida-volta quebrados sob stress (hybrid+preserve_preferred_pairs: 36/36 broken);
-  (b) optimizer aceitou conflito crítico de carregador EV. Fora do escopo das correções
-  desta sessão; em código que não modifiquei. A reportar ao usuário (decisão de corrigir).
+- **Achados PRÉ-EXISTENTES (não toquei greedy/hybrid/csp — diff vazio 7ec4269..HEAD) — VEREDITO**:
+  (a) **Pares ida-volta: NÃO é bug.** Mecanismo funciona com trip_group_id explícito
+  (teste controlado: greedy/hybrid/mcnf todos 3/3 pares no mesmo bloco). A falha da suite
+  usa `build_pair_pressure_dataset` SEM trip_group_id → pares só inferidos heuristicamente
+  (sinal soft); a audit espera preservação total. Em produção os pares vêm marcados → OK.
+  (b) **EV charger: decisão de DESIGN, não crash.** O sistema trata excesso de carregador
+  como SOFT (warning CHARGER_CAPACITY_EXCEEDED) — o cenário ev_charger_capacity PASSA
+  esperando esse warning. O cenário hard_ev_conflict espera ERRO hard. Tratar capacidade
+  de carregador como soft é operacionalmente questionável (escala EV pode ser fisicamente
+  inviável), mas mudar p/ hard é decisão de produto + mexe em código EV não tocado.
+  → Nenhum dos dois é bug de correção; ambos são design/expectativa-de-teste. Não corrigidos
+  autonomamente (escopo de produto).
+
+### Estado final (2026-05-30): 6 commits, regressão verde, otimizador sólido
+- Nenhum bug de correção aberto introduzido por esta sessão. Validação de entrada robusta.
+- PENDENTE (100% do usuário): rotacionar chave OpenRouter + destravar push (allow-secret
+  ou filter-repo) + push. git-filter-repo instalado; mapping pronto em /tmp (chave não
+  exposta). Caminho A (rotacionar→allow-secret→push) recomendado por segurança (working
+  tree tem 61 mudanças não-commitadas; rewrite reescreveria 222 commits e divergiria do
+  main remoto).
 
 ### Validação executada (de verdade)
 - `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
