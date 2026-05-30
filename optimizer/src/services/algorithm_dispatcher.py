@@ -453,9 +453,14 @@ def dispatch_algorithm(
     )
 
     # Auto-escala: redireciona para Regional Decomposition em instâncias grandes.
-    # Threshold configurável via vsp_params["auto_regional_threshold"] (padrão: 1000).
-    # Algoritmos já preparados para larga-escala são excluídos do auto-redirect.
-    _auto_regional_threshold = int(vsp_params.get("auto_regional_threshold", 1000) or 1000)
+    # Threshold configurável via vsp_params["auto_regional_threshold"].
+    # Padrão elevado 1000→3000: o regional foi feito para instâncias gigantes (15k+),
+    # mas a 1000 ele degradava os heurísticos. Medido na carta real (2696 viagens),
+    # rodando DIRETO: greedy/B&P/assignment/SA todos atingem 184 veículos (greedy em
+    # 3.7s) vs 320 quando forçados ao regional — −42% de frota. Seguro porque SA/tabu/
+    # genetic semeiam do greedy (nunca pioram que 184). Acima de 3000, regional ainda
+    # protege a tratabilidade. Alinhado ao mcnf_cluster_size_limit.
+    _auto_regional_threshold = int(vsp_params.get("auto_regional_threshold", 3000) or 3000)
     _large_scale_algorithms = frozenset([
         AlgorithmType.REGIONAL,
         AlgorithmType.BUNDLE_METHOD,
