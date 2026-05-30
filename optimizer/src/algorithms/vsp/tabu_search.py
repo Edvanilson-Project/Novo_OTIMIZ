@@ -235,9 +235,11 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         penalize_trip_ids: set = set(self.vsp_params.get("penalize_trip_ids", []))
         cct_split_penalty = float(self.vsp_params.get("cct_split_penalty", fvc * 3.0))
 
+        dhc = float(self.vsp_params.get("deadhead_cost_per_minute", 1.0))
+
         def cost_fn(state: List[List[int]]) -> float:
             sequences = [[trip_map[tid] for tid in block if tid in trip_map] for block in state]
-            base = quick_cost_from_trips(sequences, fvc, icpm, max_work, crew_cw)
+            base = quick_cost_from_trips(sequences, fvc, icpm, max_work, crew_cw, dhc)
             pairs = preferred_pair_penalty_from_trips(
                 sequences,
                 preferred_pairs,

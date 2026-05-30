@@ -282,21 +282,35 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
             for idx, args in enumerate(args_list):
                 sub_solutions[idx] = _solve_group(args)
 
-        # 3. Mergea
+        # 3. Mergea.
+        # Janelas temporais têm overlap (_OVERLAP_MINUTES) para permitir que blocos
+        # encadeiem trips na fronteira. Isso faz uma trip de borda aparecer em duas
+        # janelas e ser coberta nas duas sub-soluções. Ao mergear, mantemos a primeira
+        # cobertura e removemos a trip duplicada das janelas seguintes, preservando o
+        # invariante de set-partition (cada trip em exatamente um bloco).
         all_blocks: List[Block] = []
         block_id = 1
         total_iters = 0
-        unassigned: List[Trip] = []
+        seen_trip_ids: set = set()
 
         for sol in sub_solutions:
             if sol is None:
                 continue
             for block in sol.blocks:
+                deduped = [t for t in block.trips if t.id not in seen_trip_ids]
+                if not deduped:
+                    continue
+                for t in deduped:
+                    seen_trip_ids.add(t.id)
+                block.trips = deduped
                 block.id = block_id
                 all_blocks.append(block)
                 block_id += 1
-            unassigned.extend(sol.unassigned_trips)
             total_iters += sol.iterations or 0
+
+        # Não-atribuídas = trips de entrada não cobertas por nenhum bloco após o dedup
+        # (corrige falso "unassigned" quando a trip foi coberta em outra janela do overlap).
+        unassigned: List[Trip] = [t for t in trips if t.id not in seen_trip_ids]
 
         elapsed = self._elapsed()
         logger.info(

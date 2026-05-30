@@ -226,9 +226,15 @@ def quick_cost_from_trips(
     idle_cost_per_minute: float = 0.5,
     max_work_minutes: float = 480.0,
     crew_cost_weight: float = 400.0,
+    deadhead_cost_per_minute: float = 1.0,
 ) -> float:
     """
     Estimativa de custo ultra-rápida usando float puro para metaheurísticas.
+
+    O termo de deadhead distingue conexões no mesmo terminal (deadhead=0) de
+    conexões cruzando terminais (deadhead>0, que queimam combustível/tripulação).
+    Sem ele o proxy só enxerga o gap ocioso e as metaheurísticas (SA/Tabu)
+    encadeiam viagens cross-terminal de baixo gap mas alto custo real.
     """
     import math
 
@@ -250,11 +256,17 @@ def quick_cost_from_trips(
             total += max(0.0, float(min_crew - 1)) * crew_cost_weight
 
         for i in range(len(trips) - 1):
-            gap = trips[i + 1].start_time - trips[i].end_time
+            cur = trips[i]
+            nxt = trips[i + 1]
+            gap = nxt.start_time - cur.end_time
             if gap < 0:
                 total += abs(gap) * 50.0  # Penalidade forte por overlap
             else:
                 total += gap * idle_cost_per_minute
+                if deadhead_cost_per_minute and cur.deadhead_times:
+                    deadhead = cur.deadhead_times.get(nxt.origin_id, 0)
+                    if deadhead:
+                        total += deadhead * deadhead_cost_per_minute
     return total
 
 

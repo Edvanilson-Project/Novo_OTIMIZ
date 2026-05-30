@@ -15,8 +15,74 @@ Atualizado: 2026-05-25 (OpenRouter key validada e modelo gratuito ajustado)
 Atualizado: 2026-05-28 (Análise profunda do Optimizer e execução completa da suíte de testes verde)
 Atualizado: 2026-05-29 (Validação real ponta a ponta: 3 suítes verdes, prova de otimização, round-trip HTTP+Celery; fix P1 do build do backend)
 Atualizado: 2026-05-29 (Product polish: healthcheck optimizer, limpeza raiz 31→8 md, audit_correctness reescrito, polish UI, auditoria 6 módulos, fix dado Mapa)
+Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctness regional + alinhamento de objetivo SA/Tabu)
 
 ---
+
+## Sessão 2026-05-29 (parte 4) — Bench real de TODOS os algoritmos + 2 correções
+
+### O que foi feito (execução real in-process, mesmo code path do worker)
+- Novo harness `optimizer/scratch/bench_all_algorithms.py`: roda os 17 algoritmos
+  registrados (`AlgorithmType`) numa instância Salvador e checa invariantes por algo:
+  cobertura total, zero overlaps, custo positivo/finito, veículos vs lower bound de
+  concorrência, runtime. Rodado em 40 trips (LB 6) e 160 trips (LB 20).
+- Resultado: **17/17 viáveis** (cobertura 100%, 0 overlaps) após as correções abaixo.
+
+### BUG-REGIONAL-DUP-01 (P1, correctness) — CORRIGIDO
+- `regional` cobria **41/40 trips (duplicado)** → viola invariante set-partition `==1`
+  (CLAUDE.md). Causa: `_group_by_time_window` faz overlap de 30 min entre janelas; cada
+  janela é resolvida isolada e o merge concatenava blocos **sem dedup** → trip de borda
+  coberta 2x.
+- Fix cirúrgico em `src/algorithms/vsp/regional_decomposition.py` (merge): dedup por
+  `trip.id` (mantém a 1ª cobertura, remove duplicata das janelas seguintes) e
+  `unassigned` = complemento real (trips de entrada não cobertas). Preserva o intuito do
+  overlap (encadear blocos na fronteira) sem duplicar.
+- Validação: bench 41→**40/40, 0 overlaps**; `test_regional_decomposition.py` +
+  `test_regional_parallel_benchmark.py` **14 passed**.
+
+### IMP-SATABU-DEADHEAD-01 (qualidade do objetivo) — IMPLEMENTADO
+- SA/Tabu/joint_solver atingiam a mesma frota do greedy (24 veh) mas com custo
+  **~36% maior (R$68k vs R$50k)**. Causa: o proxy `quick_cost_from_trips` (utils.py) era
+  **cego a deadhead** — só cobrava idle (gap*idle_rate), igual para conexão no mesmo
+  terminal ou cruzando terminais. SA/Tabu reduziam gap encadeando cross-terminal de alto
+  custo real.
+- Fix em `src/algorithms/utils.py`: termo `deadhead_cost_per_minute=3.0` (default) somando
+  `deadhead*peso` quando há matriz `deadhead_times` (mesma chave de `is_connection_feasible`).
+  No-op quando `deadhead_times` vazio (instância sintética sem coords); **ativo em dados
+  reais/GTFS** que populam deadhead. Micro-teste: chain cross-terminal passa a custar mais.
+- Default aplica automaticamente → corrige SA, Tabu, genetic e ALNS sem tocar nos 4 sites.
+
+### Achados NÃO corrigidos (documentados, fora de escopo cirúrgico)
+- `regional` super-fragmenta em instâncias pequenas/médias (78 veh em 160 trips): janelas
+  temporais não reaproveitam veículo entre janelas. Só auto-seleciona >1000 trips e é
+  suplantado pelo path de stitching em escala. Refazer reuse temporal = mudança grande.
+- `vcsp_pulp` super-provisiona só no toy de 40 trips (12v); no caso realista de 160 fica
+  em 24v (OK). Baixa prioridade.
+
+### IMP-SATABU-DEADHEAD-01 — refinamento + PROVA empírica (2026-05-29 parte 4b)
+- Achado de consistência: `deadhead_cost_per_minute` já é param usado em greedy, mcnf,
+  assignment, joint_timetable, branch_and_price, hybrid — **default 1.0** em todos. Meu
+  termo no proxy usava 3.0 hardcoded (divergente). Corrigido: default 1.0 em
+  `quick_cost_from_trips` + SA e Tabu passam `vsp_params.get("deadhead_cost_per_minute",1.0)`.
+- **Verificado (não bug em produção)**: `Trip.deadhead_times` é `Dict[int,int]` em dataclass
+  SEM coerção; dados de entrada usam chave string. Consumidores fazem `.get(origin_id:int)`.
+  MAS o path de API coerce em `converters.py:38` (`{int(k):v}`) + schema Pydantic
+  `Dict[int,int]`. Logo em produção as chaves chegam int e o deadhead funciona. O miss
+  só ocorre quando se constrói `Trip` direto de dict string-keyed (tests/scratch).
+- **Prova empírica** (`scratch/exp_deadhead_proxy.py`, 90 trips, deadhead cross-terminal
+  25min, mesma path `OptimizerService.run`): com peso 0 (proxy antigo cego) SA/Tabu fazem
+  **9 conexões cross-terminal, R$27.262 (pior que greedy 25.658)**; com peso 1.0 (fix)
+  **0 cross-terminal, R$24.728 (bate o greedy)**. Peso 3.0 = mesmo que 1.0 (1.0 basta).
+
+### Validação executada (de verdade)
+- `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
+  **491 passed, 2 skipped, 1 warning** (warning = advisory esperado de greedy-gap).
+- `pytest test_cost_gap_investigation + test_violation_comparison`: **9 passed, 1 skipped**.
+- Após refinamento (default 1.0 + wiring SA/Tabu): `pytest unit/test_algorithms +
+  unit/test_vsp_tolerance_and_multiline + test_cost_gap_investigation +
+  proof_of_optimization_suite`: **68 passed, 1 skipped**.
+- Artefatos não-commit: `optimizer/scratch/bench_all_algorithms.py`,
+  `optimizer/scratch/exp_deadhead_proxy.py`.
 
 ## Sessão 2026-05-29 (parte 3) — Product polish + auditoria dos módulos restantes
 
