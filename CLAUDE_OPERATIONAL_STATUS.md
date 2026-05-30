@@ -199,6 +199,25 @@ Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctnes
   env. Falta: rotacionar a chave + scrub do segredo nos 25 commits não-enviados
   (filter-repo não instalado). Decisão do usuário.
 
+### Sessão 2026-05-30 (parte 3) — Auditoria de robustez (caça a bugs)
+- Varredura de edge-cases (9 cenários × 10 algoritmos) + suite qa_operational_extreme.
+- **Validação de entrada ROBUSTA** (não-bugs): rejeita carta vazia (NoProblemDataError),
+  origem==destino (INVALID_TERMINAL_LOOP), duração zero (INVALID_DURATION) com erro claro.
+  Os "71 problemas" do meu harness eram 70 falsos-positivos (dados inválidos meus).
+- **BUG-REGIONAL-DEADHEAD-02 (real) — CORRIGIDO**: `_trip_to_dict` (serialização p/
+  ProcessPool workers do regional) NÃO incluía `deadhead_times`. Nos sub-processos o
+  deadhead virava {} → sub-solvers encadeavam viagens cross-terminal INVIÁVEIS (ônibus
+  "teletransporta"), sem aparecer como overlap temporal. Confirmado: 2 viagens com
+  deadhead 9999 davam 1 bloco (devia ser 2). Solvers diretos (greedy/tabu/SA/mcnf) davam
+  2 corretamente — só o regional falhava. Fix: adicionar deadhead_times ao dict. Validado:
+  1→2 blocos; regional 2696 com deadhead = 311v viáveis (cob. total, 0 overlaps, 5.6s);
+  14 testes regional passam. NOTA: nºs anteriores de regional em escala (780@6740) estavam
+  OTIMISTAS/inviáveis — mas a recomendação era mcnf/hybrid, então conclusão não muda.
+- **Achados PRÉ-EXISTENTES (não toquei greedy/hybrid/csp — diff vazio 7ec4269..HEAD)**:
+  (a) pares ida-volta quebrados sob stress (hybrid+preserve_preferred_pairs: 36/36 broken);
+  (b) optimizer aceitou conflito crítico de carregador EV. Fora do escopo das correções
+  desta sessão; em código que não modifiquei. A reportar ao usuário (decisão de corrigir).
+
 ### Validação executada (de verdade)
 - `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
   **491 passed, 2 skipped, 1 warning** (warning = advisory esperado de greedy-gap).

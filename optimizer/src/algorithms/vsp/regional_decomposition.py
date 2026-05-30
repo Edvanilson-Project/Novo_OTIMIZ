@@ -208,6 +208,9 @@ def _trip_to_dict(t: Trip) -> dict:
         "direction": t.direction,
         "distance_km": t.distance_km,
         "energy_kwh": t.energy_kwh,
+        # Crítico: sem isto os sub-solvers nos ProcessPool workers viam deadhead={} e
+        # encadeavam viagens cross-terminal inviáveis (sem aparecer como overlap temporal).
+        "deadhead_times": dict(t.deadhead_times) if t.deadhead_times else {},
     }
 
 
