@@ -36,6 +36,7 @@ from typing import Dict, List, Optional, Tuple
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
+from ..utils import is_connection_feasible
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,71 @@ def _make_sub_solver(algorithm: str, vsp_params: dict, time_budget_s: float):
     solver = factory()
     solver.time_budget_s = time_budget_s
     return solver
+
+
+def _stitch_blocks(blocks: List[Block], vsp_params: dict) -> List[Block]:
+    """Reaproveita veículos encadeando blocos de janelas/regiões diferentes.
+
+    Cada janela é resolvida isolada, então um veículo da janela da manhã nunca
+    era reaproveitado à tarde → frota inflada. Esta passada gulosa concatena
+    blocos consecutivos viáveis num só veículo (mesma lógica de
+    `OptimizerService._stitch_scale_blocks`, versão enxuta), respeitando
+    `is_connection_feasible` e o span máximo do veículo.
+    """
+    real = [b for b in blocks if b.trips]
+    if len(real) <= 1:
+        return blocks
+
+    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
+    min_break = int(vsp_params.get("min_break_minutes", 30) or 30)
+    max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+    max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 240) or 240)
+    enforce_min_interval = bool(vsp_params.get("enforce_min_interval", False))
+
+    ordered = sorted(real, key=lambda b: (b.trips[0].start_time, b.trips[-1].end_time, b.id))
+    used = [False] * len(ordered)
+    stitched: List[Block] = []
+
+    for i, block in enumerate(ordered):
+        if used[i]:
+            continue
+        used[i] = True
+        merged = list(block.trips)
+        while True:
+            last = merged[-1]
+            best_idx = -1
+            best_gap = None
+            for j, cand in enumerate(ordered):
+                if used[j]:
+                    continue
+                first = cand.trips[0]
+                gap = first.start_time - last.end_time
+                if gap < 0 or gap > max_gap:
+                    continue
+                if max_shift > 0 and cand.trips[-1].end_time - merged[0].start_time > max_shift:
+                    continue
+                if not is_connection_feasible(
+                    last, first,
+                    min_layover=min_layover,
+                    min_break=min_break,
+                    enforce_min_interval=enforce_min_interval,
+                ):
+                    continue
+                if best_gap is None or gap < best_gap:
+                    best_gap = gap
+                    best_idx = j
+            if best_idx < 0:
+                break
+            used[best_idx] = True
+            merged.extend(ordered[best_idx].trips)
+        stitched.append(
+            Block(
+                id=len(stitched) + 1,
+                trips=sorted(merged, key=lambda t: (t.start_time, t.id)),
+                vehicle_type_id=block.vehicle_type_id,
+            )
+        )
+    return stitched
 
 
 def _group_by_depot(trips: List[Trip]) -> Dict[str, List[Trip]]:
@@ -312,6 +378,10 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
         # (corrige falso "unassigned" quando a trip foi coberta em outra janela do overlap).
         unassigned: List[Trip] = [t for t in trips if t.id not in seen_trip_ids]
 
+        # Reaproveita veículos entre janelas/regiões (cada grupo foi resolvido isolado).
+        blocks_before_stitch = len(all_blocks)
+        all_blocks = _stitch_blocks(all_blocks, self.vsp_params)
+
         elapsed = self._elapsed()
         logger.info(
             "regional_decomposition: %d grupos → %d blocos, %d não atribuídas, %.1fs",
@@ -332,6 +402,8 @@ class RegionalDecompositionSolver(BaseAlgorithm, IVSPAlgorithm):
                 "regional_grouping_strategy": grouping_strategy,
                 "regional_sub_algorithm": self.sub_algorithm,
                 "regional_n_trips": n_trips,
+                "regional_blocks_before_stitch": blocks_before_stitch,
+                "regional_blocks_after_stitch": len(all_blocks),
                 "regional_elapsed_s": round(elapsed, 2),
             },
         )

@@ -92,6 +92,7 @@ def _fitness(
     min_break: int = 30,
     enforce_min_interval: bool = False,
     connection_tolerance: int = 0,
+    deadhead_cost_per_minute: float = 1.0,
 ) -> float:
     """Menor custo estimado = maior fitness (retorna negativo do custo).
     Otimizado para evitar instanciar objetos Block.
@@ -110,7 +111,8 @@ def _fitness(
 
     # 3. Cálculo de custos direcional (float ultra-rápido)
     base_cost = quick_cost_from_trips(
-        sequences, fixed_vehicle_cost, idle_cost_per_minute, max_work_minutes, crew_cost_weight
+        sequences, fixed_vehicle_cost, idle_cost_per_minute, max_work_minutes, crew_cost_weight,
+        deadhead_cost_per_minute,
     )
 
     base_cost += preferred_pair_penalty_from_trips(
@@ -392,6 +394,8 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
         connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0) or 0)
         same_depot_req = bool(self.vsp_params.get("same_depot_required", False))
 
+        dhc = float(self.vsp_params.get("deadhead_cost_per_minute", 1.0))
+
         def fit_fn(c):
             return _fitness(
                 c,
@@ -409,6 +413,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                 min_break,
                 enforce_min_interval,
                 connection_tolerance,
+                dhc,
             )
 
         # Semente inicial — greedy já factível

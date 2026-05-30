@@ -74,6 +74,30 @@ Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctnes
   **9 conexões cross-terminal, R$27.262 (pior que greedy 25.658)**; com peso 1.0 (fix)
   **0 cross-terminal, R$24.728 (bate o greedy)**. Peso 3.0 = mesmo que 1.0 (1.0 basta).
 
+### Sessão 2026-05-29 (parte 4c) — melhorias aprovadas + carta real com deadhead
+- **Robustez deadhead_times**: `Trip.__post_init__` agora coerce chave para int
+  (dataclass não coerce; consumidores buscam por origin_id:int). Belt-and-suspenders —
+  path de API já coerce; isto protege construção direta de Trip.
+- **genetic + ALNS** agora passam `deadhead_cost_per_minute` ao proxy (consistência
+  total com SA/Tabu/greedy/mcnf; default 1.0).
+- **regional reuse de veículos**: `_stitch_blocks()` (passada gulosa que encadeia blocos
+  viáveis de janelas diferentes num só veículo, via `is_connection_feasible` + span máx).
+  Cada janela era resolvida isolada → frota inflada. Resultado no bench 160 trips:
+  **78 → 26 veículos** (gap 290%→30%), cobertura 160/160, 0 overlaps. Tests 14/14.
+- **CARTA REAL com deadhead** (`scratch/bench_real_gtfs_deadhead.py`): SUNT real
+  (674 trips, 20 terminais, deadhead Haversine real 1–30 min de coords reais de stops.txt):
+  - **15/15 algoritmos: 674/674 cobertas, 0 overlaps** (viabilidade sólida em dado real).
+  - 14/15 atingem **46 veículos** (LB concorrência=40 → gap 15% estrutural por deadhead).
+  - **SA/Tabu agora R$234.650 ≈ greedy R$229.379** (NÃO 36% pior — fix de deadhead provado
+    em dado real). alns/B&P/joint_bp melhores entre metaheurísticas (R$222.310).
+  - **mais barato: mcnf e hybrid_pipeline a R$153.096** (33% < greedy no mesmo nº de veíc).
+    hybrid (default de produção) usa mcnf → entrega o schedule mais barato no fleet ótimo.
+  - regional 76v (90%) — com stitch melhorou, mas em 674 trips ainda fragmenta mais.
+- Comparação honesta: baseline = lower bound de concorrência (40v) + ótimo MCNF, NÃO
+  número de OptBus (proibido inventar benchmark de concorrente). Gap 15% é o esperado por
+  deadhead real (consistente com o documentado 14 vs 10 na instância 298).
+- Validação: regressão ampla **498 passed, 3 skipped, 1 warning** (advisory esperado).
+
 ### Validação executada (de verdade)
 - `pytest proof_of_optimization_suite + test_regional_decomposition + tests/unit`:
   **491 passed, 2 skipped, 1 warning** (warning = advisory esperado de greedy-gap).

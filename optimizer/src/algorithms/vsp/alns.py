@@ -68,6 +68,7 @@ def _state_cost(state: List[List[int]], trip_map: Dict[int, Trip], vsp_params: D
             idle_cost_per_minute=float(vsp_params.get("idle_cost_per_minute", 0.25)),
             max_work_minutes=float(vsp_params.get("max_work_minutes", 480.0)),
             crew_cost_weight=float(vsp_params.get("cost_duty", 400.0)),
+            deadhead_cost_per_minute=float(vsp_params.get("deadhead_cost_per_minute", 1.0)),
         )
     )
 

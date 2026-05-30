@@ -80,6 +80,18 @@ class Trip:
             self.duration = max(0, self.end_time - self.start_time)
         if self.service_day is None:
             self.service_day = self.start_time // 1440
+        # deadhead_times é Dict[int, int] mas dataclass não coerce a chave.
+        # Consumidores buscam por origin_id (int); se a chave vier string
+        # (ex: Trip construído direto de payload JSON), o lookup silenciava em 0.
+        # O path de API já coerce em converters; isto torna a construção direta segura.
+        if self.deadhead_times and any(not isinstance(k, int) for k in self.deadhead_times):
+            coerced: Dict[int, int] = {}
+            for k, v in self.deadhead_times.items():
+                try:
+                    coerced[int(k)] = v
+                except (TypeError, ValueError):
+                    coerced[k] = v
+            self.deadhead_times = coerced
 
     def can_precede(self, other: "Trip", default_deadhead: int = 0) -> bool:
         if other.is_continuation_of(self):
