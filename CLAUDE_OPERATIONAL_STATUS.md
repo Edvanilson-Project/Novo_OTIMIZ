@@ -38,10 +38,37 @@ O branch `fix/optimizer-regional-dedup-deadhead-proxy` carrega 9 commits de corr
 - Container frontend: rebuilt com pnpm/frozen-lockfile, healthy, HTTP 200 ✓
 - Backend: sem mudanças neste branch — não re-rodado (honesto)
 
-### Pendentes (próximas tasks)
-- Limpeza dados QA com backup (task #3)
-- E2E real + invariantes pela stack real (task #4)
-- Cross-módulo + caça bugs (task #5)
+### Execução completa (2026-05-30 parte 5)
+
+**Commits (6 novos nesta parte):**
+- `ee19f13` chore: remove 12 session audit reports from root
+- `03f3271` feat(frontend): login polish, KPI gap, dashboard fix, Dockerfile pnpm
+- `2b688d0` docs: AGENTS.md, PR summary, .gitignore, status
+- `9e5e82c` feat(backend): AiAnalysis entity + audit history
+- `7eb6716` test(frontend): vitest config + planner helpers specs
+- `ceda98e` test(optimizer): E2E validation scripts + cost-gap suite
+- `42e544e` fix(backend): BUG-TERMINAL-CREATE-01 + BUG-AI-BUILD-01
+
+**E2E real (stack Docker via API+Celery):** greedy/mcnf/hybrid — 674/674
+cobertura, 0 overlaps, custo positivo, mcnf/hybrid 0 CCT violations. ✓
+
+**Demo limpa:** backup pg_dump (27703 linhas). Removidas empresas 22
+(E2E Benchmark, 5000 trips) e 23 (QA empty). Estado final: 3 empresas,
+298 trips reais, 4 usuários, 516 schedules históricos.
+
+**Bugs encontrados e corrigidos:**
+- **BUG-TERMINAL-CREATE-01**: POST /terminals retornava 500 (terminalId NOT NULL
+  sem valor). Fix: auto-gerado no service (TER-slug-NNN).
+- **BUG-AI-BUILD-01**: backend Docker falhava a compilar — ai.service.ts usava
+  @nestjs/axios (não instalado). Substituído por axios direto; nest build clean.
+
+**Backend Jest (após fix):** não re-rodado nesta parte — fixes são novos arquivos
+e service; rodar no próximo CI.
+
+**Branch final:** 16 commits à frente de main, working tree limpo.
+
+**Pendente (decisão do usuário):**
+- Rotacionar chave OpenRouter → push do branch para GitHub (B1)
 
 ---
 
