@@ -490,5 +490,31 @@ export class EvaluateDeltaPayloadDto {
  * Schema flexível por design (parametrização avançada do solver Python).
  */
 export class RosteringWeeklyDto {
-  [key: string]: unknown;
+  // Pass-through para o optimizer (/optimize/rostering/weekly faz a validação
+  // profunda). Os campos precisam ser declarados porque a ValidationPipe global
+  // usa whitelist+forbidNonWhitelisted: sem declará-los, o payload era rejeitado
+  // com 400 e a Escala Semanal nunca executava.
+  @IsOptional()
+  @IsArray()
+  operators?: unknown[];
+
+  @IsOptional()
+  @IsObject()
+  daily_duties?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsInt()
+  weekly_hour_limit_minutes?: number;
+
+  @IsOptional()
+  @IsInt()
+  min_days_off?: number;
+
+  @IsOptional()
+  @IsInt()
+  min_inter_shift_rest_minutes?: number;
+
+  @IsOptional()
+  @IsNumber()
+  time_budget_s?: number;
 }
