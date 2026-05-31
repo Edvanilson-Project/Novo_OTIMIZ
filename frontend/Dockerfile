@@ -1,6 +1,6 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY pnpm-lock.yaml package.json ./
 RUN pnpm install --frozen-lockfile
 COPY . .
@@ -11,7 +11,7 @@ RUN pnpm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/pnpm-lock.yaml ./pnpm-lock.yaml
