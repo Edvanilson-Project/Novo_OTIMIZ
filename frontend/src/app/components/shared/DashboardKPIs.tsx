@@ -300,7 +300,7 @@ const DashboardKPIs: React.FC<KPIProps> = ({ schedule }) => {
                 <strong>Trip Groups Split</strong> — Quantidade de viagens fragmentadas.
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                Uma viagem "split" é aquela que deveria ser um grupo contíguo, mas foi dividida entre múltiplas jornadas.
+                Uma viagem &quot;split&quot; é aquela que deveria ser um grupo contíguo, mas foi dividida entre múltiplas jornadas.
               </Typography>
               <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
                 0 = todas as viagens mantêm continuidade. Mais splits = menos eficiência operacional.

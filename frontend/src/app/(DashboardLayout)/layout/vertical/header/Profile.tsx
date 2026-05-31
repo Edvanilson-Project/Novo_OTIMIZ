@@ -13,7 +13,6 @@ import * as dropdownData from './data';
 
 import { IconMail } from '@tabler/icons-react';
 import { Stack } from '@mui/material';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { apiClient, clearSession } from '@/lib/api';
 import { useAuth } from '@/app/hooks/useAuth';
@@ -44,7 +43,7 @@ const Profile = () => {
   return (
     <Box>
       <IconButton
-        aria-label="show 11 new notifications"
+        aria-label="Abrir menu do perfil"
         color="inherit"
         aria-controls="msgs-menu"
         aria-haspopup="true"
@@ -82,7 +81,7 @@ const Profile = () => {
           },
         }}
       >
-        <Typography variant="h5">User Profile</Typography>
+        <Typography variant="h5">Minha Conta</Typography>
         <Stack direction="row" spacing={2} sx={{ py: 3, alignItems: "center" }}>
           <Avatar src={"/images/profile/user-1.jpg"} alt={"ProfileImg"} sx={{ width: 95, height: 95 }} />
           <Box>
@@ -158,22 +157,8 @@ const Profile = () => {
           </Box>
         ))}
         <Box sx={{ mt: 2 }}>
-          <Box sx={{ bgcolor: "primary.light", p: 3, mb: 3, overflow: "hidden", position: "relative" }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between" }}>
-              <Box>
-                <Typography variant="h5" sx={{ mb: 2 }}>
-                  Unlimited <br />
-                  Access
-                </Typography>
-                <Button variant="contained" color="primary">
-                  Upgrade
-                </Button>
-              </Box>
-              <Image src={"/images/backgrounds/unlimited-bg.png"} width={150} height={183} style={{ height: 'auto', width: 'auto' }} alt="unlimited" className="signup-bg" />
-            </Box>
-          </Box>
           <Button onClick={handleLogout} variant="outlined" color="primary" fullWidth>
-            Logout
+            Sair
           </Button>
         </Box>
       </Menu>

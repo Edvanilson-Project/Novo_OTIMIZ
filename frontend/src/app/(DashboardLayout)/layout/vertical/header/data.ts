@@ -6,24 +6,15 @@ interface ProfileType {
   icon: string;
 }
 
+// Atalhos reais da conta no dropdown de perfil. As rotas de template
+// (/apps/email, /apps/kanban, /apps/user-profile) foram removidas por não
+// existirem neste produto (geravam link morto/404).
 const profile: ProfileType[] = [
   {
-    href: "/apps/user-profile/profile",
-    title: "Meu Perfil",
-    subtitle: "Configurações de Conta",
+    href: "/settings/general",
+    title: "Ajustes",
+    subtitle: "Preferências da conta",
     icon: "/images/svgs/icon-account.svg",
-  },
-  {
-    href: "/apps/email",
-    title: "Minha Caixa",
-    subtitle: "Mensagens & Emails",
-    icon: "/images/svgs/icon-inbox.svg",
-  },
-  {
-    href: "/apps/kanban",
-    title: "Minhas Tarefas",
-    subtitle: "To-do e Tarefas Diárias",
-    icon: "/images/svgs/icon-tasks.svg",
   },
 ];
 
