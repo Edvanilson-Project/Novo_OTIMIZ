@@ -1,21 +1,28 @@
-import { of } from 'rxjs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import axios from 'axios';
 import { AiService } from './ai.service';
 
+// O serviço usa axios diretamente (default import). Mockamos get/post como
+// promises — o serviço não usa mais @nestjs/axios/observables.
+jest.mock('axios', () => ({
+  __esModule: true,
+  default: { get: jest.fn(), post: jest.fn() },
+}));
+
+const mockGet = axios.get as unknown as jest.Mock;
+const mockPost = axios.post as unknown as jest.Mock;
+
 describe('AiService', () => {
-  let http: { get: jest.Mock; post: jest.Mock };
   let config: { get: jest.Mock };
   let configValues: Record<string, string | undefined>;
   let repo: { create: jest.Mock; save: jest.Mock; find: jest.Mock };
   let companyId: number | undefined;
 
   beforeEach(() => {
-    http = {
-      get: jest.fn(),
-      post: jest.fn(),
-    };
+    mockGet.mockReset();
+    mockPost.mockReset();
     configValues = {};
     config = {
       get: jest.fn((key: string) => configValues[key]),
@@ -31,7 +38,7 @@ describe('AiService', () => {
   const tenant = () => ({ getCompanyId: () => companyId });
 
   function service() {
-    return new AiService(http as any, config as any, repo as any, tenant() as any);
+    return new AiService(config as any, repo as any, tenant() as any);
   }
 
   it('uses an honest rule-based fallback when OpenRouter is not configured', async () => {
@@ -58,40 +65,36 @@ describe('AiService', () => {
   it('tries only free OpenRouter models and fails over to the next free model', async () => {
     configValues.OPENROUTER_API_KEY = 'sk-or-test';
     configValues.OPENROUTER_FREE_MODEL_ATTEMPTS = '2';
-    http.get.mockReturnValue(
-      of({
-        data: {
-          data: [
-            {
-              id: 'paid/model',
-              context_length: 200000,
-              pricing: { prompt: '0.00001', completion: '0.00001' },
-            },
-            {
-              id: 'provider/free-small:free',
-              context_length: 1000,
-              pricing: { prompt: '0', completion: '0' },
-            },
-            {
-              id: 'provider/free-big:free',
-              context_length: 2000,
-              pricing: { prompt: '0', completion: '0' },
-            },
-          ],
-        },
-      }),
-    );
-    http.post
-      .mockReturnValueOnce(of({ status: 429, data: {} }))
-      .mockReturnValueOnce(
-        of({
-          status: 200,
-          data: {
-            choices: [{ message: { content: 'análise grátis ok' } }],
-            usage: { total_tokens: 42 },
+    mockGet.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'paid/model',
+            context_length: 200000,
+            pricing: { prompt: '0.00001', completion: '0.00001' },
           },
-        }),
-      );
+          {
+            id: 'provider/free-small:free',
+            context_length: 1000,
+            pricing: { prompt: '0', completion: '0' },
+          },
+          {
+            id: 'provider/free-big:free',
+            context_length: 2000,
+            pricing: { prompt: '0', completion: '0' },
+          },
+        ],
+      },
+    });
+    mockPost
+      .mockResolvedValueOnce({ status: 429, data: {} })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          choices: [{ message: { content: 'análise grátis ok' } }],
+          usage: { total_tokens: 42 },
+        },
+      });
 
     const response = await service().analyze({
       result: { vehicles: 2, totalTrips: 10, totalCost: 1000 },
@@ -101,9 +104,9 @@ describe('AiService', () => {
     expect(response.mode).toBe('openrouter_free');
     expect(response.model).toBe('provider/free-small:free');
     expect(response.tokens_used).toBe(42);
-    expect(http.post.mock.calls[0][1].model).toBe('provider/free-big:free');
-    expect(http.post.mock.calls[1][1].model).toBe('provider/free-small:free');
-    expect(http.post.mock.calls.map((call) => call[1].model)).not.toContain(
+    expect(mockPost.mock.calls[0][1].model).toBe('provider/free-big:free');
+    expect(mockPost.mock.calls[1][1].model).toBe('provider/free-small:free');
+    expect(mockPost.mock.calls.map((call) => call[1].model)).not.toContain(
       'paid/model',
     );
   });
@@ -222,26 +225,24 @@ describe('AiService', () => {
 
   it('skips a rate-limited (429) model on the next call (cooldown self-heal)', async () => {
     configValues.OPENROUTER_API_KEY = 'sk-or-test';
-    http.get.mockReturnValue(
-      of({
-        data: {
-          data: [
-            {
-              id: 'p/big:free',
-              context_length: 2000,
-              pricing: { prompt: '0', completion: '0' },
-            },
-            {
-              id: 'p/small:free',
-              context_length: 1000,
-              pricing: { prompt: '0', completion: '0' },
-            },
-          ],
-        },
-      }),
-    );
-    http.post.mockImplementation((_url: string, body: { model: string }) =>
-      of(
+    mockGet.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'p/big:free',
+            context_length: 2000,
+            pricing: { prompt: '0', completion: '0' },
+          },
+          {
+            id: 'p/small:free',
+            context_length: 1000,
+            pricing: { prompt: '0', completion: '0' },
+          },
+        ],
+      },
+    });
+    mockPost.mockImplementation((_url: string, body: { model: string }) =>
+      Promise.resolve(
         body.model.includes('big')
           ? { status: 429, data: {} }
           : {
@@ -256,38 +257,36 @@ describe('AiService', () => {
     const ai = service();
     const r1 = await ai.analyze({ result: { totalCost: 1 }, question: 'q1' });
     expect(r1.model).toBe('p/small:free');
-    http.post.mockClear();
+    mockPost.mockClear();
     const r2 = await ai.analyze({ result: { totalCost: 1 }, question: 'q2' });
     expect(r2.model).toBe('p/small:free');
     // O modelo que deu 429 entrou em cooldown e não é tentado de novo.
-    expect(http.post.mock.calls.map((c) => c[1].model)).not.toContain(
+    expect(mockPost.mock.calls.map((c) => c[1].model)).not.toContain(
       'p/big:free',
     );
   });
 
   it('lists ranked free models with modality info and active model', async () => {
     configValues.OPENROUTER_API_KEY = 'sk-or-test';
-    http.get.mockReturnValue(
-      of({
-        data: {
-          data: [
-            {
-              id: 'x/text:free',
-              context_length: 1000,
-              pricing: { prompt: '0', completion: '0' },
-              architecture: { input_modalities: ['text'] },
-            },
-            {
-              id: 'y/vision:free',
-              name: 'Vision',
-              context_length: 1000,
-              pricing: { prompt: '0', completion: '0' },
-              architecture: { input_modalities: ['text', 'image'] },
-            },
-          ],
-        },
-      }),
-    );
+    mockGet.mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'x/text:free',
+            context_length: 1000,
+            pricing: { prompt: '0', completion: '0' },
+            architecture: { input_modalities: ['text'] },
+          },
+          {
+            id: 'y/vision:free',
+            name: 'Vision',
+            context_length: 1000,
+            pricing: { prompt: '0', completion: '0' },
+            architecture: { input_modalities: ['text', 'image'] },
+          },
+        ],
+      },
+    });
     const out = await service().listModels();
     expect(out.models.length).toBe(2);
     const vision = out.models.find((m) => m.id === 'y/vision:free');
