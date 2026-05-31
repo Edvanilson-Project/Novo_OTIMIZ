@@ -1973,7 +1973,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         threshold = self.min_work
         short = [d for d in duties if d.work_time < threshold and d.tasks]
         normal = [d for d in duties if d.work_time >= threshold and d.tasks]
-        _log.info("[CSP-CROSS-MERGE] %d short duties (<%dmin), %d normal", len(short), threshold, len(normal))
+        _log.debug("[CSP-CROSS-MERGE] %d short duties (<%dmin), %d normal", len(short), threshold, len(normal))
         if not short:
             return duties
 
@@ -2084,7 +2084,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                         # Merge failed at apply time — skip this merge
                         continue
                 merged_ids.add(sd.id)
-                _log.info(
+                _log.debug(
                     "[CSP-CROSS-MERGE] Merged short duty %d (%dmin) into duty %d via %s (now %dmin work)",
                     sd.id,
                     sd.work_time,
@@ -2093,7 +2093,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     best_target.work_time,
                 )
             else:
-                _log.info(
+                _log.debug(
                     "[CSP-CROSS-MERGE] Could not merge duty %d (%dmin): rejects=%s",
                     sd.id,
                     sd.work_time,
@@ -2102,7 +2102,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         if merged_ids:
             duties = [d for d in duties if d.id not in merged_ids]
-            _log.info("[CSP-CROSS-MERGE] Absorbed %d short duties, %d remain", len(merged_ids), len(duties))
+            _log.debug("[CSP-CROSS-MERGE] Absorbed %d short duties, %d remain", len(merged_ids), len(duties))
         return duties
 
     def _task_is_relief_reassignment_candidate(self, task: Block) -> bool:
