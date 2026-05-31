@@ -1238,6 +1238,15 @@ export class OptimizationService implements OnModuleInit {
 
         const BATCH_SIZE = 500;
 
+        // O optimizer emite vehicle_id como índice lógico de bloco (1..N), NÃO um
+        // PK real da frota. Só gravamos na coluna FK block_assignments.vehicleId
+        // quando o id existir de fato em vehicles desta empresa; caso contrário null
+        // (o id lógico continua em metadata.vehicle_id). Sem isso, o INSERT viola a
+        // FK FK_..._vehicleId e a persistência do resultado falha por inteiro.
+        const validVehicleIds = new Set(
+          (await manager.find(Vehicle, { where: { companyId } })).map((v) => v.id),
+        );
+
         // 1. Salvar Blocos (Veículos) em lotes
         const blocksRaw = result.blocks || [];
         for (let i = 0; i < blocksRaw.length; i += BATCH_SIZE) {
@@ -1253,7 +1262,10 @@ export class OptimizationService implements OnModuleInit {
                 companyId,
                 scheduleId,
                 blockId,
-                vehicleId: explicitVehicleId ?? null,
+                vehicleId:
+                  explicitVehicleId != null && validVehicleIds.has(explicitVehicleId)
+                    ? explicitVehicleId
+                    : null,
                 tripIds: (b.trips || []).map((t: any) =>
                   typeof t === 'number' ? t : t.id,
                 ),
@@ -3128,11 +3140,26 @@ export class OptimizationService implements OnModuleInit {
   }
 
   async rosteringWeekly(body: any) {
-    const { data } = await axios.post(
-      `${this.OPTIMIZER_URL}/optimize/rostering/weekly`,
-      body,
-      { headers: this.getOptimizerHeaders(), timeout: 120000 },
-    );
-    return data;
+    try {
+      const { data } = await axios.post(
+        `${this.OPTIMIZER_URL}/optimize/rostering/weekly`,
+        body,
+        { headers: this.getOptimizerHeaders(), timeout: 120000 },
+      );
+      return data;
+    } catch (error: any) {
+      // Propaga a causa real do optimizer em vez de um 500 genérico.
+      // Erros de validação do FastAPI vêm como detail = lista de {loc, msg}.
+      const status = error.response?.status;
+      const raw = error.response?.data?.detail;
+      const detail = Array.isArray(raw)
+        ? raw.map((e: any) => `${(e.loc || []).join('.')}: ${e.msg}`).join('; ')
+        : raw;
+      const message = detail || error.message || 'Erro ao calcular escala semanal';
+      if (status && status >= 400 && status < 500) {
+        throw new BadRequestException(message);
+      }
+      throw new InternalServerErrorException(message);
+    }
   }
 }

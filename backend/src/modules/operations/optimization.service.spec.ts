@@ -364,6 +364,7 @@ describe('OptimizationService polling', () => {
       create: jest.fn((_entity, data) => data),
       save: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
+      find: jest.fn().mockResolvedValue([]),
     };
     const localService = new OptimizationService(
       {} as any, // TripRepo
@@ -453,6 +454,7 @@ describe('OptimizationService polling', () => {
       create: jest.fn((_entity, data) => data),
       save: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
+      find: jest.fn().mockResolvedValue([]),
     };
     const localService = new OptimizationService(
       {} as any, // TripRepo
@@ -540,6 +542,8 @@ describe('OptimizationService polling', () => {
       create: jest.fn((_entity, data) => data),
       save: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue(undefined),
+      // vehicle_id 91 precisa existir na frota para ser gravado na coluna FK
+      find: jest.fn().mockResolvedValue([{ id: 91 }]),
     };
     const localService = new OptimizationService(
       {} as any,
