@@ -18,6 +18,112 @@ Atualizado: 2026-05-29 (Product polish: healthcheck optimizer, limpeza raiz 31�
 Atualizado: 2026-05-29 (parte 4 — bench real dos 17 algoritmos: fix correctness regional + alinhamento de objetivo SA/Tabu)
 Atualizado: 2026-05-30 (parte 4 — re-validação E2E completa das 3 suítes + varredura no navegador das 14 telas + polish profissional do frontend para venda)
 Atualizado: 2026-05-30 (parte 5 — deploy: alinhamento Dockerfile frontend (npm→pnpm) + rebuild container saudável)
+Atualizado: 2026-05-30 (parte 6 — re-validação real das 3 suítes (fix 10 testes AI), auditoria de parâmetros com prova empírica, bench dos 17 algoritmos, E2E browser, polish do header)
+Atualizado: 2026-05-31 (parte 7 — retomada pós-desligamento: fix 400 da Escala Semanal (RosteringWeeklyDto), tsconfig exclui specs, Dockerfile pin pnpm; re-validação direcionada verde)
+
+---
+
+## Sessão 2026-05-31 (parte 7) — Retomada pós-desligamento: fix Escala Semanal + tooling
+
+### Contexto
+O PC desligou no meio de um trabalho ainda **não documentado** (uma "parte 7" iniciada após
+escrever a seção da parte 6). Ao retomar, o working tree tinha 3 edits novos além dos da parte 6:
+`operations.dto.ts`, `frontend/tsconfig.json`, `frontend/Dockerfile`. Código completo (imports OK);
+faltava apenas validar e decidir commit.
+
+### BUG-ROSTERING-400-01 (P1, correctness) — CORRIGIDO
+- `RosteringWeeklyDto` (operations.dto.ts:492) só tinha index signature `[key: string]: unknown`,
+  sem propriedades declaradas. A `ValidationPipe` global (`main.ts:62-63`) usa
+  `whitelist:true` + `forbidNonWhitelisted:true` → todo campo do payload é "não-whitelisted"
+  → **400 Bad Request** → a Escala Semanal nunca executava.
+- Fix mínimo: declarar os campos do payload com `@IsOptional` (operators, daily_duties,
+  weekly_hour_limit_minutes, min_days_off, min_inter_shift_rest_minutes, time_budget_s).
+  A validação profunda continua no optimizer (`/optimize/rostering/weekly`). Imports do
+  class-validator já existiam — sem novas dependências.
+
+### Tooling (cirúrgico)
+- `frontend/tsconfig.json`: exclui `*.spec/*.test` + `vitest.config.ts`/`playwright.config.ts`/`e2e/**`
+  do `tsc --noEmit` (build de produção não deve falhar por arquivo de teste).
+- `frontend/Dockerfile`: pin `pnpm@9.15.0` (era `pnpm@latest`) no builder e no runner —
+  reprodutibilidade do build.
+
+### Re-validação direcionada (rodada DE VERDADE nesta retomada, 2026-05-31)
+- Backend `jest src/modules/ai src/modules/operations`: **176 passed, 14 suites** (exit 0).
+- Frontend `tsc --noEmit`: **rc=0**. `vitest run`: **26 passed**.
+- Optimizer `py_compile src/api/schemas.py`: **OK** (mudança é só docstring — BUG-DOC-PARAM-01).
+- Não rodei a suíte completa do optimizer (680, ~680s, CPU-only) — nenhuma mudança de
+  comportamento no optimizer nesta parte (só docstring).
+
+### Pendente (decisão do usuário)
+- **Commit**: working tree validado, ainda não commitado. Agrupar logicamente
+  (fix Escala / tooling / test fix AI / doc param / header polish / status doc).
+- Herdados da parte 6: rebuild do container frontend (STALE), push/PR + rotação da chave OpenRouter (gated).
+
+---
+
+## Sessão 2026-05-30 (parte 6) — Re-validação + auditoria de parâmetros + bench 17 algos + polish
+
+### Pedido do usuário
+Continuar "todos os ajustes e análises": testar o sistema todo pelo browser (tudo conectado),
+deixar interface E código limpos/profissionais, e **principalmente validar os PARÂMETROS** —
+se estão corretos, tratados certo e influenciando de verdade a otimização — e **testar TODOS
+os algoritmos**.
+
+### Ground truth REAL re-rodado (sem confiar em log antigo)
+- Optimizer `pytest -m "not slow"`: **680 passed, 5 skipped** (exit 0, 683s).
+- Backend Jest: estava **10 failed / 542 passed** → após fix **552 passed, 59 suites** (exit 0).
+- Frontend `vitest`: **26 passed**; `tsc --noEmit` rc=0 (antes E depois dos edits).
+
+### BUG-AI-SPEC-01 (P1, regressão real) — CORRIGIDO
+- `ai.service.spec.ts` quebrado: o commit `42e544e` trocou `@nestjs/axios`→`axios` e mudou o
+  construtor para `(config, aiAnalysisRepository, tenantContext)`, mas o spec continuava passando
+  `(http, config, repo, tenant)` + mockando observables `of(...)`. Resultado: `repo` caía em
+  `tenantContext` → `this.tenantContext.getCompanyId is not a function` (10 testes).
+- Fix **no teste** (código de produção está correto): mock do módulo `axios` (get/post como
+  promises), construtor na ordem certa. 11/11 passam; suite backend volta a **552 passed**.
+
+### Auditoria de PARÂMETROS — definição → propagação → efeito
+- **Propagação**: rota `/optimize` constrói `cct_params`/`vsp_params`/`optimization_params` via
+  `model_dump(exclude_none=True, exclude_unset=True)` de schemas com `extra="ignore"` →
+  parâmetros fora do schema são descartados na borda da API (por design).
+- **Invariante motorista×veículo OK no runtime**: greedy separa `max_vehicle_shift_minutes`
+  (jornada/duty do motorista) de `max_block_span_minutes` (bloco-veículo, default 1440, NÃO exposto
+  em schema — interno). `optimizer_service:259` mapeia `max_shift_minutes`→`max_vehicle_shift_minutes`.
+- **BUG-DOC-PARAM-01 (doc) — CORRIGIDO**: `BaseOptimizationConfig.max_vehicle_shift_minutes` tinha
+  descrição **invertida** ("Duração máxima de um bloco de veículo"). Era a conflação que o CLAUDE.md
+  alerta. Corrigida para "jornada do motorista (duty); o limite do bloco é max_block_span_minutes".
+- **PROVA EMPÍRICA** (`optimizer/scratch/exp_param_influence.py`, mesmo path do worker, 98 trips):
+  4/5 direções fortes + 1 neutra. min_layover 5→90 ⇒ veíc 25→30; max_vehicle_shift 960→180 ⇒
+  veíc 17→52; max_shift(motorista) 560→240 ⇒ **crew** 29→37 (métrica diferente = sem conflação);
+  vehicle_fixed_cost 200→5000 ⇒ custo 30.668→112.268; apply_cct off→on ⇒ cct 0→0 (instância não
+  estressa CCT — direção mantida mas fraca).
+- O código já tem auto-diagnóstico de consistência (`[PARAMS-AUDIT]` em optimizer_service:269,
+  `[CONFIG] ... penalty soft inerte` em csp/greedy:240).
+
+### TODOS os 17 algoritmos testados (`scratch/bench_all_algorithms.py`, 160 trips, LB 20)
+- **17/17 OK**: 160/160 cobertas, 0 overlaps, custo positivo, todos ≥ LB. 15/17 atingem o ótimo
+  prático 24 veículos; mcnf/bundle 25; regional 29 (fragmenta — conhecido). Mais barato no ótimo:
+  alns/B&P/joint_bp (R$47.815).
+
+### E2E real no browser (Puppeteer, https://localhost via nginx, login admin@otimiz.com/Otimiz@123)
+- **Login → Dashboard → Parâmetros CCT → Planejador**: todos conectados a dados reais, render limpo,
+  0 erro de console. Dashboard 298 viagens/14 veíc/R$52.572,47/0 CCT (mcnf_vsp). Parâmetros CCT
+  expõe campos mapeando o schema (driver_cost, vehicle_fixed_cost, max_shift_minutes, etc.).
+  Planejador 14v/298/0 hard/0 soft/Gini 0.214/Gap ≤40% (teórico, fix OBS-GAP-01 visível).
+
+### Polish do header (cirúrgico, tsc+vitest verdes)
+- **Profile dropdown** tinha leftovers de template MUI: 3 itens de menu com **links mortos**
+  (/apps/email, /apps/kanban, /apps/user-profile — rotas inexistentes/404), caixa promo
+  "Unlimited Access/Upgrade", textos em inglês ("User Profile", "Logout"), aria-label enganoso
+  ("show 11 new notifications"). Removidos/corrigidos: menu agora aponta só p/ rota real
+  (/settings/general), "Minha Conta", "Sair", aria-label correto, import `Image` órfão removido.
+
+### Pendente (decisão do usuário)
+- **Deploy**: container frontend está STALE (mostra "7 algoritmos" no login; a fonte já diz "18").
+  Rebuild necessário p/ refletir esse fix + o polish do header. (Checar disco antes.)
+- **Commit**: edits desta sessão não commitados (3 arquivos: ai.service.spec.ts, schemas.py,
+  Profile.tsx + data.ts). Aguardando ok.
+- **Push/PR + rotação de chave OpenRouter** (B1, irreversível) — segue gated.
 
 ---
 
