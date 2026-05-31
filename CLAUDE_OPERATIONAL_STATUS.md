@@ -20,6 +20,85 @@ Atualizado: 2026-05-30 (parte 4 — re-validação E2E completa das 3 suítes + 
 Atualizado: 2026-05-30 (parte 5 — deploy: alinhamento Dockerfile frontend (npm→pnpm) + rebuild container saudável)
 Atualizado: 2026-05-30 (parte 6 — re-validação real das 3 suítes (fix 10 testes AI), auditoria de parâmetros com prova empírica, bench dos 17 algoritmos, E2E browser, polish do header)
 Atualizado: 2026-05-31 (parte 7 — retomada pós-desligamento: fix 400 da Escala Semanal (RosteringWeeklyDto), tsconfig exclui specs, Dockerfile pin pnpm; re-validação direcionada verde)
+Atualizado: 2026-05-31 (parte 8 — varredura E2E real das 24 telas no navegador: 3 bugs corrigidos (P1 persistResults FK, 422 Escala Semanal, 500→400 propagação), reconciliação de 6 runs presos, log spam CSP; achados de perf/dados documentados)
+
+---
+
+## Sessão 2026-05-31 (parte 8) — Varredura E2E real das 24 telas + 3 bugs corrigidos
+
+### Pedido do usuário
+Testar TUDO como usuário/especialista real no navegador (desde o login), achar bugs/quebras,
+corrigir, deixar limpo e profissional nível enterprise; remover o que não faz sentido.
+
+### Setup
+Docker estava inativo (usuário iniciou). Stack core subido (postgres/redis/optimizer/celery×2/
+backend/frontend/nginx — observability/exporters fora: postgres-exporter:v0.15.1 tem tag inexistente
+que travava `compose up`). Frontend rebuildado (STALE→fresh, "18 algoritmos"). Senha do admin dev
+resetada (banco restaurado não tinha a senha de teste). E2E via Puppeteer headless:false em
+https://localhost (nginx), login admin@otimiz.com.
+
+### Varredura: 24 telas, todas renderizam com dados reais e sem erro de console
+Auth (login válido/inválido/rede, forgot, reset), Dashboard, Help, Operations (data 298 viagens,
+lines, terminals, planner, map, reporting, reporting/custom, rostering, advanced/what-if, history),
+Settings (parameters 100 campos, companies, users RBAC, access matriz, general, account LGPD,
+fleet, fleet/maintenance). Login form confirmado com digitação real (puppeteer_fill não dispara
+onChange do React — artefato de teste, não bug).
+
+### BUG-ROSTERING-PAYLOAD-01 (Escala Semanal quebrada E2E) — CORRIGIDO
+- A tela mandava `operators[].cp: 0` (number) e `last_shift_end: null`, mas o schema do optimizer
+  (`OperatorProfileInput`) exige `cp: str` e `last_shift_end: int` → optimizer 422.
+- Fix frontend (`rostering/page.tsx`): `cp: ''`, `last_shift_end: 0`. Verificado: payload corrigido
+  → 201 com escala válida; UI roda. (O fix do 400 da parte 7 destravou a DTO; este destravou o 422.)
+
+### BUG-ROSTERING-500-01 (erro genérico) — CORRIGIDO
+- `OptimizationService.rosteringWeekly` fazia `axios.post` sem try/catch → 422 do optimizer virava
+  500 "Erro interno" e o frontend perdia o detalhe. Fix: catch propaga status+detalhe (400 com a
+  causa real; lista de erros Pydantic formatada). Frontend lê `detail || message`. Verificado:
+  payload bom → 201; payload ruim → 400 "body.operators.0.cp: Input should be a valid string".
+
+### BUG-PERSIST-VEHICLE-FK-01 (P1 — resultado de otimização não salvava) — CORRIGIDO
+- `persistResults` gravava `block_assignments.vehicleId = optimizer block.vehicle_id`, mas esse é um
+  índice lógico (1..N), NÃO um PK real de `vehicles`. A empresa tem 1 veículo real → INSERT de 14
+  blocos violava a FK `FK_..._vehicleId` → **persistência falhava por inteiro** e o schedule ficava
+  preso em "processing" (resultado válido perdido). Confirmado nos logs: otimização succeeded
+  (14v/0 CCT/R$50k) mas persistResults FALHOU na FK.
+- Fix (`optimization.service.ts`): carrega os ids reais de `vehicles` da empresa e só grava na coluna
+  FK quando o id existir; senão null (o id lógico segue em `metadata.vehicle_id`). 3 specs do
+  persistResults ajustados (mock de `manager.find`). **165/165 jest operations passam.**
+- **Validado E2E**: nova otimização mcnf via planner → schedule **completed**, **14 block_assignments
+  persistidos** (1 com vehicleId real, 13 null), planner mostra **14 veículos / 298 / 0 hard / 0 soft /
+  Gini 0.157**. Pipeline otimização→persist→Gantt funcionando ponta a ponta.
+
+### Reconciliação de runs presos (dado)
+- 6 schedules em "processing" (da sessão anterior, PC desligou no meio) bloqueavam o planner
+  ("Otimização em andamento" eterno). `onModuleInit` reconcilia no boot → restart do backend marcou
+  os 6 como FAILED (BACKEND_RESTART_STALE_PROCESSING). Planner destravou.
+
+### Log spam CSP (limpeza) — CORRIGIDO
+- `csp/greedy.py` `_cross_vehicle_merge` logava 4 linhas INFO por invocação, chamado ~500×/min no
+  hybrid → 3483 linhas/min. Rebaixado para DEBUG (zero mudança de comportamento, menos overhead de I/O).
+
+### Achados NÃO corrigidos (documentados — decisão do usuário; algoritmo/produto)
+- **PERF-HYBRID-01**: hybrid_pipeline leva ~345s em 298 viagens (CSP cross-merge O(short×cand) com
+  deepcopy, invocado muitas vezes). mcnf completa em ~40s com o mesmo ótimo (14v/0 CCT). O default
+  "Recomendado" do planner é o hybrid (lento); considerar mcnf como default. Mudar algoritmo = risco
+  (lição Sprint B) → não alterado autonomamente.
+- **RECONCILE-RUNTIME-01**: reconciliação de runs presos só roda no boot (onModuleInit). Run que trava
+  em runtime (worker morre/poll perdido) fica preso até reiniciar o backend. Sugerir reconciliação
+  periódica/por-timeout (mudança de arquitetura — decisão do usuário).
+- **DATA-CLEAN-01**: dados de teste/QA no banco dev (Terminal QA Teste ×2, Usuario QA Teste, Test
+  Company (dev), frota "QA"); códigos de terminal duplicados (TER-001/TER-002 em Salvador e São Paulo);
+  linhas/empresas com campos incompletos. Limpeza requer checar FK (trips→terminals) antes de remover.
+- **POLISH-01** (menores): breadcrumbs crus em algumas rotas (account/history/maintenance), acentos
+  faltando em alguns labels (Parâmetros/otimização/padrão), "Credenciais inválidas" duplicado no DOM,
+  inputs do login sem name/id (a11y), forgot/reset-password com design mais simples que o login.
+
+### Validação executada (de verdade)
+- Backend: `tsc` rc=0; `jest src/modules/operations` **165 passed, 13 suites**.
+- Frontend: `tsc` rc=0; `vitest` **26 passed**.
+- Optimizer: `py_compile` + `flake8 E9,F` limpos em greedy.py.
+- E2E: planner 14v persistido (570 completed); rosteringWeekly 201 (bom) / 400 (ruim, com detalhe).
+- Rebuild: backend (deployado+verificado); frontend+optimizer (rebuild em andamento p/ deploy do fix de UI).
 
 ---
 
