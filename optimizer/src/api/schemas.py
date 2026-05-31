@@ -120,7 +120,7 @@ class BaseOptimizationConfig(BaseModel):
     time_budget_s: Optional[int] = Field(None, description="Tempo limite para o solver (segundos)")
     random_seed: Optional[int] = Field(None, description="Seed aleatória para repetibilidade")
     max_vehicles: Optional[int] = Field(None, description="Limite máximo de veículos ativados")
-    max_vehicle_shift_minutes: Optional[int] = Field(None, description="Duração máxima de um bloco de veículo")
+    max_vehicle_shift_minutes: Optional[int] = Field(None, description="Duração máxima da jornada do motorista (duty) no VSP; o limite do bloco-veículo é max_block_span_minutes (default 1440)")
     preferred_pair_window_minutes: int = Field(30, description="Janela máxima para par preferencial (IDA+VOLTA)")
     pair_break_penalty: float = Field(1000.0, description="Penalidade por quebra de par IDA+VOLTA")
     paired_trip_bonus: float = Field(500.0, description="Bônus por par IDA+VOLTA preservado")
