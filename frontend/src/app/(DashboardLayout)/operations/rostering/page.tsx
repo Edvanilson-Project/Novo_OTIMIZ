@@ -138,8 +138,8 @@ export default function WeeklyRosteringPage() {
         operators: selectedDrivers.map((d) => ({
           id: String(d.id),
           name: d.name,
-          cp: 0,
-          last_shift_end: null,
+          cp: '',
+          last_shift_end: 0,
           metadata: {},
         })),
         daily_duties: Object.fromEntries(
@@ -154,8 +154,12 @@ export default function WeeklyRosteringPage() {
       const res = await weeklyRosteringApi.solve(body);
       setResult(res);
     } catch (e) {
-      const axiosErr = e as { response?: { data?: { detail?: string } } };
-      setError(axiosErr?.response?.data?.detail || 'Erro ao executar escala semanal.');
+      const axiosErr = e as { response?: { data?: { detail?: string; message?: string } } };
+      setError(
+        axiosErr?.response?.data?.detail ||
+          axiosErr?.response?.data?.message ||
+          'Erro ao executar escala semanal.',
+      );
     } finally {
       setLoading(false);
     }
