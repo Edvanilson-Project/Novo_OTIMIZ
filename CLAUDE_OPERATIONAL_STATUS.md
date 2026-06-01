@@ -21,8 +21,148 @@ Atualizado: 2026-05-30 (parte 5 — deploy: alinhamento Dockerfile frontend (npm
 Atualizado: 2026-05-30 (parte 6 — re-validação real das 3 suítes (fix 10 testes AI), auditoria de parâmetros com prova empírica, bench dos 17 algoritmos, E2E browser, polish do header)
 Atualizado: 2026-05-31 (parte 7 — retomada pós-desligamento: fix 400 da Escala Semanal (RosteringWeeklyDto), tsconfig exclui specs, Dockerfile pin pnpm; re-validação direcionada verde)
 Atualizado: 2026-05-31 (parte 8 — varredura E2E real das 24 telas no navegador: 3 bugs corrigidos (P1 persistResults FK, 422 Escala Semanal, 500→400 propagação), reconciliação de 6 runs presos, log spam CSP; achados de perf/dados documentados)
+Atualizado: 2026-06-01 (parte 9 — benchmark autoritativo (JSON, determinismo provado) + 2 fixes de custo: SA/Tabu/joint_solver/hybrid sem vehicle_type → custo −30%; regional stitch conflatava jornada×span → −5 veículos)
+Atualizado: 2026-06-01 (parte 10 — deploy dos fixes (rebuild optimizer+celery) + validação real no navegador dos 9 algoritmos do planner na instância 298→14; SA/Tabu 87k→46k confirmado live; cache mascarava fix; varredura de abas)
 
 ---
+
+## Sessão 2026-06-01 (parte 10) — Deploy dos fixes + validação browser dos 9 algoritmos (298→14)
+
+### Pedido do usuário
+Pesquisar fontes confiáveis sobre o comportamento correto dos algoritmos/parâmetros; depois
+executar TODOS os algoritmos no navegador com parâmetros variados, exaustivamente, e analisar
+se todos os eventos e viagens estão sendo trazidos corretamente em TODAS as abas, de forma coerente.
+
+### Fontes confiáveis (comportamento correto)
+- VSP mono-depósito = fluxo de custo mínimo, polinomial/ótimo (Bunte & Kliewer 2009).
+- Vehicle scheduling ≠ crew scheduling: "drivers need breaks while vehicles don't" (Optibus) —
+  valida o fix do regional (span do bloco = limite do VEÍCULO 1440, não jornada do MOTORISTA 960).
+- TCRP Report 30 (Transit Scheduling): bloco = pull-out → viagens → deadheads → pull-in;
+  string diagram com cor por sentido. O modelo de eventos da UI mapeia 1:1:
+  Soltura=pull-out, Viagem=revenue, Recolhimento=pull-in, IDA/VOLTA por cor (azul/roxo).
+
+### Achado crítico: container estava DESATUALIZADO em relação ao commit do fix
+- optimizer/celery rodavam imagem de 2026-05-31 16:00 (sem `select_vehicle_type` em SA/Tabu,
+  sem `max_block_span` em regional). Browser testava CÓDIGO ANTIGO → SA aparecia R$87k (o bug).
+- Ação: `docker compose build optimizer celery-worker celery-worker-depot` + recreate (no-deps).
+  Confirmado no container: SA/Tabu `select_vehicle_type`=2, regional `max_block_span`=5, healthy.
+
+### Achado: cache de resultado mascarava o fix
+- Após rebuild, 1º SA voltou em 140ms = CACHE HIT (redis db2) com o custo antigo 87352.
+  O fingerprint do cache não inclui versão de código (caveat do CLAUDE.md). 
+- Ação: `FLUSHDB` apenas no redis db2 (cache do optimizer) + reconciliar run #83 órfão (running→failed).
+
+### Validação browser — 9 algoritmos do planner, instância real 298 viagens (company_16)
+Custo total / 14 veículos / 298 cobertas / 0 unassigned / 0 CCT em TODOS (lido de optimization_runs):
+
+| Algoritmo          | Custo (R$) | Run | Obs |
+|--------------------|-----------:|-----|-----|
+| joint_solver       | 41.940,02  | 93  | mais barato (integra VSP+CSP) |
+| simulated_annealing| 46.095,92  | 88  | **FIX: era 87.352 (−47%)** |
+| tabu_search        | 46.095,92  | 89  | **FIX: idem SA** |
+| hybrid_pipeline    | 50.279,57  | 95  | 22 duties; ~230s (multi-round CSP) |
+| mcnf (exato)       | 55.000,22  | 91  | bate valor canônico do dashboard |
+| vcsp_pulp          | 64.566,02  | 94  | experimental |
+| set_partitioning   | 65.880,47  | 92  | |
+| genetic            | 68.721,92  | 90  | converge p/ seed greedy |
+| greedy             | 68.721,92  | 85  | baseline |
+
+- SA stale (run 86, código antigo) = 87.352,58 → SA fix (run 88) = 46.095,92. Fix provado LIVE.
+- company_16 tem 2 tipos de veículo (costPerDay 500 e 800); o fix rotula o mais barato.
+
+### Coerência de eventos/viagens (aba "Viagens" do planner = log de eventos)
+- 14 Soltura + 298 Viagem + 14 Recolhimento = 326 (rótulo "Viagens (326)" é o nº de EVENTOS).
+- IDA 149 / VOLTA 149 (round trips balanceados); 298/298 viagens com motorista atribuído.
+- Overnight tratado com marcador "+1" (ex.: 23:54 → 00:09 +1); 0 inversões reais de tempo.
+- 89 trocas de motorista (run-cutting, 24 duties) são IMPLÍCITAS (coluna motorista por viagem);
+  o tipo de evento `Troca de motorista`/rendição existe na UI (TabGantt.tsx) mas o motor NÃO emite
+  esses eventos explicitamente. Lacuna de completude (não é erro de dado).
+
+### Varredura de abas (coerência cross-tab: 298 viagens, 14 veículos consistentes)
+- Planner/Gantt/Veículos/Motoristas: coerente (14 veíc, 24-25 motoristas, 0 hard/soft).
+- Analytics & Relatórios: honesto — lê de optimization_runs, sem valores fabricados; estados
+  "aguardando otimização" onde falta par baseline×otimizado (por design).
+- What-If/Otimização Avançada: "Cenário Atual R$64.566 / 14 veíc" = run 94 (coerente).
+- Escala Semanal: carrega limpa (precisa "Calcular Escala Semanal" p/ popular).
+- Mapa Operacional: **0 de 298 viagens com coordenadas, 4 de 10 terminais** → rotas não desenham
+  (lacuna de DADOS, não bug de render); legenda por linha soma 298 (106+92+90+10). 
+- Rate limiter validado: 429 ThrottlerException ao exceder 5 otimizações/5min.
+
+### Pendências/achados (P2/P3)
+- P3: emitir eventos explícitos de `Troca de motorista` (rendição) no stream de eventos.
+- P3: popular coordenadas de viagens/terminais para o Mapa render rotas.
+- P3: UI passa `min_break_minutes=10` (< 30 CCT) — warning recorrente; revisar default do preset.
+- OBS: cache de resultado não invalida por mudança de código — após deploy de fix, limpar redis db2.
+
+---
+
+## Sessão 2026-06-01 (parte 9) — Benchmark autoritativo + 2 fixes de custo (SA/Tabu/hybrid −30%, regional −5 veíc)
+
+### Pedido do usuário
+(1) Pinar a instância e rodar UM benchmark autoritativo gravando JSON (leitura confiável) → baseline real;
+(2) com baseline: melhoria do hybrid (budget p/ polish CP-SAT quando baseline já no ótimo) + investigar
+SA/Tabu (frota ok, custo ruim) + regional em escala pequena — cada um validado empírico + pytest;
+(3) follow-ups de produto, testando até todos os algoritmos estarem otimizando de verdade.
+
+### Passo 1 — Determinismo era FALSO problema; o real era stdout flaky
+- O gerador `make_salvador_trips(seed=42)` é determinístico (`random.Random(seed)`); o serviço já deriva
+  seed determinística do input (`_derive_deterministic_seed`/replay_fingerprint). Probe empírico
+  (`scratch/probe_determinism.py`) + benchmark `--repeat 2`: **TODOS os 17 algoritmos byte-idênticos
+  entre as 2 passadas** (campo `determinism.*.stable=true`). A "não-determinância" percebida era leitura
+  flaky de stdout (comentada em `perf_hybrid_phases.py`). Solução = saída JSON, não mudar algoritmo.
+- `scratch/bench_all_algorithms.py` ganhou `--lines/--scale/--budget/--out/--repeat` (argparse,
+  retrocompatível). Baseline gravado em `/tmp/bench_298.json` (instância sintética 160 viagens, LB conc.=20).
+
+### BUG-VSP-VEHICLE-TYPE-01 (P1, custo) — CORRIGIDO  → SA/Tabu/joint_solver/hybrid
+- **Sintoma**: SA/Tabu/joint_solver = R$68.190 e hybrid (DEFAULT de produção) = R$66.180, todos com a
+  MESMA frota (24v) que greedy (R$50.047) — 30–36% mais caro **sem usar mais veículos**.
+- **Causa-raiz** (decomposição em `scratch/diag_satabu_cost.py` via `CostEvaluator.total_cost_breakdown`):
+  `_state_to_blocks` de SA e Tabu construía `Block(id, trips)` **sem `vehicle_type_id`**. O evaluator
+  então custeava no veículo DEFAULT caro (ativação R$800/bloco + custo/hora padrão) em vez do
+  micro-ônibus barato (R$180) que greedy/mcnf selecionam. Ex.: SA `activation`=19.200 (24×800) vs
+  greedy 4.320 (24×180). A escala/estrutura estava certa; só o RÓTULO de veículo estava errado.
+- **Fix cirúrgico** (`vsp/simulated_annealing.py`, `vsp/tabu_search.py`): `_state_to_blocks` recebe e
+  aplica `select_vehicle_type(vehicle_types, depot_id).id` (o mesmo helper do greedy, escolhe menor
+  fixed_cost). **Zero impacto na busca** (a busca usa o proxy `quick_cost_from_trips`, agnóstico a tipo
+  de veículo) — só o bloco FINAL é rotulado. joint_solver usa SA/Tabu → corrigido por tabela. O hybrid
+  seleciona o VSP de SA/Tabu → corrigido por tabela.
+- **Validado (bench `--repeat 2`, /tmp/bench_298_after.json)**: SA/Tabu/joint_solver 68.190→**47.815
+  (−30%)**, hybrid 66.180→**45.805 (−31%)**, todos 24v / 160 cobertas / 0 overlaps / determinístico.
+  Nenhum dos outros 13 algoritmos mudou (0.0%). SA/Tabu agora EMPATAM B&P/alns (47.815) — "frota ok,
+  custo ruim" virou "frota ok, custo BOM".
+
+### BUG-REGIONAL-STITCH-SPAN-01 (P1, frota) — CORRIGIDO
+- **Causa-raiz**: `_stitch_blocks` (reuso de veículo entre janelas) limitava o **span do BLOCO-VEÍCULO**
+  por `max_vehicle_shift_minutes` (960 = jornada do MOTORISTA) em vez de `max_block_span_minutes`
+  (1440 = limite do VEÍCULO). É exatamente a conflação que o CLAUDE.md proíbe. A janela operacional de
+  Salvador é 18h (5h-23h) > 16h → um veículo não cobria manhã+noite → frota inflada.
+- **Fix** (`vsp/regional_decomposition.py`): stitch usa `max_block_span_minutes` (default 1440, <0=∞),
+  espelhando greedy/mcnf. O CSP faz run-cutting da jornada do motorista (separado).
+- **Validado (A/B mesmo código, `scratch/diag_regional_span.py`)**: 160 viagens **29→24 veículos**
+  (atinge o ótimo, igual aos demais), 276 viagens **55→50**; cobertura total + 0 overlaps em ambos.
+
+### Sobre a "melhoria do hybrid (budget CP-SAT)" do pedido
+- A hipótese do usuário (reservar budget p/ polish CP-SAT) apontava o sintoma certo (hybrid subótimo),
+  mas a CAUSA era o BUG-VSP-VEHICLE-TYPE-01, com correção muito maior (−31%) e mais segura (não mexe na
+  busca nem na alocação de orçamento). NÃO implementei a realocação de budget (mudaria comportamento do
+  hybrid — lição Sprint B) pois o ganho marginal sobra ínfimo após o fix. Oportunidade de PERF aberta
+  (documentada): o hybrid gasta ~35s para 45.805 enquanto mcnf entrega 45.304 em 0,1s (PERF-HYBRID-01).
+
+### Validação executada (de verdade)
+- pytest direcionado: `unit/test_algorithms + test_multi_depot + test_vsp_tolerance_and_multiline +
+  test_explainability_and_costs + test_cost_gap_investigation` → **77 passed, 1 skipped**.
+- `proof_of_optimization_suite + qa_quick_all_algorithms` → **26 passed** (1 advisory esperado).
+- `test_regional_decomposition + test_regional_parallel_benchmark + unit/test_stress_and_postopt` →
+  **48 passed**.
+- Suíte completa `pytest -m "not slow"` — resultado registrado abaixo ao concluir.
+- Artefatos não-commit (scratch): probe_determinism.py, diag_satabu_cost.py, diag_regional_span.py,
+  bench_all_algorithms.py (--out/--repeat), perf_hybrid_phases.py.
+
+### Pendente (decisão do usuário)
+- Commit dos 3 arquivos de produção (simulated_annealing.py, tabu_search.py, regional_decomposition.py)
+  + harness/scratch. Working tree do branch fix/optimizer-regional-dedup-deadhead-proxy.
+- Opcional: realocação de budget CP-SAT / mcnf-as-default do hybrid (PERF-HYBRID-01) — fora de escopo
+  cirúrgico, decisão de produto.
 
 ## Sessão 2026-05-31 (parte 8) — Varredura E2E real das 24 telas + 3 bugs corrigidos
 
