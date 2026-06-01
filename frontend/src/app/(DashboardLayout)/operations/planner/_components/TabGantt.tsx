@@ -613,7 +613,7 @@ function buildEventsFromSegments(
     else if (type === 'duty_end') kind = 'fim_jornada';
     else if (type === 'deadhead') kind = 'deslocamento_operacional';
     else if (type === 'driver_change') kind = 'troca_motorista';
-    // driver_vehicle_change is intentionally skipped — vehicle-change bookkeeping events are not shown
+    else if (type === 'driver_vehicle_change') kind = 'troca_veiculo';
 
     if (!kind) return;
 
@@ -1958,15 +1958,25 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
 
   // ─── Flat events for Viagens tab (all vehicle events sorted chronologically) ───
   const allEventsSorted = useMemo((): PlanEvent[] => {
-    return vehicleGroups
+    const vehicleEvents = vehicleGroups
       .flatMap((g) => g.events.map((e) => ({
         ...e,
         vehicleId: g.id,
         // Enriquece com motorista: só viagens reais têm tripId que mapeiam para um duty
         dutyId: e.tripId != null ? (tripToDutyId.get(e.tripId) ?? null) : null,
-      })))
-      .sort((a, b) => a.inicio - b.inicio);
-  }, [vehicleGroups, tripToDutyId]);
+      })));
+    // Eventos de escopo MOTORISTA (descanso/refeição, rendição e troca de veículo) só
+    // existem nas duties. O log de eventos (aba Viagens) deve mostrá-los junto das
+    // viagens do veículo para refletir a operação real, não só na aba Motoristas.
+    const DRIVER_ONLY_KINDS = new Set<EventKind>([
+      'descanso', 'troca_motorista', 'troca_veiculo', 'deslocamento_operacional',
+    ]);
+    const driverEvents = dutyGroups
+      .flatMap((g) => g.events
+        .filter((e) => DRIVER_ONLY_KINDS.has(e.kind))
+        .map((e) => ({ ...e, dutyId: g.id })));
+    return [...vehicleEvents, ...driverEvents].sort((a, b) => a.inicio - b.inicio);
+  }, [vehicleGroups, dutyGroups, tripToDutyId]);
 
   // ─── Export rows ───
   const vehiculosExportRows = useMemo(() =>
