@@ -23,6 +23,48 @@ Atualizado: 2026-05-31 (parte 7 — retomada pós-desligamento: fix 400 da Escal
 Atualizado: 2026-05-31 (parte 8 — varredura E2E real das 24 telas no navegador: 3 bugs corrigidos (P1 persistResults FK, 422 Escala Semanal, 500→400 propagação), reconciliação de 6 runs presos, log spam CSP; achados de perf/dados documentados)
 Atualizado: 2026-06-01 (parte 9 — benchmark autoritativo (JSON, determinismo provado) + 2 fixes de custo: SA/Tabu/joint_solver/hybrid sem vehicle_type → custo −30%; regional stitch conflatava jornada×span → −5 veículos)
 Atualizado: 2026-06-01 (parte 10 — deploy dos fixes (rebuild optimizer+celery) + validação real no navegador dos 9 algoritmos do planner na instância 298→14; SA/Tabu 87k→46k confirmado live; cache mascarava fix; varredura de abas)
+Atualizado: 2026-06-01 (parte 11 — eventos de tripulação: descanso/rendição/troca de veículo agora aparecem no log de eventos (aba Viagens 326→555); diagnóstico salada de frutas=parâmetro; solver já escolhe rendição via run-cutting)
+
+---
+
+## Sessão 2026-06-01 (parte 11) — Eventos de tripulação no log (descanso/rendição/troca)
+
+### Pedido do usuário
+Corrigir: rendição explícita (aceitar rendição dentro da viagem), eventos de descanso vindo errado,
+"salada de frutas" (motorista em vários veículos — ver se é parâmetro ou bug), e descanso obrigatório
+não vindo para todos. Deixar comportamento em PARÂMETRO configurável; eventos têm que aparecer na viagem.
+
+### Diagnóstico (evidência: company_parameters c16, schedule 581 / run 95 hybrid)
+- "Salada de frutas" = PARÂMETRO, não bug: `operator_single_vehicle_only=false` (+ `allow_vehicle_swap=true`)
+  → 77 `driver_vehicle_change` em 22 duties. Já é configurável em Parâmetros CCT ("Operador em Único
+  Veículo"); default do frontend é `true`. A empresa 16 está com `false` salvo no banco.
+- Eventos de descanso/rendição JÁ eram calculados pelo motor (`operational_time_service` →
+  `duty_time_segments`) e persistidos em `duty_assignments.metadata`, mas o front montava o log da aba
+  "Viagens" só com eventos de VEÍCULO (`vehicleGroups`: soltura/viagem/recolhimento). Por isso descanso/
+  rendição só apareciam ao expandir a jornada na aba Motoristas.
+- Descanso obrigatório "não para todos" = CORRETO: só 8/22 duties exigem (condução contínua >4h, art.235-D);
+  `duties_missing_mandatory_rest=0`. CLT art.71 (intervalo intrajornada p/ jornada >6h) é fracionável p/
+  motorista urbano via CCT — atendido pelos 119 intervalos normais (não validado como total hoje).
+- `min_break_minutes=10` (< CCT 30) é dado salvo da empresa; configurável em Parâmetros CCT ("Intervalo Mínimo").
+- Rendição: o run-cutting JÁ escolhe o melhor ponto (terminais) automaticamente → 25 `driver_change` em run 95.
+  Rendição NO MEIO de viagem em curso exige local físico (ponto de rendição); sem ponto, o ótimo é nos terminais.
+
+### Correção aplicada (commit 769f14d, frontend, rebuild da imagem frontend)
+`TabGantt.tsx`:
+1. `buildEventsFromSegments`: deixa de descartar `driver_vehicle_change` → mapeia p/ `troca_veiculo`.
+2. `allEventsSorted`: mescla eventos de escopo MOTORISTA (descanso, troca_motorista, troca_veiculo,
+   deslocamento) das duties no log cronológico da aba Viagens.
+
+Validado no navegador (run hybrid 95): log 326→555 = 298 viagem + 14 soltura + 14 recolhimento +
+119 intervalo normal + 8 descanso obrigatório + 25 troca de motorista + 77 troca de veículo
+(bate com os duty_time_segments do banco). tsc --noEmit ok.
+
+### Pendências/decisões do usuário
+- Parâmetros são configuráveis (Parâmetros CCT): para matar a salada, ligar "Operador em Único Veículo";
+  para CCT, "Intervalo Mínimo" 10→30. (Usuário pediu deixar configurável; não forcei o dado da empresa.)
+- Rótulo da aba "Viagens (555)" ficou impreciso (agora é log de eventos) — renomear p/ "Eventos" é polish.
+- Mid-trip relief real (split de viagem) precisa de ponto de rendição cadastrado nas rotas — fora do escopo
+  do que o solver pode inventar sem local físico.
 
 ---
 
