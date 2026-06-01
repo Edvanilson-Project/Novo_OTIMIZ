@@ -18,7 +18,12 @@ from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from .greedy import GreedyVSP, build_preferred_pairs
-from ..utils import is_connection_feasible, quick_cost_from_trips, preferred_pair_penalty_from_trips
+from ..utils import (
+    is_connection_feasible,
+    quick_cost_from_trips,
+    preferred_pair_penalty_from_trips,
+    select_vehicle_type,
+)
 
 settings = get_settings()
 
@@ -172,15 +177,21 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         self,
         state: List[List[int]],
         trip_map: Dict[int, Trip],
+        vehicle_type_id: Optional[int] = None,
     ) -> List[Block]:
-        """Reconstrói objetos Block a partir do estado leve (final do algoritmo)."""
+        """Reconstrói objetos Block a partir do estado leve (final do algoritmo).
+
+        vehicle_type_id rotula cada bloco com o tipo de veículo mais barato (como
+        o greedy faz). Sem isso o CostEvaluator usa o veículo default caro
+        (custo fixo/hora padrão), inflando o custo final sem mudar a escala.
+        """
         blocks = []
         block_id = 1
         for block_ids in state:
             if not block_ids:
                 continue
             trips = [trip_map[tid] for tid in block_ids]
-            block = Block(id=block_id, trips=trips)
+            block = Block(id=block_id, trips=trips, vehicle_type_id=vehicle_type_id)
             blocks.append(block)
             block_id += 1
         return blocks
@@ -326,7 +337,10 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 tabu_list.clear()
                 stale_count = 0
 
-        best_blocks = self._state_to_blocks(best_state, trip_map)
+        selected_vt = select_vehicle_type(vehicle_types, depot_id)
+        best_blocks = self._state_to_blocks(
+            best_state, trip_map, selected_vt.id if selected_vt else None
+        )
 
         for block in best_blocks:
             block.trips.sort(key=lambda t: t.start_time)

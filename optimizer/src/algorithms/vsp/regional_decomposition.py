@@ -104,7 +104,13 @@ def _stitch_blocks(blocks: List[Block], vsp_params: dict) -> List[Block]:
 
     min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
     min_break = int(vsp_params.get("min_break_minutes", 30) or 30)
-    max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+    # O span do BLOCO-VEÍCULO é limitado por max_block_span_minutes (default 1440,
+    # como greedy/mcnf), NÃO por max_vehicle_shift_minutes (jornada do MOTORISTA, 960).
+    # Conflatar os dois capava o veículo em 16h e inflava a frota quando a janela
+    # operacional passa de 16h (ex: Salvador 5h-23h = 18h). O CSP faz run-cutting.
+    max_block_span = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)
+    if max_block_span <= 0:
+        max_block_span = 10**9  # efetivamente infinito
     max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 240) or 240)
     enforce_min_interval = bool(vsp_params.get("enforce_min_interval", False))
 
@@ -128,7 +134,7 @@ def _stitch_blocks(blocks: List[Block], vsp_params: dict) -> List[Block]:
                 gap = first.start_time - last.end_time
                 if gap < 0 or gap > max_gap:
                     continue
-                if max_shift > 0 and cand.trips[-1].end_time - merged[0].start_time > max_shift:
+                if cand.trips[-1].end_time - merged[0].start_time > max_block_span:
                     continue
                 if not is_connection_feasible(
                     last, first,
