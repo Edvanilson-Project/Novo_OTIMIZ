@@ -53,6 +53,8 @@ import { PasswordResetToken } from './modules/database/entities/password-reset-t
 import { EmailModule } from './modules/email/email.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
+import { AiModule } from './modules/ai/ai.module';
+import { AiAnalysis } from './modules/database/entities/ai-analysis.entity';
 
 @Module({
   imports: [
@@ -87,6 +89,7 @@ import { RequestLoggingInterceptor } from './common/interceptors/request-logging
           CustomReport,
           RefreshToken,
           PasswordResetToken,
+          AiAnalysis,
         ],
         synchronize: false,
         // Migrations explícitas: glob aceita .ts (dev) e .js (após build).
@@ -128,6 +131,7 @@ import { RequestLoggingInterceptor } from './common/interceptors/request-logging
     AuditModule,
     GtfsModule,
     MonitoringModule,
+    AiModule,
     JwtModule.register({}),
     // Rate limiting global: protege contra brute-force (login) e DoS por requisição pesada
     // (/optimize). Throttles podem ser sobrescritos por endpoint via @Throttle decorator.
