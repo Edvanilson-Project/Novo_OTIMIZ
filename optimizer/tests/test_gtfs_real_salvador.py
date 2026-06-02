@@ -44,6 +44,12 @@ FIXTURE_DIR = (
     / "sunt_salvador"
 )
 
+# Gracefully skip the entire test module if the SUNT Salvador GTFS fixtures are not available in this environment.
+if not FIXTURE_DIR.exists() or not (FIXTURE_DIR / "stops.txt").exists():
+    pytestmark = pytest.mark.skip(
+        reason="Real SUNT Salvador GTFS fixtures not found in the container environment."
+    )
+
 import sys
 sys.path.insert(0, str(ROOT))
 

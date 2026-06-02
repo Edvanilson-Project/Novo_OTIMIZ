@@ -56,6 +56,12 @@ async def test_infrastructure_stress_queueing():
     async def _send_request(client: httpx.AsyncClient, request_id: int) -> httpx.Response:
         request_payload = {
             **payload,
+            "trips": [
+                {
+                    **payload["trips"][0],
+                    "id": 1000 + request_id,
+                }
+            ],
             "request_metadata": {"stress_request_id": request_id},
         }
         return await client.post("http://localhost:8000/optimize/", json=request_payload, headers=headers)
