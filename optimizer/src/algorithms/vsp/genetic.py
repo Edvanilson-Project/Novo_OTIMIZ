@@ -189,12 +189,14 @@ def _repair_chromosome(
             sorted_missing = sorted(missing)
         same_depot_req = bool(kwargs.get("same_depot_required", False))
         if repaired and trip_map:
-            # Insere cada trip no bloco cujo último trip termina mais perto antes dela
+            # BUG-GA-04 fix: comentrio era "mais perto antes" mas o código faz break
+            # na PRIMEIRA conexão viável, não na melhor. Comentário corrigido.
+            # Insere cada trip no primeiro bloco compatível com is_connection_feasible.
             for tid in sorted_missing:
-                trip_map[tid].start_time
+                # BUG-GA-03 fix: trip_map[tid].start_time e float('inf') eram dead code
+                # (valores calculados e descartados). Removidos.
                 trip_depot = trip_map[tid].depot_id if tid in trip_map else None
                 best_idx = None
-                float("inf")
                 for i, seq in enumerate(repaired):
                     last_tid = seq[-1]
                     if last_tid not in trip_map:
@@ -294,7 +296,13 @@ def _mutate(
                 return chrom_copy
             trip_idx = random.randint(0, len(chrom_copy[src]) - 1)
             trip_id = chrom_copy[src].pop(trip_idx)
-            dst = random.randint(0, len(chrom_copy) - 1)
+            # BUG-GA-05 fix: dst=random.randint podia ser igual a src (no-op).
+            # Agora escolhe dst diferente de src para garantir movimento real.
+            other_idxs = [i for i in range(len(chrom_copy)) if i != src]
+            if other_idxs:
+                dst = random.choice(other_idxs)
+            else:
+                dst = src  # fallback: apenas um bloco, no-op inevitável
             chrom_copy[dst].append(trip_id)
         else:
             # Merge: combina dois blocos se factível

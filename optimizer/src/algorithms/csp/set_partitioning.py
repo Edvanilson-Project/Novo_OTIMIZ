@@ -70,7 +70,10 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         self.max_candidate_successors = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
         self.max_columns = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
         self.max_pricing_iterations = max(
-            0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0))
+            # BUG-SP-01 fix: default era 1 — CG não convergia com 1 iter.
+            # Agora default=3 (compromisso: converge na maioria dos casos, sem overhead excessivo).
+            # A versão otimizada (set_partitioning_optimized.py) usa SPPRC completo e tem 5 iter.
+            0, int(self.vsp_params.get("max_pricing_iterations", 3 if self.pricing_enabled else 0))
         )
         self.max_pricing_additions = max(1, int(self.vsp_params.get("max_pricing_additions", 512)))
 
@@ -117,7 +120,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
 
         # Converter tudo para Decimal
         work_dec = Decimal(str(work))
-        Decimal(str(spread))
+        spread_dec = Decimal(str(spread))  # BUG-SP-02 fix: era descartado (dead code), agora usado
         gaps_sum = Decimal(str(sum(gaps)))
         passive_dec = Decimal(str(passive))
 

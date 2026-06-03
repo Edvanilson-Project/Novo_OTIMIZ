@@ -250,8 +250,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         min_layover = int(self._p("min_layover_minutes", 8))
         min_break = self._p("min_break_minutes", None)
         enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
-        if enforce_min_interval and min_break is not None:
-            min_layover = max(min_layover, int(min_break))
+        # NOTE: min_break is a DRIVER constraint (CCT) applied in the CSP.
+        # Do NOT inflate min_layover here — vehicle only needs technical turnaround.
         max_vehicle_shift = int(self._p("max_vehicle_shift_minutes", 960))
         crew_block_limit = int(self._p("crew_block_limit_minutes", 0) or 0)
         if crew_block_limit > 0:
@@ -487,9 +487,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     continue
                 gap = int(trip.start_time - last.end_time)
                 needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
-
-                gap = int(trip.start_time - last.end_time)
-                needed = max(min_layover, int(last.deadhead_times.get(trip.origin_id, 0)))
+                # BUG-GR-02 fix: as 2 linhas acima eram duplicadas logo abaixo (dead code). Removidas.
 
                 if not is_connection_feasible(
                     last,
@@ -834,12 +832,13 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     and trip.depot_id != start_depot
                 ):
                     return None
+                # BUG-GR-04 fix: segundo if verificava start_depot de novo (mesmo que o primeiro).
+                # A intenção era verificar coerência com end_depot (destino do bloco).
                 if (
                     same_depot_required
                     and end_depot is not None
                     and trip.depot_id is not None
-                    and start_depot is not None
-                    and trip.depot_id != start_depot
+                    and trip.depot_id != end_depot
                 ):
                     return None
                 marginal = needed * deadhead_cost + max(0, gap - needed) * idle_cost
@@ -875,14 +874,8 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     and trip.depot_id != end_depot
                 ):
                     return None
-                if (
-                    same_depot_required
-                    and start_depot is not None
-                    and end_depot is not None
-                    and trip.depot_id is not None
-                    and trip.depot_id != end_depot
-                ):
-                    return None
+                # BUG-GR-05 fix: segundo if era subconjunto do primeiro (redundante).
+                # O primeiro (end_depot) já cobre todos os casos. Removido.
                 marginal = needed * deadhead_cost + max(0, gap - needed) * idle_cost
                 return marginal, {"mode": "prepend", "gap": gap, "needed": needed}
 

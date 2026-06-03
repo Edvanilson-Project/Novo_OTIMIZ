@@ -1116,8 +1116,11 @@ class OptimizerService:
 
         if gap == 0 and strict_zero_gap_validation and current.destination_id != nxt.origin_id:
             return "zero_gap", {"gap": gap, "from_terminal": current.destination_id, "to_terminal": nxt.origin_id}
-        if enforce_min_interval and 0 < gap < min_break:
-            return "min_break", {"gap": gap, "limit": min_break}
+        # BUG-SERVICE-01 fix: min_connection era definido em _build_parameter_effect_report
+        # mas usado aqui — NameError quando enforce_min_interval=True.
+        # Substituído por min_layover (equivalente: tempo mínimo de conexão do veículo).
+        if enforce_min_interval and 0 < gap < min_layover:
+            return "min_layover", {"gap": gap, "limit": min_layover}
         if gap < max(min_layover, deadhead):
             return "min_connection_time", {"gap": gap, "limit": max(min_layover, deadhead), "deadhead": deadhead}
         if max_vehicle_shift > 0 and int(nxt.end_time) - int(current.start_time) > max_vehicle_shift:

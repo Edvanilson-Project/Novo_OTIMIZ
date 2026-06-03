@@ -395,7 +395,18 @@ class HybridPipeline(BaseAlgorithm):
                     "greedy_score": greedy_key,
                 }
             )
-            baseline_result = OptimizationResult(vsp=vsp_sol, csp=csp_final, algorithm="baseline")
+            # BUG-PIPELINE-05 fix: set_costs() para usar parâmetros reais (não defaults)
+            evaluator.set_costs(self.vsp_params)
+            # BUG-PIPELINE-04 fix: snapshot imutável — sem deepcopy, reversão seria no-op
+            import copy as _copy
+            _vsp_snapshot = VSPSolution(
+                blocks=_copy.deepcopy(vsp_sol.blocks),
+                unassigned_trips=list(vsp_sol.unassigned_trips or []),
+                algorithm=vsp_sol.algorithm,
+                elapsed_ms=vsp_sol.elapsed_ms,
+                meta=dict(vsp_sol.meta or {}),
+            )
+            baseline_result = OptimizationResult(vsp=_vsp_snapshot, csp=csp_final, algorithm="baseline")
             baseline_metrics = {
                 "vehicles": len(vsp_sol.blocks),
                 "crew": csp_final.num_crew,
@@ -498,7 +509,22 @@ class HybridPipeline(BaseAlgorithm):
             from ..evaluator import CostEvaluator
 
             evaluator = CostEvaluator()
-            baseline_result = OptimizationResult(vsp=vsp_sol, csp=csp_greedy, algorithm="baseline")
+            # BUG-PIPELINE-05 fix: inicializar com parâmetros reais para benchmark correto.
+            # Sem set_costs(), CostEvaluator usa defaults (crew=25/h, vehicle=800)
+            # ignorando os parâmetros reais da empresa.
+            evaluator.set_costs(self.vsp_params)
+            # BUG-PIPELINE-04 fix: capturar snapshot imutável dos blocos VSP para baseline.
+            # Sem deepcopy, baseline_result.vsp apontava para o mesmo objeto mutável;
+            # após joint_duty_vehicle_swap, a reversão (L599) era um no-op.
+            import copy as _copy
+            _vsp_snapshot = VSPSolution(
+                blocks=_copy.deepcopy(vsp_sol.blocks),
+                unassigned_trips=list(vsp_sol.unassigned_trips or []),
+                algorithm=vsp_sol.algorithm,
+                elapsed_ms=vsp_sol.elapsed_ms,
+                meta=dict(vsp_sol.meta or {}),
+            )
+            baseline_result = OptimizationResult(vsp=_vsp_snapshot, csp=csp_greedy, algorithm="baseline")
             baseline_metrics = {
                 "vehicles": len(vsp_sol.blocks),
                 "crew": csp_greedy.num_crew,
@@ -531,11 +557,14 @@ class HybridPipeline(BaseAlgorithm):
                     # Fase 1: Rescoring com evaluator
                     csp_ilp = self._rescore_csp_solution(csp_ilp)
                     phase_timings_ms["csp_cpsat_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
+                    # BUG-PIPELINE-06 fix: usar < (estritamente melhor) em vez de <=.
+                    # Com <=, resultado igual ao greedy era aceito sem melhoria real.
+                    # Consistente com o branch >1500 blocos que usa < (estritamente melhor).
                     ilp_better = csp_ilp.duties and (
                         csp_ilp.cct_violations,
                         len(csp_ilp.uncovered_blocks or []),
                         csp_ilp.num_crew,
-                    ) <= (csp_greedy.cct_violations, len(csp_greedy.uncovered_blocks or []), csp_greedy.num_crew)
+                    ) < (csp_greedy.cct_violations, len(csp_greedy.uncovered_blocks or []), csp_greedy.num_crew)
                     if ilp_better:
                         logger.info(
                             "[PIPELINE] CP-SAT polish: crew %d→%d violations %d→%d uncovered %d→%d",
@@ -586,6 +615,8 @@ class HybridPipeline(BaseAlgorithm):
             from ..evaluator import CostEvaluator
 
             evaluator = CostEvaluator()
+            # BUG-PIPELINE-05 fix: usar parâmetros reais para comparação justa com baseline.
+            evaluator.set_costs(self.vsp_params)
             current_result = OptimizationResult(vsp=vsp_sol, csp=csp_final)
             final_cost = evaluator.total_cost(current_result, vehicle_types)
             baseline_cost = baseline_metrics["total_cost"]

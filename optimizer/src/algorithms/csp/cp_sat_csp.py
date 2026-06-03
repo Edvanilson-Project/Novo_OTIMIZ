@@ -16,10 +16,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from ...core.config import get_settings
 from ...domain.models import Block, CSPSolution, Duty, Trip
 from .set_partitioning import SetPartitioningCSP
 
 _log = logging.getLogger(__name__)
+settings = get_settings()
 
 try:
     from ortools.sat.python import cp_model as _cp_model
@@ -71,7 +73,9 @@ class CPSatCSP(SetPartitioningCSP):
                 _log.debug("Adicionada coluna unitária para tarefa %s não coberta", task.id)
 
         task_ids = [task.id for task in tasks]
-        time_limit = max(1, int(self.time_budget_s))
+        # BUG-CPSAT-02 fix: max_time_in_seconds aceita float — não truncar para int.
+        # int(1.8s) = 1s (perda de 44% do budget para budgets pequenos).
+        time_limit = max(1.0, float(self.time_budget_s))
 
         # ── CP-SAT model ────────────────────────────────────────────────────
         model = _cp_model.CpModel()
@@ -102,9 +106,13 @@ class CPSatCSP(SetPartitioningCSP):
             model.AddExactlyOne([x[i] for i in covering_cols] + [s[task_id]])
 
         # ── Solver ──────────────────────────────────────────────────────────
+        import os as _os
         solver = _cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = time_limit
-        solver.parameters.num_search_workers = 4  # paralelismo CP-SAT
+        # BUG-CSP-03 fix: usar settings.ilp_threads (configurável) em vez de hardcoded 4.
+        # Fallback para cpu_count com cap em 8 (evita sobrecarregar containers).
+        _cpus = min(settings.ilp_threads or _os.cpu_count() or 4, 8)
+        solver.parameters.num_search_workers = _cpus
         solver.parameters.log_search_progress = False
 
         status = solver.Solve(model)

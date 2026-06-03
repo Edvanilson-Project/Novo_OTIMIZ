@@ -814,8 +814,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         GAP_WEIGHT = 0.1  # Peso interno do solver para gaps pequenos
         PASSIVE_WEIGHT = float(self.goal_weights.get("passive_transfer", 0.25))
         BREAK_RESET_MIN = self.greedy.min_break
-        self.greedy.long_unpaid_break_limit
-        self.greedy.long_unpaid_break_penalty_weight
+        # BUG-CSP-05-NOVO fix: long_unpaid_break_limit e long_unpaid_break_penalty_weight
+        # eram lidos (L817-818) mas imediatamente descartados — nunca usados no cálculo.
+        # Agora são constantes reais que penalizam gaps grandes entre tarefas.
+        LONG_UB_LIMIT = int(self.greedy.long_unpaid_break_limit)  # default: 90min
+        LONG_UB_PENALTY_W = float(self.greedy.long_unpaid_break_penalty_weight)  # default: 0.5
 
         target_work = max(
             self.greedy.min_work,
@@ -881,17 +884,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                         w_dominates = True
                     elif w1_fairness <= w2_fairness:
                         w_dominates = True
-                # BUG-CSP-02 fix: quando self_l.w > other.w (self tem MAIS trabalho),
-                # NÃO pode dominar other na dimensão w mesmo dentro de fairness_tolerance.
-                # A dominância Pareto exige que self seja <= other em TODAS as dimensões.
-                # Excepcionalmente, permite dominar apenas se a fairness de self for
-                # estritamente melhor (mais próximo do target_work), indicando que o
-                # excesso de trabalho é compensado por melhor adequação ao target.
-                else:  # self_l.w > other.w
-                    if w1_fairness < w2_fairness:
-                        # self está mais próximo do target → pode ser considerado dominante
-                        w_dominates = True
-                    # Caso: ambos dentro de tolerância mas self tem MAIS trabalho → NÃO domina
+                # BUG-CSP-06 fix: quando self_l.w > other.w, NUNCA pode dominar.
+                # Pareto exige self <= other em TODAS as dimensões de recurso.
+                # Um rótulo com mais trabalho pode não ser extensível a tarefas futuras
+                # que still caberiam num rótulo com menos trabalho.
+                # (o branch 'else' anterior violava o axioma de monotonicidade do Label-Setting)
 
                 if not w_dominates:
                     return False
@@ -987,7 +984,11 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                     0,
                     self.greedy._transfer_needed(task_i, task_j) - self.greedy.min_layover,
                 )
-                edge_c = drive_j * CREW_COST_PER_MIN + gap * GAP_WEIGHT + passive * PASSIVE_WEIGHT
+                # Penalidade para gaps longos não-remunerados (BUG-CSP-05-NOVO fix)
+                # Só o gap além do min_layover é unpaid_break real (BUG-CSP-04 fix)
+                unpaid_gap = max(0, gap - self.greedy.min_layover)
+                long_ub_penalty = LONG_UB_PENALTY_W * max(0, unpaid_gap - LONG_UB_LIMIT)
+                edge_c = drive_j * CREW_COST_PER_MIN + gap * GAP_WEIGHT + passive * PASSIVE_WEIGHT + long_ub_penalty
                 edge_rc = edge_c - duals.get(task_j.id, 0.0)
 
                 for lbl in node_labels[i]:
@@ -1005,9 +1006,10 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                     if new_d > self.greedy.max_driving:
                         continue
 
-                    # Unpaid break acumulado: soma do gap atual ao ub anterior
-                    # O gap é parte não remunerada entre tarefas
-                    new_ub = lbl.ub + gap
+                    # BUG-CSP-04 fix: unpaid_break é apenas o gap além do min_layover.
+                    # O min_layover é tempo técnico de transferência que conta como jornada.
+                    # Acumular o gap inteiro inflava o custo de spread artificialmente.
+                    new_ub = lbl.ub + max(0, gap - self.greedy.min_layover)
 
                     _add_label(
                         j,
