@@ -370,12 +370,14 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             )
         )
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
-        idle_cost = float(self._p("idle_cost_per_minute", 0.25))
+        idle_cost = float(self._p("idle_cost_per_minute", 0.5))  # BUG-MCNF-01: era 0.25, corrigido para 0.5 (consistente com SA/Tabu/Greedy)
         min_layover = int(self._p("min_layover_minutes", 8))
         min_break = self._p("min_break_minutes", None)
         enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
-        if enforce_min_interval and min_break is not None:
-            min_layover = max(min_layover, int(min_break))
+        # NOTE: min_break is a DRIVER constraint (CCT) applied in the CSP.
+        # Do NOT inflate min_layover here — vehicle only needs technical
+        # turnaround time (min_layover). The old code raised min_layover
+        # from 10→30, adding ~10 extra vehicles.
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
@@ -451,14 +453,26 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 ):
                     continue
 
-                dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
-                idle = gap - dh
-                cost = (dh * deadhead_cost) + (idle * idle_cost)
-                # Incentivo por continuidade no mesmo terminal: sem deadhead necessário,
-                # reduzimos levemente o custo para que MCNF prefira essas conexões ao
-                # invés de misturar picos manhã+tarde no mesmo bloco (que prejudica o CSP).
+                # BUG-MCNF-02 fix: Separate real deadhead travel time from
+                # mandatory layover.  Previously the code used
+                #   dh = max(min_layover, deadhead_real)
+                # which charged deadhead_cost_per_minute for min_layover even
+                # when the vehicle stays at the same terminal (real deadhead=0).
+                # This inflated connection costs by ~R$100 per same-terminal
+                # connection (10min × R$10/min instead of 10min × R$2/min).
+                raw_dh = int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0))
+                # Same-terminal connections have zero deadhead travel
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
-                    cost -= fixed_cost * 0.05
+                    raw_dh = 0
+                dh = max(0, raw_dh)
+                # Mandatory layover is idle, not deadhead
+                min_wait = max(min_layover, dh)  # vehicle must wait at least min_layover or deadhead travel time
+                idle = gap - min_wait
+                cost = (dh * deadhead_cost) + ((min_wait - dh + max(0, idle)) * idle_cost)
+                # Record actual deadhead and idle for block metadata
+                actual_idle = max(0, gap - dh)
+
+                # Preferred pair incentives
                 pair_target = preferred_next.get(int(trips_sorted[i].id))
                 if pair_target is not None:
                     if int(trips_sorted[j].id) == pair_target:
@@ -469,8 +483,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 valid_X[(i, j)] = {
                     "cost": max(0.0, cost),
                     "dh": dh,
-                    "idle": max(0, idle),
+                    "idle": max(0, actual_idle),
                 }
+
+
 
         # Precompute pull-out / pull-in costs per depot
         depot_caps: Dict[Any, int] = {}
@@ -736,8 +752,19 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
 
         max_block_duration = self._p("max_block_duration_minutes", None)
+        # BUG-MCNF-03 fix: O MCNF verifica o GAP entre viagens (max_shift) mas nunca
+        # o span TOTAL do bloco. Um bloco pode ter span de 963min com gaps individuais <960min.
+        # Quando max_block_duration_minutes não está setado mas max_vehicle_shift_minutes está
+        # configurado explicitamente, usá-lo como limite de span total do bloco VSP.
+        # Nota: max_vehicle_shift_minutes tem default=960, então verificamos se foi
+        # explicitamente passado nos parâmetros (não é None antes do default).
+        if max_block_duration is None:
+            explicit_max_shift = self.vsp_params.get("max_vehicle_shift_minutes") if hasattr(self, "vsp_params") else None
+            if explicit_max_shift is not None:
+                max_block_duration = int(explicit_max_shift)
         if max_block_duration is not None and int(max_block_duration) > 0:
             blocks = self._split_blocks_by_total_duration(blocks, int(max_block_duration))
+
 
         total_trips_packed = sum(len(b.trips) for b in blocks)
         _effective_preferred_pairs = preferred_pairs or {}

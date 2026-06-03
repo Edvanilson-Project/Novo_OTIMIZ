@@ -881,11 +881,17 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                         w_dominates = True
                     elif w1_fairness <= w2_fairness:
                         w_dominates = True
+                # BUG-CSP-02 fix: quando self_l.w > other.w (self tem MAIS trabalho),
+                # NÃO pode dominar other na dimensão w mesmo dentro de fairness_tolerance.
+                # A dominância Pareto exige que self seja <= other em TODAS as dimensões.
+                # Excepcionalmente, permite dominar apenas se a fairness de self for
+                # estritamente melhor (mais próximo do target_work), indicando que o
+                # excesso de trabalho é compensado por melhor adequação ao target.
                 else:  # self_l.w > other.w
-                    if w1_fairness <= fairness_tolerance and w2_fairness <= fairness_tolerance:
+                    if w1_fairness < w2_fairness:
+                        # self está mais próximo do target → pode ser considerado dominante
                         w_dominates = True
-                    elif w1_fairness <= w2_fairness:
-                        w_dominates = True
+                    # Caso: ambos dentro de tolerância mas self tem MAIS trabalho → NÃO domina
 
                 if not w_dominates:
                     return False

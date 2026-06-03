@@ -136,7 +136,10 @@ def _is_connection_feasible_logic(
     Regras:
     1. gap < 0: Inviável (sobreposição).
     2. gap == 0: Só viável se for mesmo trip_group_id ou continuação de segmento.
-    3. enforce_min_interval and gap < min_break: Inviável (descanso legal).
+    3. enforce_min_interval and gap < min_layover: Inviável (tempo técnico de terminal).
+       Nota: min_break (descanso CCT do motorista) é aplicado no CSP, NÃO aqui.
+       O veículo pode operar continuamente — apenas min_layover (tempo de
+       terminal/turnaround) é exigido entre viagens consecutivas no mesmo bloco.
     4. gap + tolerance < max(min_layover, deadhead): Inviável (deadhead operacional).
     """
     gap = int(nxt.start_time) - int(current.end_time)
@@ -165,8 +168,12 @@ def _is_connection_feasible_logic(
 
         return True
 
-    # A regra central deve ser verificada antes de qualquer tolerância
-    if enforce_min_interval and gap < min_break:
+    # BUG FIX: Previously used min_break (driver CCT, e.g. 30 min) here,
+    # which is a DRIVER rest constraint — not a VEHICLE constraint.
+    # The vehicle can operate continuously; only min_layover (technical
+    # terminal turnaround, e.g. 10 min) is required between trips.
+    # min_break is correctly enforced in the CSP (crew scheduling).
+    if enforce_min_interval and gap < min_layover:
         return False
 
     deadhead = int(current.deadhead_times.get(nxt.origin_id, 0))
@@ -178,6 +185,7 @@ def _is_connection_feasible_logic(
 
     # 5. Fallback com tolerância
     return (gap + connection_tolerance) >= required
+
 
 
 def extract_connection_params(vsp_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -213,10 +221,18 @@ def quick_cost_sorted(
     idle_cost_per_minute: float = 0.5,
     max_work_minutes: float = 480.0,
     crew_cost_weight: float = 400.0,
+    deadhead_cost_per_minute: float = 1.0,
 ) -> float:
-    """Estimativa de custo rápida (compatibilidade com Block)."""
+    """Estimativa de custo rápida (compatibilidade com Block).
+
+    BUG-PIPELINE-03 (corrigido 2026-06-02): parâmetro deadhead_cost_per_minute
+    não era repassado para quick_cost_from_trips. Com deadhead=R$10/min (Empresa 16),
+    o pipeline não conseguia distinguir soluções SA (menos deadhead) de MCNF, e
+    sempre selecionava MCNF mesmo sendo inferior pelo objetivo real.
+    """
     return quick_cost_from_trips(
-        [b.trips for b in blocks], fixed_vehicle_cost, idle_cost_per_minute, max_work_minutes, crew_cost_weight
+        [b.trips for b in blocks], fixed_vehicle_cost, idle_cost_per_minute,
+        max_work_minutes, crew_cost_weight, deadhead_cost_per_minute
     )
 
 

@@ -172,7 +172,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             )
             or 0.15
         )
-        self.max_spread_soft = int(params.get("duty_max_spread_soft_minutes", 12 * 60) or 12 * 60)
+        raw_spread_soft = params.get("duty_max_spread_soft_minutes")
+        if raw_spread_soft is None:
+            self.max_spread_soft = min(12 * 60, max(0, self.max_shift - 60)) if self.max_shift > 0 else 12 * 60
+        else:
+            self.max_spread_soft = int(raw_spread_soft)
         self.max_idle_soft = int(params.get("duty_max_idle_soft_minutes", 180) or 180)
         self.min_work_soft = int(
             params.get(
@@ -826,9 +830,16 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if self.meal_break_minutes > 0
                 else self.mandatory_break_after
             )
+            # BUG-CSP-05 fix: limite de span acumulado para run-cutting.
+            # Um bloco VSP pode ter span de 984min mas condução de apenas 200min
+            # (com pausas longas entre viagens). O run-cutting anterior só cortava
+            # por condução, deixando duties com spread > max_shift.
+            # max_shift=560 por default (CCT: 9h20 de jornada).
+            max_chunk_span = self.max_shift  # 560 min
         else:
             max_chunk_drive = 10**9
             meal_trigger = 10**9
+            max_chunk_span = 10**9
 
         for block in sorted(blocks, key=lambda item: (item.start_time, item.id)):
             ordered, block_mid_relief_splits = self._expand_block_trips_for_relief(block)
@@ -893,8 +904,47 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     should_cut = True
                 elif boundary and self.meal_break_minutes > 0 and current_drive + next_duration > meal_trigger:
                     should_cut = True
+                elif boundary and not should_cut:
+                    # BUG-CSP-05 fix (v1): corte por span acumulado com boundary.
+                    chunk_start = current[0].start_time if current else nxt.start_time
+                    span_with_next = nxt.end_time - chunk_start + self.pullback + self.pullout
+                    if span_with_next > max_chunk_span:
+                        should_cut = True
+                elif self.apply_cct and gap >= self.min_break and not should_cut:
+                    # BUG-CSP-05 fix (v2): gap longo sem boundary operacional.
+                    # Quando há um gap >= min_break entre viagens de terminais diferentes
+                    # dentro do mesmo bloco VSP, mas o span acumulado com a próxima viagem
+                    # ultrapassaria max_shift (jornada CCT), devemos forçar o corte
+                    # mesmo sem boundary=True. O gap longo já é evidência de ruptura
+                    # operacional suficiente para separar a jornada do motorista.
+                    # Sem este critério: Bloco VSP T10(06:11)→T13(16:45)→T4(20:09)→T15(21:44)
+                    # gerava duty com spread=756min > 560min sem nenhum corte.
+                    chunk_start = current[0].start_time if current else nxt.start_time
+                    span_with_next = nxt.end_time - chunk_start + self.pullback + self.pullout
+                    if span_with_next > max_chunk_span:
+                        should_cut = True
 
-                if pair_guard and not short_positive_interval:
+
+
+                # BUG-CSP-01 fix: pair_guard NÃO deve cancelar cortes obrigatórios por
+                # limite de condução contínua (max_chunk_drive, meal_trigger, max_work).
+                # Deve apenas proteger cortes por folga natural (gap >= min_break) que
+                # fragmentariam desnecessariamente um par ida-volta do mesmo grupo.
+                # Antes desta correção, motoristas com pairs podiam exceder max_chunk_drive
+                # sem corte, causando as CCT violations observadas (30-56 por algoritmo).
+                # A lógica pré-guard (linhas 864-879) já trata pair_guard+max_chunk_drive.
+                mandatory_drive_cut = (
+                    (boundary and current_drive >= max_chunk_drive)
+                    or (boundary and current_drive >= meal_trigger and self.meal_break_minutes > 0)
+                    or (boundary and current_drive >= self.max_work)
+                    or (boundary and current_drive + next_duration > max_chunk_drive)
+                    or (boundary and self.meal_break_minutes > 0 and current_drive + next_duration > meal_trigger)
+                    # BUG-CSP-05: span cut também é obrigatório — pair_guard não deve cancelar
+                    or (self.apply_cct and gap >= self.min_break and (
+                        (nxt.end_time - (current[0].start_time if current else nxt.start_time) + self.pullback + self.pullout) > max_chunk_span
+                    ))
+                )
+                if pair_guard and not short_positive_interval and not mandatory_drive_cut:
                     should_cut = False
 
                 if should_cut:

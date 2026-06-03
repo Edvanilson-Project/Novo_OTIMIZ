@@ -252,23 +252,27 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         self,
         state: List[List[int]],
         trip_map: Dict[int, Trip],
-        vehicle_type_id: Optional[int] = None,
+        vehicle_types: List[VehicleType],
+        depot_id: Optional[int] = None,
     ) -> List[Block]:
         """Reconstrói objetos Block a partir do estado leve (final do algoritmo).
 
-        vehicle_type_id rotula cada bloco com o tipo de veículo mais barato (como
-        o greedy faz). Sem isso o CostEvaluator usa o veículo default caro
-        (custo fixo/hora padrão), inflando o custo final sem mudar a escala.
+        BUG-SA-01 fix: seleciona vehicle_type_id por bloco usando o depot da
+        primeira trip do bloco (consistente com GreedyVSP e GeneticVSP).
+        Antes selecionava um único tipo global via select_vehicle_type(vehicle_types, depot_id),
+        atribuindo o mesmo tipo a todos os blocos em operações multi-depot.
         """
         blocks = []
         for block_ids in state:
             if not block_ids:
                 continue
             trips = [trip_map[tid] for tid in block_ids]
+            blk_depot = trips[0].depot_id if trips else depot_id
+            vt = select_vehicle_type(vehicle_types, blk_depot)
             block = Block(
                 id=self._next_block_id(),
                 trips=trips,
-                vehicle_type_id=vehicle_type_id,
+                vehicle_type_id=vt.id if vt else None,
             )
             blocks.append(block)
         return blocks
@@ -347,8 +351,55 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         iteration = 0
         restarts = 0
 
+        # ── Calibração automática da temperatura inicial ─────────────────────────
+        # Método de Aarts & Korst (1989): amostra 50 movimentos aleatórios,
+        # calcula a média dos deltas positivos (piorias) e define T0 tal que
+        # a probabilidade de aceitar uma melhora de Δ+ seja p0 = 0.80.
+        # Isso garante que SA explore adequadamente no início independente
+        # da escala de custo do problema.
+        # Ref: Aarts & Korst (1989) "Simulated Annealing and Boltzmann Machines"
+        _configured_t0 = float(self.vsp_params.get("sa_initial_temp", self.initial_temp))
+        _auto_calibrate = bool(self.vsp_params.get("sa_auto_calibrate_temp", True))
+        if _auto_calibrate and len(current_state) >= 2:
+            _positive_deltas = []
+            _cal_state = _copy_state(current_state)
+            _cal_cost = current_cost
+            for _cal_iter in range(50):
+                _op = random.choice(_OPERATORS)
+                _candidate = _op(
+                    _cal_state,
+                    trip_map=trip_map,
+                    min_gap=min_gap,
+                    min_break=int(min_break) if min_break is not None else 30,
+                    enforce_min_interval=enforce_min_interval,
+                    connection_tolerance=connection_tolerance,
+                )
+                if _candidate is None:
+                    continue
+                _delta = cost_fn(_candidate) - _cal_cost
+                if _delta > 0:
+                    _positive_deltas.append(_delta)
+                _cal_state = _candidate
+                _cal_cost = cost_fn(_cal_state)
+            if _positive_deltas:
+                _avg_delta = sum(_positive_deltas) / len(_positive_deltas)
+                _p0 = 0.80  # probabilidade inicial de aceitar soluções piores
+                import math as _math
+                _calibrated_t0 = -_avg_delta / _math.log(_p0)
+                # Usa o maior entre o calibrado e o configurado (evita temperatura
+                # muito baixa por p0 > 0, garante exploração adequada)
+                _t0 = max(_calibrated_t0, _configured_t0 * 0.01)  # no mínimo 1% do configurado
+                logger.debug(
+                    "SA auto-calib: avg_delta=%.1f p0=%.2f T0_calib=%.1f T0_config=%.1f -> T0=%.1f",
+                    _avg_delta, _p0, _calibrated_t0, _configured_t0, _t0,
+                )
+            else:
+                _t0 = _configured_t0
+        else:
+            _t0 = _configured_t0
+
         while iteration < max_iterations and not self._check_timeout():
-            temp = self.initial_temp
+            temp = _t0  # usa temperatura inicial calibrada (ou configurada)
 
             if restarts > 0:
                 current_state = _copy_state(best_state)
@@ -411,9 +462,8 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
 
             restarts += 1
 
-        selected_vt = select_vehicle_type(vehicle_types, depot_id)
         best_blocks = self._state_to_blocks(
-            best_state, trip_map, selected_vt.id if selected_vt else None
+            best_state, trip_map, vehicle_types, depot_id
         )
 
         for block in best_blocks:

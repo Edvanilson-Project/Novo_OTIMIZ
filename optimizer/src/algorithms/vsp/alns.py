@@ -53,7 +53,17 @@ _REACTION_FACTOR = 0.1  # quão rápido pesos se adaptam (0.1 = lento, 0.5 = rá
 
 
 def _state_cost(state: List[List[int]], trip_map: Dict[int, Trip], vsp_params: Dict) -> float:
-    """Soma quick_cost de cada bloco. Compatível com função de custo do SA existente."""
+    """Soma quick_cost de cada bloco. Compatível com função de custo do SA existente.
+
+    IMPORTANTE: usa os mesmos parâmetros e defaults do SA/Tabu para garantir
+    que as comparações entre algoritmos sejam feitas na mesma escala de custo.
+    BUG-ALNS-01 (corrigido): `fixed_vehicle_cost` era 900.0 (hardcoded); corrigido
+      para ler de vsp_params com default 800.0 (consistente com SA/Tabu/Greedy).
+    BUG-ALNS-02 (corrigido): `crew_cost_weight` era lido via `cost_duty` (errado);
+      corrigido para `crew_cost_weight` (a chave usada em todos os outros algoritmos).
+    BUG-ALNS-03 (corrigido): `idle_cost_per_minute` default era 0.25; corrigido
+      para 0.5 (mesmo default de SA/Tabu/Greedy).
+    """
     sequences: List[List[Trip]] = []
     for block in state:
         if not block:
@@ -61,13 +71,14 @@ def _state_cost(state: List[List[int]], trip_map: Dict[int, Trip], vsp_params: D
         sequences.append([trip_map[tid] for tid in block])
     if not sequences:
         return 0.0
+    fvc = float(vsp_params.get("fixed_vehicle_activation_cost", 800.0))
     return float(
         quick_cost_from_trips(
             sequences,
-            fixed_vehicle_cost=float(vsp_params.get("fixed_vehicle_activation_cost", 900.0)),
-            idle_cost_per_minute=float(vsp_params.get("idle_cost_per_minute", 0.25)),
+            fixed_vehicle_cost=fvc,
+            idle_cost_per_minute=float(vsp_params.get("idle_cost_per_minute", 0.5)),
             max_work_minutes=float(vsp_params.get("max_work_minutes", 480.0)),
-            crew_cost_weight=float(vsp_params.get("cost_duty", 400.0)),
+            crew_cost_weight=float(vsp_params.get("crew_cost_weight", fvc * 0.5)),
             deadhead_cost_per_minute=float(vsp_params.get("deadhead_cost_per_minute", 1.0)),
         )
     )
@@ -79,13 +90,17 @@ def _is_feasible_chain(
     min_layover: int,
     enforce_min_interval: bool,
     connection_tolerance: int,
+    min_break: int = 30,
 ) -> bool:
+    # BUG-ALNS-06 fix: min_break (CCT do motorista, ex: 30min) é diferente de
+    # min_layover (turnaround técnico do veículo, ex: 8min). A versão anterior
+    # usava min_layover como min_break, o que é semanticamente incorreto.
     for i in range(len(block) - 1):
         if not is_connection_feasible(
             trip_map[block[i]],
             trip_map[block[i + 1]],
             min_layover=min_layover,
-            min_break=min_layover,
+            min_break=min_break,
             enforce_min_interval=enforce_min_interval,
             connection_tolerance=connection_tolerance,
         ):
@@ -438,12 +453,19 @@ class ALNSVSP(BaseAlgorithm, IVSPAlgorithm):
                         r_count[name] = 0
 
         # Reconstrói VSPSolution a partir de best_state
-        vt = select_vehicle_type(vehicle_types)
+        # BUG-ALNS-04 fix: seleciona vehicle_type por bloco usando depot da primeira
+        # trip, consistente com GreedyVSP e GeneticVSP. Antes usava select_vehicle_type()
+        # sem depot_id, atribuindo o tipo mais barato globalmente a todos os blocos,
+        # o que é incorreto em operações multi-depot.
+        # BUG-ALNS-05 fix: pré-calcula greedy_cost em variável para evitar duplo cálculo no log.
+        _greedy_cost = _state_cost([[int(t.id) for t in b.trips] for b in seed.blocks], trip_map, self.vsp_params)
         blocks_out: List[Block] = []
         for b_idx, block_ids in enumerate(best_state):
             if not block_ids:
                 continue
             chain = [trip_map[tid] for tid in block_ids]
+            blk_depot = chain[0].depot_id if chain else None
+            vt = select_vehicle_type(vehicle_types, blk_depot)
             blk = Block(id=b_idx + 1, trips=chain, vehicle_type_id=vt.id if vt else None)
             blocks_out.append(blk)
 
@@ -451,8 +473,8 @@ class ALNSVSP(BaseAlgorithm, IVSPAlgorithm):
             "[ALNS] iterations=%d best_cost=%.2f vs greedy_cost=%.2f reduction=%.1f%%",
             iterations,
             best_cost,
-            _state_cost([[int(t.id) for t in b.trips] for b in seed.blocks], trip_map, self.vsp_params),
-            (1 - best_cost / max(1.0, _state_cost([[int(t.id) for t in b.trips] for b in seed.blocks], trip_map, self.vsp_params))) * 100,
+            _greedy_cost,
+            (1 - best_cost / max(1.0, _greedy_cost)) * 100,
         )
 
         return VSPSolution(

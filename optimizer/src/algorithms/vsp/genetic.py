@@ -556,15 +556,27 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             repaired.append(last_b)
         blocks = repaired
 
-        # Safety net: se GA ficou pior que greedy, usa greedy
-        ga_cost = quick_cost_sorted(blocks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
+        # Safety net: se GA ficou pior que greedy, usa greedy.
+        # BUG-GA-01 (corrigido): comparação usava quick_cost_sorted que NÃO inclui
+        # deadhead_cost_per_minute, enquanto _fitness usa quick_cost_from_trips que
+        # INCLUI deadhead. Com deadhead alto (ex: R$10/min), o GA encontrava soluções
+        # com menos deadhead (melhor por fitness), mas o safety net as descartava por
+        # não contabilizar deadhead na comparação → GA sempre retornava o Greedy.
+        # Fix: usar quick_cost_from_trips (mesma função que _fitness) em ambos os lados.
+        def _blocks_to_seqs(blk_list):
+            return [[t for t in b.trips] for b in blk_list if b.trips]
+
+        ga_seqs = _blocks_to_seqs(blocks)
+        seed_seqs = _blocks_to_seqs(seed.blocks)
+
+        ga_cost = quick_cost_from_trips(ga_seqs, fvc, icpm, max_work, crew_cw, dhc) + preferred_pair_penalty(
             blocks,
             preferred_pairs,
             pair_break_penalty,
             paired_trip_bonus,
             hard_pairing_penalty,
         )
-        greedy_cost = quick_cost_sorted(seed.blocks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
+        greedy_cost = quick_cost_from_trips(seed_seqs, fvc, icpm, max_work, crew_cw, dhc) + preferred_pair_penalty(
             seed.blocks,
             preferred_pairs,
             pair_break_penalty,

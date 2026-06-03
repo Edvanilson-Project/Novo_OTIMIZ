@@ -35,13 +35,13 @@ MIN_REMAINING_BUDGET_FOR_ILP_S = 5.0
 # Trip limit raised to 1500 so CP-SAT ILP polish runs at 1000v (194 greedy blocks,
 # problem size is determined by blocks not trips — the old 600-trip limit was overly conservative).
 # Auditoria 2026-05-17: limites originais (220/180) eram conservadores demais.
-# Para 500 trips o SA/Tabu termina em ~30-45s com time_budget de 20s no pipeline,
-# então faz sentido permitir até 500 trips com time budget adequado. Acima disso,
-# metaheurísticas geram pouco ganho marginal pelo tempo gasto.
+# Auditoria 2026-06-02: limite elevado de 220→350 trips para cobrir instâncias reais
+# (Empresa 16 = 298 trips). SA/ALNS/Tabu provam ganho real de 37.4% vs Greedy nesta instância.
+# Para 350 trips o SA termina em ~5-10s com budget de 30-60s — muito dentro do orçamento.
 DEFAULT_MAX_CSP_ILP_TRIPS = 1500
 DEFAULT_MAX_CSP_ILP_BLOCKS = 450
-DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 220
-DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS = 180
+DEFAULT_MAX_VSP_METAHEURISTIC_TRIPS = 350
+DEFAULT_MAX_VSP_METAHEURISTIC_BLOCKS = 250
 
 
 class HybridPipeline(BaseAlgorithm):
@@ -286,8 +286,12 @@ class HybridPipeline(BaseAlgorithm):
             return self._finalize(best_vsp, trips, vehicle_types)
 
         # PERF 2.4: Early stop — se issues==0 e Tabu já não melhorou
-        if best_issues == 0 and ts_issues == 0 and abs(ts_cost - best_cost) / max(1.0, best_cost) < 0.01:
-            logger.info("[PIPELINE] Early stop: solução estável, pulando Genetic")
+        # BUG-PIPELINE-01 (corrigido): early stop era ativado quando |TS_cost - best_cost| < 1%,
+        # mas isso descartava o GA antes mesmo de executar, independente do resultado do Tabu.
+        # Agora só aplica early stop se o Tabu usou menos de 10% do seu budget (convergiu rápido)
+        # e as soluções são idênticas (custo exatamente igual).
+        if best_issues == 0 and ts_issues == 0 and ts_cost == best_cost and ts_elapsed_s < ts_budget * 0.1:
+            logger.info("[PIPELINE] Early stop: solução estável e Tabu convergiu rapido, pulando GA")
             return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
         remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
@@ -747,7 +751,18 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
                 else:
                     infeasible_penalty += Decimal("15000.0")
 
-    quick_cost = Decimal(str(quick_cost_sorted(sol.blocks)))
+    # BUG-PIPELINE-02 (corrigido): quick_cost_sorted sem parâmetros usava defaults internos
+    # (fvc=800, idle=0.5) ignorando os parâmetros reais da empresa. Com fvc=R$960 e idle=R$2/min
+    # da Empresa 16, o custo era subestimado em >15%, comprometendo a comparação entre soluções.
+    # BUG-PIPELINE-03 (corrigido): deadhead_cost_per_minute não era passado → pipeline cego para
+    # a vantagem principal do SA/ALNS (redução de deadhead). Com R$10/min de deadhead, MCNF era
+    # selecionado mesmo sendo inferior ao SA pelo objetivo real.
+    fvc   = float(vsp_params.get("fixed_vehicle_activation_cost", 800.0))
+    icpm  = float(vsp_params.get("idle_cost_per_minute", 0.5))
+    dhc   = float(vsp_params.get("deadhead_cost_per_minute", 1.0))
+    max_w = float(vsp_params.get("max_work_minutes", float(vsp_params.get("max_vehicle_shift_minutes", 960))))
+    crew  = float(vsp_params.get("crew_cost_weight", fvc * 0.5))
+    quick_cost = Decimal(str(quick_cost_sorted(sol.blocks, fvc, icpm, max_w, crew, dhc)))
     total = quick_cost + unassigned_penalty + long_block_penalty + infeasible_penalty + pair_penalty
     return float(total)
 

@@ -177,13 +177,15 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         self,
         state: List[List[int]],
         trip_map: Dict[int, Trip],
-        vehicle_type_id: Optional[int] = None,
+        vehicle_types: List[VehicleType],
+        depot_id: Optional[int] = None,
     ) -> List[Block]:
         """Reconstrói objetos Block a partir do estado leve (final do algoritmo).
 
-        vehicle_type_id rotula cada bloco com o tipo de veículo mais barato (como
-        o greedy faz). Sem isso o CostEvaluator usa o veículo default caro
-        (custo fixo/hora padrão), inflando o custo final sem mudar a escala.
+        BUG-TS-02 fix: seleciona vehicle_type_id por bloco usando o depot da
+        primeira trip do bloco (consistente com GreedyVSP e GeneticVSP).
+        Antes selecionava um único tipo global via select_vehicle_type(vehicle_types, depot_id),
+        atribuindo o mesmo tipo a todos os blocos em operações multi-depot.
         """
         blocks = []
         block_id = 1
@@ -191,7 +193,9 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             if not block_ids:
                 continue
             trips = [trip_map[tid] for tid in block_ids]
-            block = Block(id=block_id, trips=trips, vehicle_type_id=vehicle_type_id)
+            blk_depot = trips[0].depot_id if trips else depot_id
+            vt = select_vehicle_type(vehicle_types, blk_depot)
+            block = Block(id=block_id, trips=trips, vehicle_type_id=vt.id if vt else None)
             blocks.append(block)
             block_id += 1
         return blocks
@@ -287,7 +291,11 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             neighbours = _generate_reloc_neighbours(
                 current_state,
                 trip_map,
-                sample_n=40,
+                # Vizinhança adaptativa: sqrt(N_trips) * 3, clampado em [40, 120].
+                # Instâncias maiores precisam de mais vizinhos para evitar
+                # que o Tabu fique preso em ótimos locais de baixa qualidade.
+                # Ref: Glover & Laguna (1997) "Tabu Search" §3.2
+                sample_n=min(120, max(40, int(len(trips) ** 0.5 * 3))),
                 min_gap=min_gap,
                 min_break=int(min_break) if min_break is not None else 30,
                 enforce_min_interval=enforce_min_interval,
@@ -337,9 +345,8 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
                 tabu_list.clear()
                 stale_count = 0
 
-        selected_vt = select_vehicle_type(vehicle_types, depot_id)
         best_blocks = self._state_to_blocks(
-            best_state, trip_map, selected_vt.id if selected_vt else None
+            best_state, trip_map, vehicle_types, depot_id
         )
 
         for block in best_blocks:
