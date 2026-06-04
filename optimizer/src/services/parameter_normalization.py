@@ -193,6 +193,25 @@ def align_vsp_params_with_cct(
 
     if "pricing_enabled" not in vsp_params and "enable_column_generation" in vsp_params:
         vsp_params["pricing_enabled"] = bool(vsp_params.get("enable_column_generation"))
+    if "pricing_enabled" not in vsp_params and "enable_column_generation" in cct_params:
+        vsp_params["pricing_enabled"] = bool(cct_params.get("enable_column_generation"))
+
+    # Normalização de aliases para parâmetros CCT/operacionais.
+    # Permite que o frontend envie nomes alternativos sem quebrar o solver.
+    # max_continuous_driving_minutes / condução_máxima → max_driving_minutes
+    for src_params in (cct_params, vsp_params):
+        for alias, canonical in (
+            ("max_continuous_driving_minutes", "max_driving_minutes"),
+            ("conducao_maxima_minutos", "max_driving_minutes"),
+            ("max_work_time_minutes", "max_work_minutes"),
+            ("max_shift_spread_minutes", "max_shift_minutes"),
+            ("break_after_minutes", "mandatory_break_after_minutes"),
+            ("pausa_obrigatoria_apos_minutos", "mandatory_break_after_minutes"),
+            ("descanso_interjornada_minutos", "inter_shift_rest_minutes"),
+            ("descanso_semanal_minutos", "weekly_rest_minutes"),
+        ):
+            if alias in src_params and canonical not in src_params:
+                src_params[canonical] = src_params[alias]
 
 
 def is_strict_trip_group_mode(

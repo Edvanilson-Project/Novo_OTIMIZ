@@ -104,9 +104,27 @@ class Settings(BaseSettings):
     default_cost_per_hour: float = 50.0  # R$ por hora de operação
 
     # ── Regras CCT (Convenção Coletiva de Trabalho) ───────────────────────────
-    cct_max_shift_minutes: int = 480  # 8 horas de jornada
-    cct_max_driving_minutes: int = 270  # 4h30 de direção contínua
-    cct_min_break_minutes: int = 30  # 30 min de intervalo mínimo
+    # max_shift_minutes: amplitude total da jornada (1ª viagem → última) — spread.
+    #   Valor 560 min (9h20) é padrão de CCTs regionais (ex: SP, Salvador).
+    #   NÃO é valor da CLT — a CLT define trabalho efetivo (8h), não spread.
+    #   Fonte: CCTs sindicais regionais (SINTUR, SINDPASS, SINTTRONORMAT, etc.)
+    cct_max_shift_minutes: int = 560  # 9h20 de spread/amplitude (CCT regional)
+
+    # max_work_minutes: trabalho efetivo máximo (tempo realmente ao volante).
+    #   Fonte: CLT Art. 235-C, caput (Lei 13.103/2015) — 8h de jornada efetiva.
+    cct_max_work_minutes: int = 480  # 8h de trabalho efetivo (CLT Art. 235-C)
+
+    # max_driving_minutes: condução contínua máxima antes de pausa obrigatória.
+    #   CTB Art. 67-C §1-A: pausa de 30min a cada 4h de condução (passageiros).
+    #   CTB Art. 67-C, caput: máximo absoluto contínuo = 5h30 (330min).
+    #   O valor 270min (4h30) é conservador/CCT — mais restritivo que os 4h do CTB.
+    #   Use mandatory_break_after_minutes=240 para o estrito do CTB §1-A.
+    cct_max_driving_minutes: int = 270  # 4h30 conservador (CTB Art. 67-C §1-A: 4h)
+
+    # min_break_minutes: pausa mínima obrigatória do motorista.
+    #   CTB Art. 67-C §1-A: 30min de pausa a cada 4h de condução (passageiros).
+    #   CLT Art. 235-C §2: intervalo de refeição mínimo de 1h (redutível a 30min via CCT).
+    cct_min_break_minutes: int = 30  # 30min de pausa obrigatória (CTB Art. 67-C §1-A)
 
     # ── AI Copilot (OpenRouter) ───────────────────────────────────────────────
     openrouter_api_key: str = ""  # Chave de API. Vazia = recurso desativado silenciosamente.

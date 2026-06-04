@@ -1138,13 +1138,17 @@ class OptimizerService:
         vsp_params: Dict[str, Any],
     ) -> Dict[str, Any]:
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
+        # min_connection = layover técnico do veículo (sem base legal — operacional, padrão 8-15min)
         min_connection = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
-        max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
+        # max_shift = spread/amplitude (CCT regional, ex: 560min=9h20) — NÃO é trabalho efetivo
+        max_shift = int(cct_params.get("max_shift_minutes", 560) or 560)
+        # max_driving = condução contínua — CTB Art. 67-C §1-A: 4h (pausa passageiros)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         mandatory_break_after = int(cct_params.get("mandatory_break_after_minutes", max_driving) or max_driving)
         meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
-        pullout = int(cct_params.get("pullout_minutes", vsp_params.get("pullout_minutes", 0)) or 0)
-        pullback = int(cct_params.get("pullback_minutes", vsp_params.get("pullback_minutes", 0)) or 0)
+        # pullout/pullback: default 10min (consistente com CSP greedy) — puramente operacional
+        pullout = int(cct_params.get("pullout_minutes", vsp_params.get("pullout_minutes", 10)) or 0)
+        pullback = int(cct_params.get("pullback_minutes", vsp_params.get("pullback_minutes", 10)) or 0)
         enforce_min_interval = bool(
             vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False))
         )

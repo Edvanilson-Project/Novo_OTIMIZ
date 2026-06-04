@@ -28,10 +28,15 @@ from ..base import BaseAlgorithm
 
 settings = get_settings()
 
-_DEF_MAX_SHIFT = getattr(settings, "cct_max_shift_minutes", 560)
-_DEF_MAX_WORK = getattr(settings, "cct_max_work_minutes", 480)
-_DEF_MAX_DRIVING = getattr(settings, "cct_max_driving_minutes", 270)
-_DEF_MIN_BREAK = getattr(settings, "cct_min_break_minutes", 30)
+# Defaults CCT/CLT para CSP (motoristas de ônibus urbano):
+# max_shift = spread/amplitude da jornada (1ª viagem → última) — CCT regional (ex: 560min=9h20)
+# max_work = trabalho efetivo máximo — CLT Art. 235-C (8h = 480min)
+# max_driving = condução antes de pausa — CTB Art. 67-C §1-A: 4h (240min), conservador: 4h30 (270min)
+# min_break = pausa mínima do motorista — CTB Art. 67-C §1-A: 30min a cada 4h de condução
+_DEF_MAX_SHIFT = getattr(settings, "cct_max_shift_minutes", 560)    # spread CCT (não CLT)
+_DEF_MAX_WORK = getattr(settings, "cct_max_work_minutes", 480)       # trabalho CLT Art. 235-C
+_DEF_MAX_DRIVING = getattr(settings, "cct_max_driving_minutes", 270) # condução CTB Art. 67-C §1-A
+_DEF_MIN_BREAK = getattr(settings, "cct_min_break_minutes", 30)      # pausa CTB Art. 67-C §1-A
 
 
 from ..evaluator import _nocturnal_overlap, CostEvaluator
@@ -59,7 +64,19 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.vsp_params = vsp_params or {}
         self._next_synthetic_trip_id = -1
 
-        # Sincronização com BaseOptimizationConfig
+        # Parâmetros CCT/CLT de jornada — DISTINÇÃO IMPORTANTE:
+        # max_shift = spread/amplitude total (1ª trip → última trip). CCT regional (ex: 560min=9h20).
+        #   NÃO é trabalho efetivo — inclui pausas e intervalos.
+        # max_work = tempo efetivo ao volante. CLT Art. 235-C caput: 8h = 480min.
+        # max_driving = condução contínua antes de pausa obrigatória:
+        #   CTB Art. 67-C §1-A: pausa de 30min a cada 4h (240min) de condução (passageiros).
+        #   CTB Art. 67-C caput: máximo absoluto de 5h30 (330min) contínuos.
+        #   Default 270min (4h30) = valor conservador/CCT (mais restritivo que a lei).
+        # mandatory_break_after = gatilho para pausa obrigatória (default=max_driving).
+        #   Se usar CTB §1-A estritamente: 240min. Se CCT conservadora: 270min.
+        # min_break = pausa mínima do motorista. CTB Art. 67-C §1-A: 30min (passageiros).
+        # inter_shift_rest = descanso entre jornadas. CLT Art. 235-C §3: 11h = 660min.
+        #   Pós-ADI 5322 (STF jun/2023): devem ser CONTÍNUAS, não fracionadas.
         self.max_shift = int(params.get("max_shift_minutes", _DEF_MAX_SHIFT))
         self.max_work = int(params.get("max_work_minutes", _DEF_MAX_WORK))
         self.min_work = int(params.get("min_work_minutes", 0))
@@ -71,6 +88,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.connection_tolerance = max(0, int(params.get("connection_tolerance_minutes", 0)))
         self.mandatory_break_after = int(params.get("mandatory_break_after_minutes", self.max_driving))
         self.meal_break_minutes = int(params.get("meal_break_minutes", 0))
+        # inter_shift_rest ≥ 660min (11h) — mínimo legal CLT Art. 235-C §3 (pós-ADI 5322: contínuas)
         self.inter_shift_rest = max(int(params.get("inter_shift_rest_minutes", 660)), 660)
         self.pullout_counts_in_driver_shift = bool(params.get("pullout_counts_in_driver_shift", True))
         self.pullback_counts_in_driver_shift = bool(params.get("pullback_counts_in_driver_shift", True))
@@ -108,8 +126,12 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             self.max_total_unpaid_break = int(self.max_total_unpaid_break)
         self.weekly_driving_limit = int(params.get("weekly_driving_limit_minutes", 3360))
         self.fortnight_driving_limit = int(params.get("fortnight_driving_limit_minutes", 5400))
-        self.weekly_rest = int(params.get("weekly_rest_minutes", 2700))
-        self.reduced_weekly_rest = int(params.get("reduced_weekly_rest_minutes", 1440))
+        # Descanso semanal (DSR):
+        # CLT Art. 67 + Art. 235-D: DSR mínimo = 24h + 11h interjornada = 35h = 2100min.
+        # "2700" (45h) não existe na legislação — era valor incorreto.
+        # CLT Art. 235-F: regime 12x36 = 36h (2160min) — somente via CCT/ACT.
+        self.weekly_rest = int(params.get("weekly_rest_minutes", 2100))           # 35h (CLT Art. 235-D)
+        self.reduced_weekly_rest = int(params.get("reduced_weekly_rest_minutes", 1440))  # 24h (CLT Art. 67 DSR puro)
         self.allow_reduced_weekly_rest = bool(params.get("allow_reduced_weekly_rest", False))
 
         # Minutos de Layover/Pull

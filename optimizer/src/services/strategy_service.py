@@ -61,8 +61,10 @@ class StrategyService:
         total_service_minutes = sum(max(0, trip.end_time - trip.start_time) for trip in trips)
         operating_span = max(trip.end_time for trip in trips) - min(trip.start_time for trip in trips)
 
-        max_shift = int(cct.get("max_shift_minutes", 480) or 480)
-        max_work = int(cct.get("max_work_minutes", 440) or 440)
+        # max_shift = spread/amplitude da jornada (CCT regional, ex: 560min=9h20)
+        max_shift = int(cct.get("max_shift_minutes", 560) or 560)
+        # max_work = trabalho efetivo máximo (CLT Art. 235-C caput: 8h = 480min)
+        max_work = int(cct.get("max_work_minutes", 480) or 480)
         max_vehicle_shift = int(vsp.get("max_vehicle_shift_minutes", 960) or 960)
         max_vehicles = int(vsp.get("max_vehicles", vsp.get("maxVehicles", 0)) or 0)
 

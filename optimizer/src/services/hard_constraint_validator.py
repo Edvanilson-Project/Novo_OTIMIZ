@@ -53,7 +53,9 @@ class HardConstraintValidator:
 
             issues.extend(self._validate_mid_trip_relief(trip, allow_relief_points))
 
-        max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
+        # max_shift = spread/amplitude da jornada (CCT regional, ex: 560min=9h20).
+        # NÃO confundir com trabalho efetivo (max_work_minutes=480, CLT Art. 235-C).
+        max_shift = int(cct_params.get("max_shift_minutes", 560) or 560)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         inter_shift = int(cct_params.get("inter_shift_rest_minutes", 660) or 660)
         if apply_cct and max_shift > 1440:
@@ -80,7 +82,8 @@ class HardConstraintValidator:
     ) -> Dict[str, Any]:
         issues: List[str] = []
         apply_cct = bool(cct_params.get("apply_cct", True))
-        max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
+        # max_shift = spread/amplitude da jornada (CCT regional, ex: 560min=9h20) — não confundir com max_work.
+        max_shift = int(cct_params.get("max_shift_minutes", 560) or 560)
         max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
         meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
@@ -92,8 +95,8 @@ class HardConstraintValidator:
             )
         )
         min_layover = int(cct_params.get("min_layover_minutes", vsp_params.get("min_layover_minutes", 8)) or 8)
-        if apply_cct and enforce_min_interval:
-            min_layover = max(min_layover, min_break)
+        # NOTE: min_break is a DRIVER constraint validated in _audit_duty.
+        # Block (vehicle) validation uses min_layover only (technical turnaround).
         idle_behavior = str(vsp_params.get("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")
         idle_threshold = vsp_params.get("vehicle_idle_gap_threshold_minutes")
         max_idle_gap: Optional[int] = None
