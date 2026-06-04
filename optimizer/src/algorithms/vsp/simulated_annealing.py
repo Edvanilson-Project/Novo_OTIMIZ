@@ -235,7 +235,7 @@ def _merge(
     ):
         return None  # retorna None — caller usa current_state inalterado
 
-    return state
+    return new_state
 
 
 _OPERATORS = [_reloc, _swap2, _split, _merge]

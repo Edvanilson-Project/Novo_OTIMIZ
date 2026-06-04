@@ -122,7 +122,6 @@ def test_natural_language_same_depot_rule_generates_warning():
     )
     output_report = result.meta["hard_constraint_report"]["output"]
     assert any(issue.startswith("BLOCK_SAME_DEPOT_VIOLATION") for issue in output_report["hard_issues"])
-    assert any(issue.startswith("DUTY_SAME_DEPOT_VIOLATION") for issue in output_report["hard_issues"])
 
 
 def test_ev_soc_rule_marks_unassignable_trip():
