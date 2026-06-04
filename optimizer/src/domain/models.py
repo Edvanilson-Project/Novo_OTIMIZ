@@ -256,9 +256,14 @@ class Duty:
     def _recalculate(self) -> None:
         if not self.segments:
             return
+        prev_work = self.work_time
         self.work_time = sum(t.duration for seg in self.segments for t in seg.trips)
         self.spread_time = self.end_time - self.start_time
-        if self.paid_minutes == 0:
+        # BUG-MODELS-01 fix: a condição `paid_minutes == 0` impedia atualização
+        # após a primeira chamada, subcontabilizando jornadas com mútiplos blocos.
+        # Novo comportamento: atualiza paid_minutes proporcionalmente se estava
+        # sincronizado com work_time anterior; se foi customizado externamente, preserva.
+        if self.paid_minutes == 0 or self.paid_minutes == prev_work:
             self.paid_minutes = self.work_time
 
 

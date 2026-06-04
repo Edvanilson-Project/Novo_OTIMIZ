@@ -227,7 +227,11 @@ def _repair_chromosome(
         else:
             repaired.append(sorted_missing)
 
-    return repaired if repaired else [sorted(all_trip_ids)]
+    # BUG-GA-01 fix: fallback `[sorted(all_trip_ids)]` criava um \u00fanico bloco gigante com
+    # todas as trips \u2014 invi\u00e1vel e altamente penalizado, for\u00e7ando o GA a sempre usar o Greedy.
+    # Correto: cada trip em seu pr\u00f3prio bloco \u2014 sempre vi\u00e1vel (sem conex\u00f5es), e o GA
+    # pode consolidar nas gera\u00e7\u00f5es seguintes atrav\u00e9s dos operadores de cruzamento/muta\u00e7\u00e3o.
+    return repaired if repaired else [[tid] for tid in sorted(all_trip_ids)]
 
 
 def _crossover(

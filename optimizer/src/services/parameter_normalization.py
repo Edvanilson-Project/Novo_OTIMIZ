@@ -125,13 +125,26 @@ def normalize_rules(params: Any) -> Dict[str, Any]:
 
     rules = normalized.get("natural_language_rules") or []
     if rules:
+        # BUG-NL-01 fix: dict.update() fazia shallow merge, descartando sub-chaves de
+        # goal_weights de regras anteriores quando a última também gerava goal_weights.
+        # Correto: acumular com deep merge para dicts aninhados.
         regex_parsed: Dict[str, Any] = {}
         for rule in rules:
-            regex_parsed.update(parse_rule(rule))
+            rule_result = parse_rule(rule)
+            for key, value in rule_result.items():
+                if key in regex_parsed and isinstance(regex_parsed[key], dict) and isinstance(value, dict):
+                    # Deep merge: preserva chaves de regras anteriores
+                    regex_parsed[key] = {**regex_parsed[key], **value}
+                else:
+                    regex_parsed[key] = value
 
         if regex_parsed:
             for key, value in regex_parsed.items():
-                normalized.setdefault(key, value)
+                if key in normalized and isinstance(normalized[key], dict) and isinstance(value, dict):
+                    # Deep merge com parâmetros já existentes
+                    normalized[key] = {**value, **normalized[key]}  # existente tem prioridade (setdefault semantics)
+                else:
+                    normalized.setdefault(key, value)
         else:
             ai_parsed = AiService().translate_rules_sync(rules)
             if ai_parsed:
@@ -168,7 +181,12 @@ def align_vsp_params_with_cct(
         cct_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
     if vsp_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
         vsp_params["min_layover_minutes"] = int(vsp_params["min_connection_time"])
-    if cct_params.get("min_connection_time") is not None and vsp_params.get("min_layover_minutes") is None:
+    # BUG-NL-02 fix: só propaga cct.min_connection_time para vsp.min_layover se vsp ainda não
+    # tiver um valor (das duas condições anteriores ou do payload original).
+    if (
+        cct_params.get("min_connection_time") is not None
+        and vsp_params.get("min_layover_minutes") is None
+    ):
         vsp_params["min_layover_minutes"] = int(cct_params["min_connection_time"])
 
     if "same_depot_required" not in vsp_params and cct_params.get("enforce_same_depot_start_end") is not None:

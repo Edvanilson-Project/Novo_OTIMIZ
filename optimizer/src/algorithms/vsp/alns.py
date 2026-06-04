@@ -227,8 +227,11 @@ def _greedy_insertion(
                 ):
                     continue
                 # custo barato: minimiza idle inserido
+                # BUG-ALNS-01 fix: delta=0.0 para pos=0 subestimava custo de inserção
+                # no início do bloco, fazendo o ALNS preferir sempre o início.
+                # Correto: calcular o gap real que a trip introduz (idle antes do 1º elemento).
                 if pos == 0:
-                    delta = 0.0
+                    delta = float(trip_map[block[0]].start_time - trip.end_time) if block else 0.0
                 elif pos == len(block):
                     delta = float(trip.start_time - trip_map[block[-1]].end_time)
                 else:
@@ -278,8 +281,9 @@ def _regret_insertion(
                         connection_tolerance,
                     ):
                         continue
+                    # BUG-ALNS-02 fix: mesmo delta=0.0 para pos=0 que BUG-ALNS-01.
                     if pos == 0:
-                        delta = 0.0
+                        delta = float(trip_map[block[0]].start_time - trip.end_time) if block else 0.0
                     elif pos == len(block):
                         delta = float(trip.start_time - trip_map[block[-1]].end_time)
                     else:

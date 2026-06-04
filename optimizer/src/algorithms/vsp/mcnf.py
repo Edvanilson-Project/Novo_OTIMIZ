@@ -305,7 +305,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     if block.trips:
                         block_id_counter += 1
                         all_blocks.append(block)
-                        assigned_trip_ids.update(block_trip_ids - assigned_trip_ids)
+                        # BUG-MCNF-B fix: `block_trip_ids` era do bloco ORIGINAL (antes do filtro).
+                        # Trips removidas pelo filtro eram marcadas como cobertas sem estar em nenhum bloco.
+                        # Correto: marcar apenas os IDs das filtered_trips que realmente entraram.
+                        assigned_trip_ids.update({t.id for t in block.trips})
                 else:
                     block.id = block_id_counter
                     block_id_counter += 1

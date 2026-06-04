@@ -75,11 +75,14 @@ class StrategyService:
             if hasattr(optimization_params, "cost_vehicle"):
                 # Se for objeto (pydantic)
                 cost_vehicle = optimization_params.cost_vehicle
-                optimization_params.cost_km
+                # BUG-STRATEGY-08 fix: cost_km era lido mas descartado (dead read).
+                # Capturado e usado no cálculo de custo de distância por veículo.
+                cost_km = float(getattr(optimization_params, "cost_km", 1.0) or 1.0)
                 cost_duty = optimization_params.cost_duty
             elif isinstance(optimization_params, dict):
                 # Se for dicionário
                 cost_vehicle = optimization_params.get("cost_vehicle", 1000.0)
+                cost_km = float(optimization_params.get("cost_km", 1.0) or 1.0)
                 cost_duty = optimization_params.get("cost_duty", 500.0)
 
         if _PULP_AVAILABLE:

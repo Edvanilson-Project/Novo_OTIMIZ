@@ -89,35 +89,38 @@ def _reloc(
     if len(state) < 2:
         return None
 
-    original = _copy_state(state)
-    src = random.randint(0, len(state) - 1)
-    if not state[src]:
+    # BUG-SA-01 fix: _reloc modificava `state` in-place ANTES de verificar viabilidade.
+    # Se inviável, retornava `original` mas o caller (current_state) já estava corrompido.
+    # Correto: trabalhar sempre em cópia local; nunca modificar o parâmetro `state`.
+    new_state = _copy_state(state)
+    src = random.randint(0, len(new_state) - 1)
+    if not new_state[src]:
         return None
 
-    trip_idx = random.randint(0, len(state[src]) - 1)
-    trip_id = state[src][trip_idx]
-    del state[src][trip_idx]
+    trip_idx = random.randint(0, len(new_state[src]) - 1)
+    trip_id = new_state[src][trip_idx]
+    del new_state[src][trip_idx]
 
-    dst = random.choice([i for i in range(len(state)) if i != src])
-    state[dst].append(trip_id)
-    state[dst].sort(key=lambda tid: trip_map[tid].start_time)
+    dst = random.choice([i for i in range(len(new_state)) if i != src])
+    new_state[dst].append(trip_id)
+    new_state[dst].sort(key=lambda tid: trip_map[tid].start_time)
 
-    state = [b for b in state if b]
+    new_state = [b for b in new_state if b]
 
     if not _blocks_are_feasible(
-        state,
+        new_state,
         trip_map,
         min_gap,
         kwargs.get("min_break", 30),
         kwargs.get("enforce_min_interval", False),
         kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", kwargs.get("strict_zero_gap_validation", False)),
-        kwargs.get("strict_operational_mode", kwargs.get("strict_operational_mode", False)),
-        kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
+        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix: redundante removido
+        kwargs.get("strict_operational_mode", False),
+        kwargs.get("strict_hard_constraints", False),
     ):
-        return original
+        return None  # retorna None — caller usa current_state inalterado
 
-    return state
+    return new_state
 
 
 def _swap2(
@@ -130,32 +133,34 @@ def _swap2(
     if len(state) < 2:
         return None
 
-    original = _copy_state(state)
-    i, j = random.sample(range(len(state)), 2)
-    if not state[i] or not state[j]:
+    # BUG-SA-01 fix: _swap2 modificava state in-place antes da verificação.
+    # Trabalha agora exclusivamente em cópia local.
+    new_state = _copy_state(state)
+    i, j = random.sample(range(len(new_state)), 2)
+    if not new_state[i] or not new_state[j]:
         return None
 
-    ii = random.randint(0, len(state[i]) - 1)
-    jj = random.randint(0, len(state[j]) - 1)
-    state[i][ii], state[j][jj] = state[j][jj], state[i][ii]
+    ii = random.randint(0, len(new_state[i]) - 1)
+    jj = random.randint(0, len(new_state[j]) - 1)
+    new_state[i][ii], new_state[j][jj] = new_state[j][jj], new_state[i][ii]
 
-    for block in state:
+    for block in new_state:
         block.sort(key=lambda tid: trip_map[tid].start_time)
 
     if not _blocks_are_feasible(
-        state,
+        new_state,
         trip_map,
         min_gap,
         kwargs.get("min_break", 30),
         kwargs.get("enforce_min_interval", False),
         kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", kwargs.get("strict_zero_gap_validation", False)),
-        kwargs.get("strict_operational_mode", kwargs.get("strict_operational_mode", False)),
-        kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
+        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix
+        kwargs.get("strict_operational_mode", False),
+        kwargs.get("strict_hard_constraints", False),
     ):
-        return original
+        return None  # retorna None — caller usa current_state inalterado
 
-    return state
+    return new_state
 
 
 def _split(
@@ -208,25 +213,27 @@ def _merge(
     if len(state) < 2:
         return None
 
-    original = _copy_state(state)
-    i, j = sorted(random.sample(range(len(state)), 2))
-    merged_block = [*state[i], *state[j]]
-    del state[j]
-    state[i] = merged_block
-    state[i].sort(key=lambda tid: trip_map[tid].start_time)
+    # BUG-SA-01 fix: _merge modificava state in-place antes da verificação.
+    # Trabalha agora exclusivamente em cópia local.
+    new_state = _copy_state(state)
+    i, j = sorted(random.sample(range(len(new_state)), 2))
+    merged_block = [*new_state[i], *new_state[j]]
+    del new_state[j]
+    new_state[i] = merged_block
+    new_state[i].sort(key=lambda tid: trip_map[tid].start_time)
 
     if not _blocks_are_feasible(
-        state,
+        new_state,
         trip_map,
         min_gap,
         kwargs.get("min_break", 30),
         kwargs.get("enforce_min_interval", False),
         kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", kwargs.get("strict_zero_gap_validation", False)),
-        kwargs.get("strict_operational_mode", kwargs.get("strict_operational_mode", False)),
-        kwargs.get("strict_hard_constraints", kwargs.get("strict_hard_constraints", False)),
+        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix
+        kwargs.get("strict_operational_mode", False),
+        kwargs.get("strict_hard_constraints", False),
     ):
-        return original
+        return None  # retorna None — caller usa current_state inalterado
 
     return state
 

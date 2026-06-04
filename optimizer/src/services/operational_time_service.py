@@ -180,6 +180,9 @@ def build_duty_operational_time_report(
             and cumulative_work_before_gap >= mandatory_break_after
             and work_after_gap > 0
         )
+        # BUG-OTS-07 fix: salvar work_before ANTES do reset do contador.
+        # Antes, o reset ocorria na linha 186 e work_before_minutes recebia 0 (já zerado).
+        work_before_this_gap = cumulative_work_before_gap
         if qualifies_as_mandatory_rest:
             segment_type = "mandatory_rest"
             mandatory_rest_time += gap
@@ -201,7 +204,7 @@ def build_duty_operational_time_report(
                 "location": current.trips[-1].destination_id,
                 "from_block_id": current_block_id,
                 "to_block_id": next_block_id,
-                "work_before_minutes": cumulative_work_before_gap,
+                "work_before_minutes": work_before_this_gap,
                 "work_after_minutes": work_after_gap,
             }
         )
@@ -249,7 +252,7 @@ def build_duty_operational_time_report(
 
     has_valid_mandatory_rest = mandatory_rest_time > 0
     invalid_rest_position = bool(required_rest > 0 and (start_buffer >= required_rest or end_buffer >= required_rest))
-    int(duty.work_time or total_drive)
+    # BUG-OTS-06 fix: expressão morta `int(duty.work_time or total_drive)` sem atribuição removida.
     max_continuous_drive = int(duty.meta.get("max_continuous_drive_minutes", 0) or 0)
     # CCT BR transporte urbano (CLT art. 235-D): pausa obrigatória de 30min é exigida
     # quando há CONDUÇÃO CONTÍNUA acima do limite (mandatory_break_after, ex: 4h).

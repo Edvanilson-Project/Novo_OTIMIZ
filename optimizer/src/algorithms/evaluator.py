@@ -344,9 +344,13 @@ class CostEvaluator(ICostEvaluator):
         - próximos 60 min: 3x peso
         - acima disso: 10x peso
         """
-        excess = max(0, int(unpaid_break_minutes) - self.long_unpaid_break_limit_minutes)
-        if excess <= 0:
+        # BUG-EVAL-01 fix: unpaid_break_minutes é Decimal mas `int()` truncava (ex: Decimal('90.7') -> 90).
+        # Para valores próximos ao threshold, o truncamento fazia a tier não disparar.
+        # Correto: manter precisão Decimal e comparar com Decimal.
+        excess_d = unpaid_break_minutes - Decimal(str(self.long_unpaid_break_limit_minutes))
+        if excess_d <= Decimal("0"):
             return Decimal("0.0")
+        excess = int(excess_d.quantize(Decimal("1"), rounding="ROUND_HALF_UP"))
 
         tier1 = min(excess, 30)
         tier2 = min(max(0, excess - 30), 60)
@@ -532,7 +536,9 @@ class CostEvaluator(ICostEvaluator):
 
             # Aplica o nocturnal_factor no trabalho efetivo regulamentar
             regulatory_work_minutes = self._to_decimal(duty.work_time)
-            if self.nocturnal_factor > 1.0:
+            # BUG-EVAL-02 fix: `Decimal > float` levanta TypeError no Python 3.
+            # Correto: comparar Decimal com Decimal.
+            if self.nocturnal_factor > Decimal("1.0"):
                 extension = self._to_decimal(noct_minutes) * (self.nocturnal_factor - Decimal("1.0"))
                 regulatory_work_minutes += extension
 

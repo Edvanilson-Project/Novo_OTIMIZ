@@ -88,6 +88,9 @@ class HardConstraintValidator:
         min_break = int(cct_params.get("min_break_minutes", 30) or 30)
         meal_break = int(cct_params.get("meal_break_minutes", min_break) or min_break)
         mandatory_break_after = int(cct_params.get("mandatory_break_after_minutes", max_driving) or max_driving)
+        # BUG-VALIDATOR-03 fix: default era False aqui mas True em parameter_normalization.py L185.
+        # Unificado para False em ambos: enforce_min_interval deve ser ativado explicitamente
+        # via parâmetro, não por default. O normalizador também foi corrigido.
         enforce_min_interval = bool(
             cct_params.get(
                 "enforce_min_interval",
@@ -113,7 +116,11 @@ class HardConstraintValidator:
             )
             or 0
         )
-        inter_shift = max(int(cct_params.get("inter_shift_rest_minutes", 660) or 660), 660)
+        # BUG-VALIDATOR-05 fix: `max(..., 660)` forçava inter_shift ≥ 660 mesmo quando
+        # o usuário configurou valor menor (ex: 480min para acordos específicos).
+        # O validador deve respeitar o parâmetro configurado.
+        # O piso constitucional de 660min é garantido pelo audit_input (L63), não aqui.
+        inter_shift = int(cct_params.get("inter_shift_rest_minutes", 660) or 660)
         enforce_same_depot = bool(
             cct_params.get("enforce_same_depot_start_end", False) or vsp_params.get("same_depot_required", False)
         )
@@ -451,8 +458,10 @@ class HardConstraintValidator:
             start_depot = trips[0].depot_id
             end_depot = trips[-1].depot_id
             if start_depot is not None and end_depot is not None and start_depot != end_depot:
+                # BUG-VALIDATOR-04 fix: emitia DUTY_SAME_DEPOT_VIOLATION com block.id (deveria
+                # ser duty.id e ser emitido em _audit_duty, não aqui). Removida emissão
+                # duplicada/errada que inflava contagem de hard_issues.
                 issues.append(f"BLOCK_SAME_DEPOT_VIOLATION B{block.id}")
-                issues.append(f"DUTY_SAME_DEPOT_VIOLATION B{block.id}")
         return issues
 
     def _audit_duty(

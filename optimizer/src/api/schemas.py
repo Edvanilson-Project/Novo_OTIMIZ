@@ -150,7 +150,11 @@ class OptimizationParametersDTO(BaseOptimizationConfig):
     @model_validator(mode="after")
     def sync_deprecated_fields(self) -> "OptimizationParametersDTO":
         if self.max_driving_time_minutes is not None:
-            self.max_work_minutes = self.max_driving_time_minutes
+            # BUG-SCHEMA-10 fix: campo deprecated `max_driving_time_minutes` mapeava
+            # erroneamente para `max_work_minutes` (trabalho efetivo = 8h=480min).
+            # Semanticamente correto é `max_driving_minutes` (condução contínua = 4h30=270min).
+            # Driving (condução contínua) ≠ Work (trabalho efetivo) na CCT.
+            self.max_driving_minutes = self.max_driving_time_minutes
         return self
 
 
@@ -193,8 +197,10 @@ class TripInput(BaseModel):
         if self.start_time < 0:
             raise ValueError("start_time deve ser >= 0 (minutos desde meia-noite)")
         effective_duration = self.duration if self.duration > 0 else (self.end_time - self.start_time)
-        if effective_duration < 0:
-            raise ValueError("end_time deve ser >= start_time quando duration não for informado")
+        # BUG-SCHEMA-09 fix: aceitar duration=0 permitia trips inválidas.
+        # A validação correta é <= 0 (trip com duração zero ou negativa é inválida).
+        if effective_duration <= 0:
+            raise ValueError("Duração da viagem deve ser > 0 (end_time deve ser maior que start_time)")
         return self
 
     @model_validator(mode="after")
