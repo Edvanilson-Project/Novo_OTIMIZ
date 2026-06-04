@@ -183,7 +183,8 @@ class HardConstraintValidator:
                 next_start, _, next_duty_id = ordered[index + 1]
                 current_week = current_end // (7 * 1440)
                 next_week = next_start // (7 * 1440)
-                weekly_rest = int(cct_params.get("weekly_rest_minutes", 2700) or 2700)
+                # DSR mínimo = 35h = 2100min (CLT Art.235-D: DSR 24h + interjornada 11h). 2700 não existe na lei.
+                weekly_rest = int(cct_params.get("weekly_rest_minutes", 2100) or 2100)
                 reduced_weekly_rest = int(cct_params.get("reduced_weekly_rest_minutes", 1440) or 1440)
                 allow_reduced_weekly_rest = bool(cct_params.get("allow_reduced_weekly_rest", False))
                 required_weekly_rest = reduced_weekly_rest if allow_reduced_weekly_rest else weekly_rest

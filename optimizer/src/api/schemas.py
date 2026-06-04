@@ -57,7 +57,9 @@ class BaseOptimizationConfig(BaseModel):
     max_extended_driving_days_per_week: int = Field(2, description="Número máximo de extensões de direção por semana")
     weekly_driving_limit_minutes: int = Field(3360, description="Limite de direção semanal (56h)")
     fortnight_driving_limit_minutes: int = Field(5400, description="Limite de direção quinzenal (90h)")
-    weekly_rest_minutes: int = Field(2700, description="Tempo de descanso semanal obrigatório (45h)")
+    # CLT Art. 235-D: DSR mínimo = 24h + 11h interjornada = 35h = 2100min.
+    # 2700min (45h) não existe na legislação brasileira.
+    weekly_rest_minutes: int = Field(2100, description="Descanso semanal obrigatório (35h = CLT Art.235-D: DSR 24h + interjornada 11h)")
     reduced_weekly_rest_minutes: int = Field(1440, description="Tempo de descanso semanal reduzido (24h)")
     allow_reduced_weekly_rest: bool = Field(False, description="Permite reduzir o descanso semanal")
     max_unpaid_break_minutes: Optional[int] = Field(
