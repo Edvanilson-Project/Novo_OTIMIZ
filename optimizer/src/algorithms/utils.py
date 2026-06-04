@@ -65,12 +65,12 @@ def is_connection_feasible(
     strict_operational_mode: bool = False,
     strict_hard_constraints: bool = False,
 ) -> bool:
-    # Garante que inteiros sejam usados no cálculo
+    """Centraliza a lógica de viabilidade de conexão VSP com cache de aresta."""
+    # BUG-UTILS-01 fix: coerção int() movida para DEPOIS da docstring
+    # para que __doc__ não seja None
     min_layover = int(min_layover)
     min_break = int(min_break)
     connection_tolerance = int(connection_tolerance)
-
-    """Centraliza a lógica de viabilidade de conexão VSP com cache de aresta."""
     # PERF: Cache de aresta nível 1 (O(1) após primeiro hit)
     params_key = frozenset(
         {
@@ -157,16 +157,28 @@ def _is_connection_feasible_logic(
     if hasattr(nxt, "is_continuation_of"):
         is_same_trip_segment = nxt.is_continuation_of(current)
 
+    is_same_terminal = (
+        getattr(current, "destination_id", None) is not None
+        and getattr(current, "destination_id", None) == getattr(nxt, "origin_id", None)
+    )
+
+    deadhead = int(current.deadhead_times.get(nxt.origin_id, 0))
+    required = max(min_layover, deadhead)
+
     if gap == 0:
-        if not (is_contiguous_pair or is_same_trip_segment):
-            return False
-
-        # Upgrade de qualidade: validação geográfica em gap zero
-        if strict_zero_gap_validation:
-            if getattr(current, "destination_id", None) != getattr(nxt, "origin_id", None):
+        linked = is_contiguous_pair or is_same_trip_segment
+        if linked:
+            # Pares explicitamente ligados (mesmo trip_group / continuação de
+            # segmento) operam back-to-back no mesmo veículo por design.
+            if strict_zero_gap_validation and not is_same_terminal:
                 return False
-
-        return True
+            return True
+        # Viagens distintas com gap=0 só são viáveis com turnaround INSTANTÂNEO
+        # no MESMO terminal (o veículo já está na origem) E quando nenhum tempo
+        # mínimo de terminal/deadhead é exigido (required <= 0, p.ex. min_layover=0,
+        # como nas timetables do Optibus). gap=0 entre terminais distintos exigiria
+        # teletransporte -> inviável; required > 0 exige turnaround -> inviável.
+        return is_same_terminal and required <= 0
 
     # BUG FIX: Previously used min_break (driver CCT, e.g. 30 min) here,
     # which is a DRIVER rest constraint — not a VEHICLE constraint.
@@ -175,9 +187,6 @@ def _is_connection_feasible_logic(
     # min_break is correctly enforced in the CSP (crew scheduling).
     if enforce_min_interval and gap < min_layover:
         return False
-
-    deadhead = int(current.deadhead_times.get(nxt.origin_id, 0))
-    required = max(min_layover, deadhead)
 
     # 4. Strict Hard Constraints: Rejeita tolerâncias (Segurança operacional total)
     if strict_operational_mode or strict_hard_constraints:
@@ -190,13 +199,19 @@ def _is_connection_feasible_logic(
 
 def extract_connection_params(vsp_params: Dict[str, Any]) -> Dict[str, Any]:
     """Extrai e padroniza parâmetros de conexão do vsp_params."""
+    allow_relief = bool(vsp_params.get("allow_relief_points", False))
+    if allow_relief:
+        max_vehicle_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)
+    else:
+        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+
     return {
         "min_layover": int(vsp_params.get("min_layover_minutes", 8) or 8),
         "min_break": int(vsp_params.get("min_break_minutes", 30) or 30),
         "enforce_min_interval": bool(vsp_params.get("enforce_min_interval", False)),
         "connection_tolerance": int(vsp_params.get("connection_tolerance_minutes", 0) or 0),
         "allow_multi_line": bool(vsp_params.get("allow_multi_line_block", True)),
-        "max_vehicle_shift": int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960),
+        "max_vehicle_shift": max_vehicle_shift,
         "strict_zero_gap_validation": bool(vsp_params.get("strict_zero_gap_validation", False)),
         "strict_operational_mode": bool(vsp_params.get("strict_operational_mode", False)),
         "strict_hard_constraints": bool(vsp_params.get("strict_hard_constraints", False)),
@@ -278,11 +293,15 @@ def quick_cost_from_trips(
             if gap < 0:
                 total += abs(gap) * 50.0  # Penalidade forte por overlap
             else:
-                total += gap * idle_cost_per_minute
+                deadhead = 0
                 if deadhead_cost_per_minute and cur.deadhead_times:
                     deadhead = cur.deadhead_times.get(nxt.origin_id, 0)
-                    if deadhead:
-                        total += deadhead * deadhead_cost_per_minute
+                
+                idle_time = max(0, gap - deadhead)
+                total += idle_time * idle_cost_per_minute
+                
+                if deadhead:
+                    total += deadhead * deadhead_cost_per_minute
     return total
 
 
