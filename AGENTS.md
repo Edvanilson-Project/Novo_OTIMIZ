@@ -78,3 +78,23 @@ Uma tela/modulo so esta pronto quando:
 
 Siga tambem as instrucoes especificas de subdiretorios, como `frontend/AGENTS.md`,
 quando trabalhar dentro deles.
+
+## Otimizador (VSP/CSP) — roadmap e invariantes (LER antes de mexer no optimizer)
+
+Antes de tocar em qualquer algoritmo de otimizacao (`optimizer/src/algorithms/**`,
+`optimizer/src/services/optimizer_service.py`) ou na comparacao com o Optibus, leia:
+
+- `ROADMAP_SUPERAR_OPTIBUS.md` — estado atual, o que JA esta feito (nao refazer),
+  backlog priorizado com COMO FAZER, playbook de validacao e pitfalls. **Mantenha-o
+  atualizado** (instrucoes de manutencao no §8 do proprio arquivo).
+- `artifacts/RELATORIO_OTIMIZ_vs_OPTIBUS_2026-06-04.md` — a comparacao real medida.
+- `CLAUDE.md §5` — invariantes do otimizador.
+
+Invariantes que NAO podem ser quebrados (cada um ja foi bug; ha testes que os protegem):
+`max_block_span`(1440, veiculo) ≠ `max_vehicle_shift`(960, motorista); gap=0 so no mesmo
+terminal com `required<=0`; particao `==1`; deadhead escalado/haversine. Detalhes e
+file:line em `ROADMAP_SUPERAR_OPTIBUS.md §2`.
+
+Estado atual (2026-06-04): Mussurunga 36 = Optibus 36; Mirantes 86 vs Optibus 82 (+4,9%);
+suite 684 passed/0 failed/5 skipped. Unico caminho honesto para superar no Mirantes =
+matriz de deadhead geografica real (tarefa T1 do roadmap).
