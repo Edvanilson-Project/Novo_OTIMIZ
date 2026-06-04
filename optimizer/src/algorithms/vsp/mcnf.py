@@ -755,16 +755,16 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
 
         max_block_duration = self._p("max_block_duration_minutes", None)
-        # BUG-MCNF-03 fix: O MCNF verifica o GAP entre viagens (max_shift) mas nunca
-        # o span TOTAL do bloco. Um bloco pode ter span de 963min com gaps individuais <960min.
-        # Quando max_block_duration_minutes não está setado mas max_vehicle_shift_minutes está
-        # configurado explicitamente, usá-lo como limite de span total do bloco VSP.
-        # Nota: max_vehicle_shift_minutes tem default=960, então verificamos se foi
-        # explicitamente passado nos parâmetros (não é None antes do default).
+        # BUG-MCNF-03 fix: o MCNF valida o GAP entre viagens (max_shift) mas nunca o
+        # span TOTAL do bloco. O span do BLOCO-VEÍCULO é limitado por
+        # max_block_span_minutes (dia do veículo), NÃO por max_vehicle_shift_minutes
+        # (jornada do MOTORISTA = restrição de CSP). Só corta o bloco se um limite de
+        # span foi explicitamente configurado; a jornada do motorista não corta o
+        # bloco-veículo (run-cutting resolve no CSP — CLAUDE.md §5).
         if max_block_duration is None:
-            explicit_max_shift = self.vsp_params.get("max_vehicle_shift_minutes") if hasattr(self, "vsp_params") else None
-            if explicit_max_shift is not None:
-                max_block_duration = int(explicit_max_shift)
+            mbs = self.vsp_params.get("max_block_span_minutes") if hasattr(self, "vsp_params") else None
+            if mbs is not None:
+                max_block_duration = int(mbs)
         if max_block_duration is not None and int(max_block_duration) > 0:
             blocks = self._split_blocks_by_total_duration(blocks, int(max_block_duration))
 

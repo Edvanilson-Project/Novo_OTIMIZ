@@ -475,7 +475,9 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
         deadhead_cost = float(self._p("deadhead_cost_per_minute", _DEFAULT_DEADHEAD_COST))
         idle_cost = float(self._p("idle_cost_per_minute", _DEFAULT_IDLE_COST))
         min_layover = int(self._p("min_layover_minutes", _DEFAULT_MIN_LAYOVER))
-        max_vehicle_shift = int(self._p("max_vehicle_shift_minutes", _DEFAULT_MAX_VEHICLE_SHIFT))
+        # span do BLOCO-VEÍCULO (max_block_span_minutes, 1440 = dia do veículo);
+        # a jornada do motorista é restrição de CSP (CLAUDE.md §5).
+        max_vehicle_shift = int(self._p("max_block_span_minutes", 1440) or 1440)
         max_pricing_iters = int(self._p("bp_max_pricing_iterations", _DEFAULT_MAX_PRICING_ITERS))
         max_pricing_cols = int(self._p("bp_max_pricing_columns", _DEFAULT_MAX_PRICING_COLUMNS))
         max_labels_per_node = int(self._p("bp_max_labels_per_node", 50))
@@ -585,18 +587,27 @@ class BranchAndPrice(BaseAlgorithm, IVSPAlgorithm):
                         mip_obj = best_obj
                         rf_used = True
 
-        # Reconstrução: blocos a partir dos trip_ids selecionados
+        # Reconstrução: blocos a partir dos trip_ids selecionados.
+        # O master usa covering (>= 1), então uma viagem pode aparecer em colunas
+        # selecionadas distintas. Forçamos PARTIÇÃO (== 1): cada viagem entra em
+        # exatamente UM bloco (a primeira coluna que a reivindica), evitando
+        # sobre-cobertura (CLAUDE.md §5). Remover viagens já cobertas mantém o bloco
+        # viável (apenas aumenta gaps entre viagens consecutivas).
         rebuilt_blocks: List[Block] = []
         covered: set[int] = set()
         for idx in selected:
             col_trip_ids = master.column_trips(idx)
-            col_trips = [trip_by_id[tid] for tid in col_trip_ids if tid in trip_by_id]
+            col_trips = [
+                trip_by_id[tid]
+                for tid in col_trip_ids
+                if tid in trip_by_id and tid not in covered
+            ]
             if not col_trips:
                 continue
             block = Block(id=len(rebuilt_blocks) + 1, trips=sorted(col_trips, key=lambda t: t.start_time))
             block.vehicle_type_id = vehicle.id if vehicle else None
             rebuilt_blocks.append(block)
-            covered.update(col_trip_ids)
+            covered.update(t.id for t in col_trips)
 
         unassigned = [t for t in trips if t.id not in covered]
 

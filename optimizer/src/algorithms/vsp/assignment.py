@@ -105,9 +105,11 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
         min_layover = int(self._p("min_layover_minutes", 8))
         min_break = self._p("min_break_minutes", None)
         enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))
-        if enforce_min_interval and min_break is not None:
-            min_layover = max(min_layover, int(min_break))
-        max_shift = int(self._p("max_vehicle_shift_minutes", 960))
+        # NOTE: min_break is a DRIVER constraint (CCT) applied in the CSP.
+        # Do NOT inflate min_layover here — vehicle only needs technical turnaround.
+        # max_shift = span do BLOCO-VEÍCULO (max_block_span_minutes, default 1440 =
+        # dia do veículo). A jornada do motorista (max_vehicle_shift) é CSP — CLAUDE.md §5.
+        max_shift = int(self._p("max_block_span_minutes", 1440) or 1440)
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
         max_successors = int(
@@ -479,14 +481,15 @@ class AssignmentVSP(BaseAlgorithm, IVSPAlgorithm):
                 new_blocks.append(merged_block)
                 new_id += 1
 
-            # Adiciona blocos que ficaram só como "right" (cabeça consumida)
+            # BUG-ASSIGN-01 fix: blocos não visitados DEVEM ser preservados,
+            # senão suas trips desaparecem da solução.
             for a in range(B):
                 if a not in visited_b:
                     blk = blocks_sorted[a]
-                    if blk not in new_blocks:
-                        # Só inclui se não foi fundido como cauda
-                        # (taken_right significa que era cabeça sendo prependida; já incluído acima)
-                        pass
+                    preserved = Block(id=new_id, trips=blk.trips, vehicle_type_id=blk.vehicle_type_id)
+                    preserved.meta.update(blk.meta)
+                    new_blocks.append(preserved)
+                    new_id += 1
             merge_ms_total += (time.perf_counter() - tm0) * 1000
             merge_iters += 1
             merge_total += iter_merges

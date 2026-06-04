@@ -302,13 +302,14 @@ class TestMergeVSPBlocksConnectionTolerance:
                 assert merged_trips[i].start_time <= merged_trips[i + 1].start_time
 
     def test_no_merge_when_shift_exceeded(self):
-        """Não deve fundir se a duração total exceder max_vehicle_shift."""
+        """Não deve fundir se o span total do bloco-veículo exceder max_block_span_minutes.
+        (max_vehicle_shift é jornada do motorista = restrição de CSP — CLAUDE.md §5.)"""
         t1 = make_trip(1, 0, 60, 1, 2, deadhead_to_dest=5)
         t2 = make_trip(2, 70, 500, 2, 1, deadhead_to_dest=5)
         b1 = make_block(1, [t1])
         b2 = make_block(2, [t2])
         sol = make_vsp_solution([b1, b2])
-        # max_vehicle_shift=400 mas b1.start=0, b2.end=500 → total=500 > 400
-        params = {"min_layover_minutes": 5, "max_vehicle_shift_minutes": 400}
+        # max_block_span=400 mas b1.start=0, b2.end=500 → total=500 > 400
+        params = {"min_layover_minutes": 5, "max_block_span_minutes": 400}
         result = _try_merge_vsp_blocks(sol, params)
         assert len(result.blocks) == 2

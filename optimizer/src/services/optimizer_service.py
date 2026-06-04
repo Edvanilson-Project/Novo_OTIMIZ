@@ -2552,9 +2552,13 @@ class OptimizerService:
         # combinado é validada por max_vehicle_shift (960min hard) + is_connection_feasible.
         # Medido em seed=42 a 2000v: 366→360 blocos, custo -0.5%, tempo +1%.
         max_gap = int(vsp_params.get("scale_stitch_max_gap_minutes", 240) or 240)
-        max_vehicle_shift = int(
-            vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960
-        )
+        allow_relief = bool(vsp_params.get("allow_relief_points", False))
+        if allow_relief:
+            max_vehicle_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)
+        else:
+            max_vehicle_shift = int(
+                vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960
+            )
         min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
         enforce_min_interval = bool(
@@ -3643,18 +3647,45 @@ class OptimizerService:
         fallback_floor = int(vsp_params.get("fallback_deadhead_floor_minutes", 8) or 8)
         impossible_deadhead = int(vsp_params.get("unknown_deadhead_minutes", 999999) or 999999)
 
+        # Sem lat/long, estima o deadhead terminal->terminal pelo MENOR tempo de uma
+        # viagem de serviço observada entre esses terminais (proxy conservador: o
+        # trecho vazio não é mais lento que o trecho com paradas). Habilita
+        # reposicionamento realista entre terminais conectados pela própria
+        # timetable — caso típico de exports só com stop IDs (ex.: Optibus).
+        infer_from_timetable = bool(vsp_params.get("infer_deadhead_from_timetable", True))
+        # O trecho de serviço inclui paradas/embarque; o deslocamento vazio é mais
+        # rápido. Escala o tempo de serviço por um fator (<1) para aproximar o
+        # deadhead real, com piso em fallback_floor.
+        service_factor = float(vsp_params.get("deadhead_service_time_factor", 0.6) or 0.6)
+        svc_time: Dict[Tuple[int, int], int] = {}
+        if infer_from_timetable:
+            for t in trips:
+                key = (int(t.origin_id), int(t.destination_id))
+                dur = int(t.duration or 0)
+                if dur > 0 and (key not in svc_time or dur < svc_time[key]):
+                    svc_time[key] = dur
+
         for trip in trips:
             trip.deadhead_times = dict(trip.deadhead_times or {})
-            dest_coords = terminal_coords.get(int(trip.destination_id))
+            dest = int(trip.destination_id)
+            dest_coords = terminal_coords.get(dest)
             for origin_id in origin_ids:
                 if origin_id in trip.deadhead_times:
                     continue
-                if int(trip.destination_id) == int(origin_id):
+                if dest == int(origin_id):
                     trip.deadhead_times[origin_id] = 0
                     continue
                 origin_coords = terminal_coords.get(int(origin_id))
                 if dest_coords is None or origin_coords is None:
-                    trip.deadhead_times[origin_id] = impossible_deadhead
+                    # 1) tempo de serviço direto dest->origin; 2) reverso (simétrico);
+                    # 3) fallback flat/proibido (unknown_deadhead_minutes).
+                    est = svc_time.get((dest, int(origin_id)))
+                    if est is None:
+                        est = svc_time.get((int(origin_id), dest))
+                    if est is not None:
+                        trip.deadhead_times[origin_id] = max(fallback_floor, int(round(est * service_factor)))
+                    else:
+                        trip.deadhead_times[origin_id] = impossible_deadhead
                     continue
                 trip.deadhead_times[origin_id] = self._estimate_deadhead_minutes(
                     dest_coords,

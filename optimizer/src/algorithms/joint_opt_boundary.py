@@ -88,7 +88,7 @@ def boundary_two_opt(
     import copy
 
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
-    max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
+    max_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)  # span do bloco-veículo (CLAUDE.md §5)
     allow_multi = bool(vsp_params.get("allow_multi_line_block", True))
 
     blocks = [
@@ -152,7 +152,7 @@ def boundary_two_opt(
     if swaps == 0:
         return vsp_sol, 0
 
-    new_sol = copy.copy(vsp_sol)
+    new_sol = copy.deepcopy(vsp_sol)  # BUG-BOUND-02 fix: deepcopy evita corrupção silenciosa
     new_sol.blocks = blocks
     new_sol.meta = {**(vsp_sol.meta or {}), "boundary_swaps": swaps}
     logger.info(
@@ -178,7 +178,7 @@ def boundary_tail_relocation(
     import copy
 
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
-    max_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
+    max_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)  # span do bloco-veículo (CLAUDE.md §5)
 
     blocks = [
         Block(
@@ -241,7 +241,7 @@ def boundary_tail_relocation(
 
     for idx, b in enumerate(blocks):
         b.id = idx + 1
-    new_sol = copy.copy(vsp_sol)
+    new_sol = copy.deepcopy(vsp_sol)  # BUG-BOUND-03 fix: deepcopy evita corrupção silenciosa
     new_sol.blocks = blocks
     new_sol.meta = {**(vsp_sol.meta or {}), "boundary_tail_relocations": relocations}
     logger.info(f"[BOUNDARY-TAIL] {relocations} realocações eliminaram {relocations} veículos")
@@ -270,5 +270,11 @@ def stitch_chunk_boundaries(
     )
     logger.info(f"[STITCH] {len(boundary_ids)}/{len(vsp_sol.blocks)} blocos identificados " f"como fronteira")
     sol, _ = boundary_tail_relocation(vsp_sol, vsp_params, boundary_ids)
+    # BUG-BOUND-04 fix: recalcular boundary_ids após tail_relocation (blocos mudaram)
+    boundary_ids = identify_boundary_blocks(
+        sol.blocks,
+        chunk_assignments=chunk_assignments,
+        temporal_window_minutes=temporal_window_minutes,
+    )
     sol, _ = boundary_two_opt(sol, vsp_params, boundary_ids)
     return sol

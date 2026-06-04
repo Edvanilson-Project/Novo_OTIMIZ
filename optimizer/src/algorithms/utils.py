@@ -199,11 +199,14 @@ def _is_connection_feasible_logic(
 
 def extract_connection_params(vsp_params: Dict[str, Any]) -> Dict[str, Any]:
     """Extrai e padroniza parâmetros de conexão do vsp_params."""
-    allow_relief = bool(vsp_params.get("allow_relief_points", False))
-    if allow_relief:
-        max_vehicle_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)
-    else:
-        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+    # O span do BLOCO-VEÍCULO é limitado por max_block_span_minutes (default 1440 =
+    # dia operacional do veículo), NÃO por max_vehicle_shift_minutes (jornada do
+    # MOTORISTA = restrição de CSP). Um ônibus roda o dia inteiro servido por vários
+    # motoristas via run-cutting (CLAUDE.md §5). A chave de retorno mantém o nome
+    # "max_vehicle_shift" por compatibilidade com os callers, mas a semântica é span.
+    max_vehicle_shift = int(vsp_params.get("max_block_span_minutes", 1440) or 1440)
+    if max_vehicle_shift <= 0:
+        max_vehicle_shift = 10**9
 
     return {
         "min_layover": int(vsp_params.get("min_layover_minutes", 8) or 8),

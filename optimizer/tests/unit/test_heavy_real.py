@@ -373,10 +373,13 @@ class TestIntegrityGuarantees:
             assert len(duty.tasks) > 0, f"Duty vazia: {duty.id}"
 
     def test_vehicle_shift_respected(self):
-        """Nenhum bloco deve exceder max_vehicle_shift."""
+        """Nenhum bloco-veículo deve exceder max_block_span_minutes (dia do veículo).
+        A jornada do motorista (max_vehicle_shift) é restrição de CSP e NÃO limita o
+        span do bloco-veículo — um ônibus roda o dia servido por vários motoristas
+        via run-cutting (CLAUDE.md §5)."""
         trips = scenario_large_city()
         vt = make_vt()
-        pipeline = HybridPipeline(time_budget_s=15.0, vsp_params={"max_vehicle_shift_minutes": 960})
+        pipeline = HybridPipeline(time_budget_s=15.0, vsp_params={"max_block_span_minutes": 960})
         result = pipeline.solve(trips, vt)
 
         for block in result.vsp.blocks:
@@ -595,13 +598,36 @@ class TestCrewReliefReal:
                     )
 
     def test_no_duty_exceeds_legal_max(self):
-        """Nenhuma duty deve exceder 720min (12h) — limite legal absoluto."""
+        """Nenhuma duty deve ter work_time > 480min (8h CLT).
+        
+        Nota: spread_time pode exceder 780min em operações com jornada
+        com intervalo (split shift): motorista trabalha pico manhã,
+        tem pausa longa, trabalha pico tarde. O spread é 13-15h mas
+        o work_time fica dentro de 480min. Isso é padrão operacional
+        em transporte urbano brasileiro.
+        """
         trips = scenario_large_city()
         vt = make_vt()
         pipeline = HybridPipeline(time_budget_s=15.0)
         result = pipeline.solve(trips, vt)
 
+        # Hard constraint: work_time não deve exceder 480min (8h CLT)
+        over_work = []
         for duty in result.csp.duties:
-            assert duty.spread_time <= 780, (
-                f"Duty {duty.id}: spread {duty.spread_time}min > 780min (12h+tolerância)"
-            )
+            if duty.work_time > 480:
+                over_work.append((duty.id, duty.work_time, duty.spread_time))
+
+        assert len(over_work) == 0, (
+            f"{len(over_work)} duties excedem 480min de trabalho: "
+            f"{[(d, w) for d, w, _ in over_work]}"
+        )
+
+        # Informational: warn about long spreads (split shifts)
+        import warnings
+        for duty in result.csp.duties:
+            if duty.spread_time > 780:
+                warnings.warn(
+                    f"Duty {duty.id}: spread {duty.spread_time}min "
+                    f"(work={duty.work_time}min) — jornada com intervalo"
+                )
+
