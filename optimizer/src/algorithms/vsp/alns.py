@@ -358,7 +358,8 @@ class ALNSVSP(BaseAlgorithm, IVSPAlgorithm):
         best_cost = current_cost
 
         rng = random.Random(int(self._p("random_seed", time.time() * 1000)))
-        min_layover = int(self._p("min_layover_minutes", 8) or 8)
+        val_layover = self._p("min_layover_minutes", None)
+        min_layover = int(val_layover if val_layover is not None else 8)
         enforce_min_interval = bool(self._p("enforce_min_interval", False))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0) or 0)
 

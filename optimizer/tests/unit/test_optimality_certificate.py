@@ -82,7 +82,7 @@ class TestCertificateStructure:
     def test_empty_result(self):
         result = _make_result(VSPSolution(algorithm="empty"))
         cert = certify_optimality(result)
-        assert cert["vsp_lower_bound"] == 0
+        assert cert["vsp_lower_bound"] is None
         assert cert["vsp_actual"] == 0
         assert cert["lb_method"] == "none"
 
@@ -115,16 +115,16 @@ class TestCertificateStructure:
 
 
 class TestBestOfSelection:
-    def test_lagrangean_wins_when_higher(self):
-        # Bodin=1 (no overlap), Lagrangian=5 → cert escolhe Lagrangian
+    def test_lagrangean_is_reported_but_does_not_override_vehicle_lb(self):
+        # Bodin=1 (no overlap), Lagrangian=5 → cert escolhe Bodin para vehicle LB
         blocks = [Block(id=1, vehicle_type_id=1, trips=[_trip(1, 0, 60), _trip(2, 60, 120)])]
         result = _make_result(
             VSPSolution(blocks=blocks, algorithm="lagrangean"),
             meta={"lagrangean_lower_bound": 5.0},
         )
         cert = certify_optimality(result)
-        assert cert["lb_method"] == "lagrangean"
-        assert cert["vsp_lower_bound"] == 5
+        assert cert["lb_method"] == "bodin_golden"
+        assert cert["lb_sources"]["lagrangean"] == 5.0
 
     def test_bodin_wins_when_higher(self):
         # Bodin=2 (overlap), Lagrangian=1 → cert escolhe Bodin
@@ -137,15 +137,16 @@ class TestBestOfSelection:
         assert cert["lb_method"] == "bodin_golden"
         assert cert["vsp_lower_bound"] == 2
 
-    def test_bundle_and_lagrangean_combined(self):
+    def test_bundle_and_lagrangean_combined_are_reported(self):
         blocks = [Block(id=1, vehicle_type_id=1, trips=[_trip(1, 0, 60)])]
         result = _make_result(
             VSPSolution(blocks=blocks, algorithm="bundle"),
             meta={"lagrangean_lower_bound": 3.0, "bundle_lower_bound": 4.7},
         )
         cert = certify_optimality(result)
-        assert cert["lb_method"] == "bundle"
-        assert cert["vsp_lower_bound"] == 5  # round(4.7)
+        assert cert["lb_method"] == "bodin_golden"
+        assert cert["lb_sources"]["lagrangean"] == 3.0
+        assert cert["lb_sources"]["bundle"] == 4.7
         assert "lagrangean" in cert["lb_sources"]
         assert "bundle" in cert["lb_sources"]
 

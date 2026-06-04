@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, Set
 
-from ...domain.models import Block, OptimizationResult, Trip, VehicleType, VSPSolution
+from ...domain.models import Block, CSPSolution, OptimizationResult, Trip, VehicleType, VSPSolution
 from ..vsp.greedy import GreedyVSP
 from ..utils import select_vehicle_type
 
@@ -69,9 +69,10 @@ class DisruptionRecoverySolver:
             OptimizationResult com VSP recuperado e meta de métricas de mudança.
         """
         if not trips:
+            # BUG-DR-01 fix: csp=None violates contract, use empty CSPSolution
             return OptimizationResult(
                 vsp=VSPSolution(algorithm="disruption_recovery"),
-                csp=None,
+                csp=CSPSolution(algorithm="disruption_recovery"),
             )
 
         freeze_unaffected = bool(self._p("disruption_freeze_unaffected", True))
@@ -163,7 +164,8 @@ class DisruptionRecoverySolver:
                 "disruption_strategy": "incremental",
             },
         )
-        return OptimizationResult(vsp=vsp, csp=None)
+        # BUG-DR-01 fix: csp=None violates contract, use empty CSPSolution
+        return OptimizationResult(vsp=vsp, csp=CSPSolution(algorithm="disruption_recovery"))
 
     def _full_reoptimize(
         self,
@@ -181,4 +183,5 @@ class DisruptionRecoverySolver:
             "disruption_affected_ratio": 1.0,
         })
         vsp.algorithm = "disruption_recovery"
-        return OptimizationResult(vsp=vsp, csp=None)
+        # BUG-DR-01 fix: csp=None violates contract, use empty CSPSolution
+        return OptimizationResult(vsp=vsp, csp=CSPSolution(algorithm="disruption_recovery"))

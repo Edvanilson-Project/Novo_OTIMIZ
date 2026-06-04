@@ -1,4 +1,5 @@
 """
+
 Chunked CSP Orchestrator — Decomposição Geográfica + Temporal.
 
 Resolve o problema de Set Partitioning para mega-instâncias (30k-40k viagens)
@@ -61,8 +62,13 @@ class ChunkedCSPOrchestrator(BaseAlgorithm, ICSPAlgorithm):
         self._base_solver_factory = base_solver
 
     def _make_solver(self) -> ICSPAlgorithm:
+        # BUG-CHUNK-02 fix: solver reutilizado com estado mutável entre chunks.
+        # Se é classe (type), instanciar nova a cada chunk. Se é instância, deepcopy.
         if self._base_solver_factory is not None:
-            return self._base_solver_factory
+            if isinstance(self._base_solver_factory, type):
+                return self._base_solver_factory(vsp_params=self.vsp_params, **self.params)
+            import copy
+            return copy.deepcopy(self._base_solver_factory)
         # Lazy import para evitar circular dep
         from .set_partitioning_optimized import SetPartitioningOptimizedCSP
 

@@ -143,10 +143,11 @@ class JointTimetableVSP(BaseAlgorithm, IVSPAlgorithm):
                 if gap_min > BIG_M:
                     continue
                 # Verifica se é potencialmente factível
+                # BUG-JT-01 fix: parênteses corrigidos na aritmética de filtro
                 if (
-                    trips_sorted[j].start_time + slack
-                    - trips_sorted[i].end_time + slack
-                    < min_layover - slack
+                    (trips_sorted[j].start_time + slack)
+                    - (trips_sorted[i].end_time - slack)
+                    < min_layover
                 ):
                     continue
                 candidates.append((i, j))

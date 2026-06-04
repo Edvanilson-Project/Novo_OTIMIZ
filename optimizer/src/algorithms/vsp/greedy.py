@@ -246,7 +246,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
             )
         )
         deadhead_cost = float(self._p("deadhead_cost_per_minute", 1.0))
-        idle_cost = float(self._p("idle_cost_per_minute", 0.25))
+        idle_cost = float(self._p("idle_cost_per_minute", 0.5))
         min_layover = int(self._p("min_layover_minutes", 8))
         min_break = self._p("min_break_minutes", None)
         enforce_min_interval = bool(self._p("enforce_min_interval", self._p("strict_min_interval", False)))

@@ -209,8 +209,8 @@ def extract_connection_params(vsp_params: Dict[str, Any]) -> Dict[str, Any]:
         max_vehicle_shift = 10**9
 
     return {
-        "min_layover": int(vsp_params.get("min_layover_minutes", 8) or 8),
-        "min_break": int(vsp_params.get("min_break_minutes", 30) or 30),
+        "min_layover": int(vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else 8),
+        "min_break": int(vsp_params.get("min_break_minutes") if vsp_params.get("min_break_minutes") is not None else 30),
         "enforce_min_interval": bool(vsp_params.get("enforce_min_interval", False)),
         "connection_tolerance": int(vsp_params.get("connection_tolerance_minutes", 0) or 0),
         "allow_multi_line": bool(vsp_params.get("allow_multi_line_block", True)),

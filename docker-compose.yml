@@ -300,7 +300,7 @@ services:
 
   # ── Infrastructure Exporters ───────────────────────────────────────────────
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.15.1
+    image: prometheuscommunity/postgres-exporter:v0.15.0
     container_name: otimiz-v2-postgres-exporter
     restart: unless-stopped
     depends_on:

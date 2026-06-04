@@ -110,14 +110,18 @@ class SolutionValidator:
                 end1, start2 = trip1.get("end_time"), trip2.get("start_time")
                 if end1 and start2:
                     gap = start2 - end1
-                    if gap < self.tolerance:
+                    # BUG-SOLVAL-01 fix: se dest1 == origin2, deadhead necessário é 0
+                    dest1 = trip1.get("destination_id")
+                    origin2 = trip2.get("origin_id")
+                    required_gap = 0 if (dest1 is not None and dest1 == origin2) else self.tolerance
+                    if gap < required_gap:
                         errors.append(
                             ValidationError(
                                 error_type="INSUFFICIENT_DEADHEAD",
                                 severity=ErrorSeverity.HIGH,
                                 vehicle_id=vehicle_id,
                                 trip_ids=[trip1.get("tripId"), trip2.get("tripId")],
-                                detail=f"Gap {gap}min < required {self.tolerance}min",
+                                detail=f"Gap {gap}min < required {required_gap}min",
                             )
                         )
         return errors
@@ -225,7 +229,8 @@ class UncoveredTripExplainer:
         trip_start = trip.get("start_time")
         trip_end = trip.get("end_time")
         trip_origin = trip.get("origin_id")
-        trip.get("destination_id")
+        # BUG-SOLVAL-02 fix: expressão morta — resultado agora atribuído
+        trip_dest = trip.get("destination_id")
 
         # Razão 1: Nenhum veículo disponível no terminal de origem
         vehicles_at_origin = []

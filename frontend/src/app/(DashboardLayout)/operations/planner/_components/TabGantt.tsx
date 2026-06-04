@@ -2209,14 +2209,34 @@ export function TabGantt({ res, lines, terminals, intervalPolicy, onWhatIfUpdate
               <Tooltip key={`handoff-${hi}`} title={`Rendição motorista — ${minToHHMM(t)}`} arrow>
                 <Box sx={{
                   position: 'absolute',
-                  left: t * scale * BASE_PIXELS_PER_MINUTE - 1,
-                  top: 0, bottom: 0, width: 3,
-                  bgcolor: 'secondary.main',
-                  opacity: 0.8,
-                  zIndex: 4,
+                  left: t * scale * BASE_PIXELS_PER_MINUTE,
+                  top: 0, bottom: 0, width: 4,
+                  bgcolor: theme.palette.error.main,
+                  opacity: 0.9,
+                  zIndex: 10,
                   cursor: 'pointer',
-                  '&:hover': { opacity: 1, width: 4 },
-                }} />
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  '&:hover': { opacity: 1, width: 6, '& .handoff-icon': { transform: 'scale(1.2)' } },
+                }}>
+                  <Box className="handoff-icon" sx={{
+                    position: 'absolute',
+                    top: -6,
+                    bgcolor: theme.palette.error.main,
+                    color: '#fff',
+                    borderRadius: '50%',
+                    p: 0.2,
+                    boxShadow: 1,
+                    transition: 'transform 0.15s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <IconUsers size={12} stroke={2.5} />
+                  </Box>
+                </Box>
               </Tooltip>
             ))}
           </Box>

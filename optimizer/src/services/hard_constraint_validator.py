@@ -97,7 +97,8 @@ class HardConstraintValidator:
                 vsp_params.get("enforce_min_interval", False),
             )
         )
-        min_layover = int(cct_params.get("min_layover_minutes", vsp_params.get("min_layover_minutes", 8)) or 8)
+        min_layover_val = cct_params.get("min_layover_minutes") if cct_params.get("min_layover_minutes") is not None else vsp_params.get("min_layover_minutes")
+        min_layover = int(min_layover_val if min_layover_val is not None else 8)
         # NOTE: min_break is a DRIVER constraint validated in _audit_duty.
         # Block (vehicle) validation uses min_layover only (technical turnaround).
         idle_behavior = str(vsp_params.get("vehicle_idle_gap_behavior", "solver_decides") or "solver_decides")

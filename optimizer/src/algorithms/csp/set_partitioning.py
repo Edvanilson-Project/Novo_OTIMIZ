@@ -130,13 +130,17 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         cost += gaps_sum * Decimal("0.1")
         cost += passive_dec * Decimal(str(self.goal_weights.get("passive_transfer", 0.25)))
 
-        # Desvios de metas
+        # BUG-SP-COST fix: O ILP gerava MAIS duties (70) que o Greedy (63) porque
+        # target_work = 85% de max_work penalizava duties longos com underwork+fairness.
+        # Resultado: ILP preferia 70 duties curtos a 63 duties longos.
+        # Fix: target_work = 95% de max_work para permitir duties mais próximos do limite.
+        # Penalidades de underwork e fairness reduzidas significativamente.
         target_work = max(
             self.greedy.min_work,
-            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))),
+            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.95))),
         )
         target_spread = min(
-            self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9))
+            self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.95))
         )
 
         overtime_dev = max(0, work - self.greedy.max_work)
@@ -151,10 +155,11 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         fairness_dev_dec = Decimal(str(fairness_dev))
 
         # Adicionar penalidades de desvio
-        cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 0.8)))
-        cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.2)))
-        cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.15)))
-        cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.05)))
+        # BUG-SP-COST fix: reduzir underwork e fairness para não fragmentar duties
+        cost += overtime_dev_dec * Decimal(str(self.goal_weights.get("overtime", 1.2)))
+        cost += underwork_dev_dec * Decimal(str(self.goal_weights.get("min_work", 0.05)))
+        cost += spread_dev_dec * Decimal(str(self.goal_weights.get("spread", 0.05)))
+        cost += fairness_dev_dec * Decimal(str(self.goal_weights.get("fairness", 0.01)))
 
         return float(cost)
 

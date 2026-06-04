@@ -172,6 +172,8 @@ def align_vsp_params_with_cct(
         "strict_zero_gap_validation",
         "strict_operational_mode",
         "strict_hard_constraints",
+        "allow_relief_points",
+        "max_block_span_minutes",
     )
     for field in passthrough_fields:
         if field not in vsp_params and cct_params.get(field) is not None:

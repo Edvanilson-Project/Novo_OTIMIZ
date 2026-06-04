@@ -338,7 +338,8 @@ class OptimizationResult:
         trip_ids = [int(t.id) for t in block.trips]
         costs = block_costs.get(int(block.id), {})
         meta = dict(block.meta)
-        vehicle_id = int(meta.get("vehicle_id", meta.get("source_block_id", block.id)))
+        # BUG-MODELS-02 fix: meta.get("vehicle_id") pode ser None explícito → int(None) crash
+        vehicle_id = int(meta.get("vehicle_id") or meta.get("source_block_id") or block.id)
         return {
             "block_id": block.id,
             "vehicle_id": vehicle_id,

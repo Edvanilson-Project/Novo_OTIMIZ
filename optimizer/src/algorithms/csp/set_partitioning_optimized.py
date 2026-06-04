@@ -197,6 +197,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         pricing_default = bool(self.vsp_params.get("enable_column_generation", True))
         self.pricing_enabled = bool(self.vsp_params.get("pricing_enabled", pricing_default))
         self._max_candidate_successors_base = max(1, int(self.vsp_params.get("max_candidate_successors_per_task", 6)))
+        self._max_trips_per_piece_base = self.max_trips_per_piece  # BUG-SPO-03: salvar para restauração
         self._max_columns_base = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
         # Auditoria 2026-05-17: padrão antigo era 1 iteração — não é Column Generation real.
         # CG legítimo itera até convergência dual (custo reduzido >= 0). Default 5 dá CG
@@ -256,7 +257,8 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         elif n_tasks > 50:
             # REDUÇÃO MODERADA: Instâncias grandes
             self.max_candidate_successors = max(3, self._max_candidate_successors_base - 1)
-            self.max_trips_per_piece = max(3, self.max_trips_per_piece - 1)
+            # BUG-SPO-03 fix: usar base salva, não self.max_trips_per_piece (que degrada)
+            self.max_trips_per_piece = max(3, self._max_trips_per_piece_base - 1)
             self.max_columns = max(3000, int(self._max_columns_base * 0.6))
             _log.debug(
                 f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
@@ -266,7 +268,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         elif n_tasks > 20:
             # REDUÇÃO LEVE: Instâncias médias
             self.max_candidate_successors = max(3, self._max_candidate_successors_base)
-            self.max_trips_per_piece = max(3, self.max_trips_per_piece)
+            self.max_trips_per_piece = max(3, self._max_trips_per_piece_base)
             self.max_columns = max(4000, int(self._max_columns_base * 0.8))
             _log.debug(
                 f"Parâmetros adaptativos: n={n_tasks}, sucessores={self.max_candidate_successors}, "
@@ -274,8 +276,9 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             )
 
         else:
-            # MODO PADRÃO: Instâncias pequenas
+            # MODO PADRÃO: Instâncias pequenas — restaurar valores originais
             self.max_candidate_successors = self._max_candidate_successors_base
+            self.max_trips_per_piece = self._max_trips_per_piece_base
             self.max_columns = self._max_columns_base
             _log.debug(f"Parâmetros adaptativos: n={n_tasks}, usando configurações padrão")
 
@@ -820,9 +823,10 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         LONG_UB_LIMIT = int(self.greedy.long_unpaid_break_limit)  # default: 90min
         LONG_UB_PENALTY_W = float(self.greedy.long_unpaid_break_penalty_weight)  # default: 0.5
 
+        # BUG-SPO-04 fix: alinhar target_work com o pai SetPartitioningCSP (95%, não 85%)
         target_work = max(
             self.greedy.min_work,
-            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))),
+            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.95))),
         )
         fairness_tolerance = int(self.goal_weights.get("fairness_tolerance_minutes", 30))
 

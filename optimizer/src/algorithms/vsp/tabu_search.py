@@ -30,6 +30,43 @@ settings = get_settings()
 Move = Tuple[int, int, int, int]
 
 
+def _block_is_feasible(
+    block: List[int],
+    trip_map: Dict[int, Trip],
+    min_gap: int = 8,
+    min_break: int = 30,
+    enforce_min_interval: bool = False,
+    connection_tolerance: int = 0,
+    strict_zero_gap_validation: bool = False,
+    strict_operational_mode: bool = False,
+    strict_hard_constraints: bool = False,
+    same_depot_required: bool = False,
+) -> bool:
+    """Verifica viabilidade de UM bloco usando trip_map."""
+    if not block:
+        return True
+
+    if same_depot_required:
+        depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
+        if len(depots) > 1:
+            return False
+
+    for i in range(len(block) - 1):
+        if not is_connection_feasible(
+            trip_map[block[i]],
+            trip_map[block[i + 1]],
+            min_layover=min_gap,
+            min_break=min_break,
+            enforce_min_interval=enforce_min_interval,
+            connection_tolerance=connection_tolerance,
+            strict_zero_gap_validation=strict_zero_gap_validation,
+            strict_operational_mode=strict_operational_mode,
+            strict_hard_constraints=strict_hard_constraints,
+        ):
+            return False
+
+    return True
+
 def _blocks_are_feasible(
     state: List[List[int]],
     trip_map: Dict[int, Trip],
@@ -44,28 +81,19 @@ def _blocks_are_feasible(
 ) -> bool:
     """Verifica viabilidade dos blocos usando trip_map."""
     for block in state:
-        if not block:
-            continue
-
-        if same_depot_required:
-            depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
-            if len(depots) > 1:
-                return False
-
-        for i in range(len(block) - 1):
-            if not is_connection_feasible(
-                trip_map[block[i]],
-                trip_map[block[i + 1]],
-                min_layover=min_gap,
-                min_break=min_break,
-                enforce_min_interval=enforce_min_interval,
-                connection_tolerance=connection_tolerance,
-                strict_zero_gap_validation=strict_zero_gap_validation,
-                strict_operational_mode=strict_operational_mode,
-                strict_hard_constraints=strict_hard_constraints,
-            ):
-                return False
-
+        if not _block_is_feasible(
+            block,
+            trip_map,
+            min_gap,
+            min_break,
+            enforce_min_interval,
+            connection_tolerance,
+            strict_zero_gap_validation,
+            strict_operational_mode,
+            strict_hard_constraints,
+            same_depot_required,
+        ):
+            return False
     return True
 
 
@@ -112,17 +140,22 @@ def _generate_reloc_neighbours(
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
 
-        if not _blocks_are_feasible(
-            new_state,
-            trip_map,
-            min_gap,
-            kwargs.get("min_break", 30),
-            kwargs.get("enforce_min_interval", False),
-            kwargs.get("connection_tolerance", 0),
-            kwargs.get("strict_zero_gap_validation", False),
-            kwargs.get("strict_operational_mode", False),
-            kwargs.get("strict_hard_constraints", False),
-        ):
+        mb = kwargs.get("min_break", 30)
+        ei = kwargs.get("enforce_min_interval", False)
+        ct = kwargs.get("connection_tolerance", 0)
+        sz = kwargs.get("strict_zero_gap_validation", False)
+        so = kwargs.get("strict_operational_mode", False)
+        sh = kwargs.get("strict_hard_constraints", False)
+
+        # BUG-TS-CRASH fix: após filtragem de blocos vazios, src_idx/dst_idx ficam stale.
+        # Encontrar os blocos que contêm as viagens afetadas pelo novo índice.
+        feasible = True
+        for bi, blk in enumerate(new_state):
+            if trip_id in blk:
+                if not _block_is_feasible(blk, trip_map, min_gap, mb, ei, ct, sz, so, sh):
+                    feasible = False
+                    break
+        if not feasible:
             continue
 
         move: Move = (trip_id, src_idx, dst_idx, insert_pos)
@@ -145,17 +178,17 @@ def _generate_reloc_neighbours(
         for block in new_state:
             block.sort(key=lambda tid: trip_map[tid].start_time)
 
-        if not _blocks_are_feasible(
-            new_state,
-            trip_map,
-            min_gap,
-            kwargs.get("min_break", 30),
-            kwargs.get("enforce_min_interval", False),
-            kwargs.get("connection_tolerance", 0),
-            kwargs.get("strict_zero_gap_validation", False),
-            kwargs.get("strict_operational_mode", False),
-            kwargs.get("strict_hard_constraints", False),
-        ):
+        mb = kwargs.get("min_break", 30)
+        ei = kwargs.get("enforce_min_interval", False)
+        ct = kwargs.get("connection_tolerance", 0)
+        sz = kwargs.get("strict_zero_gap_validation", False)
+        so = kwargs.get("strict_operational_mode", False)
+        sh = kwargs.get("strict_hard_constraints", False)
+
+        # BUG-TS-MERGE fix: após del new_state[j], se j < i o índice i fica stale.
+        # Calcular o índice correto do bloco fundido.
+        merged_idx = i if j > i else i - 1
+        if not _block_is_feasible(new_state[merged_idx], trip_map, min_gap, mb, ei, ct, sz, so, sh):
             continue
 
         move: Move = (-1, j, i, -1)
@@ -222,7 +255,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
         pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
         paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
-        min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        min_gap = int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8)
         min_break = self.vsp_params.get("min_break_minutes", 30)
         enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", False))
         connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0))
@@ -234,7 +267,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
-                int(self.vsp_params.get("min_layover_minutes", 8) or 8),
+                int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8),
                 int(self.vsp_params.get("preferred_pair_window_minutes", 120) or 120),
             )
             if bool(self.vsp_params.get("preserve_preferred_pairs", True))
@@ -319,7 +352,12 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             chosen_cost = float("inf")
 
             for move, nb, cost in scored:
-                if move not in tabu_list or cost < best_cost:
+                # BUG-TS-03 fix: comparar por trip_id (move[0]) em vez do tuple completo.
+                # Índices de bloco (move[1..3]) ficam stale após merges/filtragem.
+                # Aspiration criterion: se melhora o best global, aceitar mesmo que tabu.
+                trip_id_key = move[0]  # -1 para merges (sempre aceitos)
+                is_tabu = any(m[0] == trip_id_key and trip_id_key != -1 for m in tabu_list)
+                if not is_tabu or cost < best_cost:
                     chosen_move = move
                     chosen_state = nb
                     chosen_cost = cost

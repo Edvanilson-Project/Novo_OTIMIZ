@@ -14,7 +14,7 @@ Calibration is derived from Optibus's own schedule so the comparison is fair:
 Usage: venv/bin/python scratch/compare_optibus.py <xlsx> --out <json> [--budget S]
                                                   [--config fair|naive]
 """
-import sys, os, time, math, json, argparse, re
+import sys, os, time, math, json, argparse, re, csv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("INTERNAL_OPTIMIZER_KEY", "test-strong-key-for-pytest-32chars-ok")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
@@ -49,7 +49,45 @@ def _norm(t):
     return t + 1440 if t < 180 else t
 
 
-def load_optibus(path):
+def load_stops():
+    stops = {}
+    path = os.path.join(os.path.dirname(__file__), "../../backend/src/modules/gtfs/fixtures/sunt_salvador/stops.txt")
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(__file__), "../backend/src/modules/gtfs/fixtures/sunt_salvador/stops.txt")
+    if not os.path.exists(path):
+        return stops
+    with open(path, mode="r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            sid = row["stop_id"].strip()
+            stops[sid] = (float(row["stop_lat"]), float(row["stop_lon"]))
+    return stops
+
+
+def load_excel_deadhead_matrix(path):
+    from collections import defaultdict
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb["Duties"]
+    rows = list(ws.iter_rows(values_only=True))
+    H = {h: i for i, h in enumerate(rows[0])}
+    dh_rows = [r for r in rows[1:] if r[H["Event Type"]] == "deadhead"]
+    
+    matrix = defaultdict(list)
+    for r in dh_rows:
+        o = int(r[H["Origin Stop Id"]]) if r[H["Origin Stop Id"]] is not None else None
+        d = int(r[H["Destination Stop Id"]]) if r[H["Destination Stop Id"]] is not None else None
+        if o is None or d is None:
+            continue
+        st = r[H["Start Time"]]
+        et = r[H["End Time"]]
+        dur = _tmin(et) - _tmin(st)
+        if dur < 0: dur += 1440
+        matrix[(o, d)].append(dur)
+    wb.close()
+    return {k: min(v) for k, v in matrix.items()}
+
+
+def load_optibus(path, stops_map, excel_dh_matrix):
     """Return (trips, optibus_baseline_dict). Segments (_1,_2) merged into real trips."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb["Duties"]
@@ -107,12 +145,26 @@ def load_optibus(path):
             line_id = 1
         o_id = int(o) if o is not None else 1
         d_id = int(d) if d is not None else 2
+
+        # Look up coordinates
+        o_lat, o_lon = stops_map.get(str(o_id), (None, None))
+        d_lat, d_lon = stops_map.get(str(d_id), (None, None))
+
+        # Pre-populate deadhead times using excel matrix
+        dh_times = {}
+        for (src, dest), dur in excel_dh_matrix.items():
+            if src == d_id:
+                dh_times[int(dest)] = int(dur)
+
         trips.append(Trip(
             id=tid, line_id=line_id,
             start_time=int(s0), end_time=int(eN), duration=int(eN - s0),
             origin_id=o_id, destination_id=d_id,
             distance_km=float(dist) if dist else 1.0,
             trip_group_id=tid, segment_count=len(segs),
+            origin_latitude=o_lat, origin_longitude=o_lon,
+            destination_latitude=d_lat, destination_longitude=d_lon,
+            deadhead_times=dh_times
         ))
         tid += 1
     return trips, baseline
@@ -148,6 +200,8 @@ def make_params(config):
             "strict_zero_gap_validation": False,
             "allow_multi_line_block": True,
             "disable_scale_decomposition": False,
+            "fallback_deadhead_speed_kmh": 36.0,
+            "fallback_deadhead_floor_minutes": 5,
         }
     # naive = old defaults that produced the 42-vehicle Mussurunga result
     return {
@@ -167,7 +221,9 @@ def main():
     ap.add_argument("--config", default="fair", choices=["fair", "naive"])
     args = ap.parse_args()
 
-    trips, baseline = load_optibus(args.xlsx)
+    stops_map = load_stops()
+    excel_dh_matrix = load_excel_deadhead_matrix(args.xlsx)
+    trips, baseline = load_optibus(args.xlsx, stops_map, excel_dh_matrix)
     lb = max_concurrency(trips)
     vt = [VehicleType(id=1, name="Convencional", passenger_capacity=80,
                       fixed_cost=1000.0, cost_per_km=3.0)]

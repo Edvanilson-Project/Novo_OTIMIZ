@@ -108,7 +108,8 @@ class ReliefVehicleEstimator:
             for task in duty.tasks:
                 if not task.trips:
                     continue
-                source_bid = int(task.meta.get("source_block_id", task.id))
+                # BUG-RELIEF-01 fix: task.meta pode ser None
+                source_bid = int(task.meta.get("source_block_id", task.id)) if task.meta else task.id
                 task_trips_sorted = sorted(task.trips, key=lambda t: t.start_time)
                 start_t = task_trips_sorted[0].start_time
                 end_t = task_trips_sorted[-1].end_time

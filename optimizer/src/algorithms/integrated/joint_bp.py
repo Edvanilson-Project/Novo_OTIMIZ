@@ -18,7 +18,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ...domain.interfaces import IIntegratedSolver
-from ...domain.models import OptimizationResult, Trip, VehicleType
+from ...domain.models import CSPSolution, OptimizationResult, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from ..csp.greedy import GreedyCSP
 from ..vsp.branch_and_price import BranchAndPrice
@@ -55,7 +55,8 @@ class JointBP(BaseAlgorithm, IIntegratedSolver):
     ) -> OptimizationResult:
         self._start_timer()
         if not trips:
-            return OptimizationResult(vsp=None, csp=None)
+            # BUG-JBP-01 fix: None violates contract, use empty solution objects
+            return OptimizationResult(vsp=VSPSolution(algorithm=self.name), csp=CSPSolution(algorithm=self.name))
 
         # Extrair limites CLT do cct_params e injetar no B&P via vsp_params
         # Usa "max_driving_minutes" (mesma chave que GreedyCSP/CctParamsInput)
@@ -78,7 +79,8 @@ class JointBP(BaseAlgorithm, IIntegratedSolver):
 
         if not vsp_sol.blocks:
             _log.warning("JointBP: B&P não produziu blocos — retornando sem CSP")
-            return OptimizationResult(vsp=vsp_sol, csp=None)
+            # BUG-JBP-01 fix: csp=None violates contract, use empty CSPSolution
+            return OptimizationResult(vsp=vsp_sol, csp=CSPSolution(algorithm=self.name))
 
         csp = GreedyCSP(vsp_params=self.vsp_params, **self.cct_params)
         csp.time_budget_s = csp_budget

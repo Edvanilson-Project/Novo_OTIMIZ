@@ -81,6 +81,9 @@ class BaseAlgorithm:
             from ..domain.models import OptimizationResult
 
             evaluator = CostEvaluator()
+            # BUG-BASE-01 fix: set_costs com vsp_params para custos reais (não defaults)
+            if hasattr(self, 'vsp_params') and self.vsp_params:
+                evaluator.set_costs(self.vsp_params)
             breakdown = evaluator.vsp_cost_breakdown(solution, vehicle_types or [])
             solution.total_cost = float(breakdown.get("total", 0.0))
             solution.meta = solution.meta or {}
@@ -100,6 +103,9 @@ class BaseAlgorithm:
             from .evaluator import CostEvaluator
 
             evaluator = CostEvaluator()
+            # BUG-BASE-01 fix: set_costs com vsp_params para custos reais (não defaults)
+            if hasattr(self, 'vsp_params') and self.vsp_params:
+                evaluator.set_costs(self.vsp_params)
             breakdown = evaluator.csp_cost_breakdown(solution)
             solution.total_cost = float(breakdown.get("total", 0.0))
             solution.meta = solution.meta or {}
@@ -118,6 +124,9 @@ class BaseAlgorithm:
             from .evaluator import CostEvaluator
 
             evaluator = CostEvaluator()
+            # BUG-BASE-01 fix: set_costs com vsp_params para custos reais (não defaults)
+            if hasattr(self, 'vsp_params') and self.vsp_params:
+                evaluator.set_costs(self.vsp_params)
             total_cost = evaluator.total_cost(result, vehicle_types or [])
             result.total_cost = total_cost
             result.meta = result.meta or {}

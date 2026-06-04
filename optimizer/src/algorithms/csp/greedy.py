@@ -872,23 +872,40 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
             current: List[Trip] = []
             current_drive = 0
+            # BUG-CSP-RUN-CUT-01 fix: rastrear condução contínua sem pausa legal.
+            # `current_drive` acumula a soma total de durações no chunk, mas não
+            # distingue entre gaps que contam como descanso legal (>= min_break) e
+            # gaps que são apenas tempo ocioso curto (< min_break).
+            # Exemplo: um task com 11 viagens, gaps de 1-25min, soma de durações = 287min.
+            # O run-cutting antigo cortava quando current_drive >= 270 (max_chunk_drive),
+            # mas NÃO quando o motorista está dirigindo 287min sem nenhuma pausa >= 30min.
+            # Resultado: tasks gerados com 287-442min de condução contínua sem descanso,
+            # causando REST_VIOL na validação CCT.
+            # Fix: `continuous_no_break` só é resetado por gaps >= min_break e corta
+            # quando excede mandatory_break_after.
+            continuous_no_break = 0
             for index, trip in enumerate(ordered):
                 current.append(trip)
                 current_drive += trip.duration
+                continuous_no_break += trip.duration
                 nxt = ordered[index + 1] if index + 1 < len(ordered) else None
                 if nxt is None:
                     tasks.append(self._make_task(block, current, self._next_block_id()))
                     break
 
                 gap = nxt.start_time - trip.end_time
+                effective_gap = self._effective_gap(gap)
                 boundary = self._is_relief_boundary(trip, nxt)
                 explicit_mid_trip_relief_boundary = trip.ends_at_mid_trip_relief and nxt.starts_at_mid_trip_relief
                 next_duration = nxt.duration
-                pair_guard = (
-                    trip.trip_group_id is not None
-                    and trip.trip_group_id == nxt.trip_group_id
-                    and trip.line_id == nxt.line_id
-                )
+                
+                group1 = getattr(trip, "trip_group_id", None)
+                group2 = getattr(nxt, "trip_group_id", None)
+                pair_guard = bool(group1 is not None and group1 == group2)
+
+                # Atualizar continuous_no_break: resetar se gap >= min_break
+                if effective_gap >= self.min_break:
+                    continuous_no_break = 0
 
                 if (
                     pair_guard
@@ -906,6 +923,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     relief_cuts += 1
                     current = [current[-1]]
                     current_drive = current[-1].duration
+                    continuous_no_break = current[-1].duration
 
                 should_cut = False
                 short_positive_interval = self.apply_cct and self.enforce_min_interval and 0 < gap < self.min_break
@@ -916,6 +934,17 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     should_cut = True
                 elif explicit_mid_trip_relief_boundary:
                     should_cut = True
+                # BUG-CSP-RUN-CUT-01 v2: corte por condução contínua sem break legal,
+                # INDEPENDENTE de boundary. Quando o motorista acumula >=
+                # mandatory_break_after minutos sem uma pausa >= min_break, DEVE haver
+                # corte. Um motorista não pode dirigir > 4h30 sem pausa legal — isso é
+                # regra da CLT (Art. 235-D) e não depende de existir relief point.
+                # Antes: corte só ocorria se boundary=True. Muitas conexões têm
+                # boundary=False (dest != origin_next) e o drive acumulava 287-442min.
+                elif self.apply_cct and continuous_no_break >= self.mandatory_break_after:
+                    should_cut = True
+                elif self.apply_cct and continuous_no_break + next_duration > self.mandatory_break_after:
+                    should_cut = True
                 elif boundary and current_drive >= max_chunk_drive:
                     should_cut = True
                 elif boundary and current_drive >= meal_trigger:
@@ -925,6 +954,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 elif boundary and current_drive + next_duration > max_chunk_drive:
                     should_cut = True
                 elif boundary and self.meal_break_minutes > 0 and current_drive + next_duration > meal_trigger:
+                    should_cut = True
+                # BUG-CSP-RUN-CUT-01 fix: corte por condução contínua sem break legal.
+                # Se o motorista já dirigiu >= mandatory_break_after minutos sem uma
+                # pausa de min_break, devemos cortar mesmo que current_drive < max_chunk_drive.
+                # Isso garante que cada task gerado tenha condução contínua <= mandatory_break_after.
+                elif boundary and self.apply_cct and continuous_no_break >= self.mandatory_break_after:
+                    should_cut = True
+                elif boundary and self.apply_cct and continuous_no_break + next_duration > self.mandatory_break_after:
                     should_cut = True
                 elif boundary and not should_cut:
                     # BUG-CSP-05 fix (v1): corte por span acumulado com boundary.
@@ -961,6 +998,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     or (boundary and current_drive >= self.max_work)
                     or (boundary and current_drive + next_duration > max_chunk_drive)
                     or (boundary and self.meal_break_minutes > 0 and current_drive + next_duration > meal_trigger)
+                    # BUG-CSP-RUN-CUT-01: continuous_no_break cut é obrigatório e boundary-independent
+                    or (self.apply_cct and continuous_no_break >= self.mandatory_break_after)
+                    or (self.apply_cct and continuous_no_break + next_duration > self.mandatory_break_after)
                     # BUG-CSP-05: span cut também é obrigatório — pair_guard não deve cancelar
                     or (self.apply_cct and gap >= self.min_break and (
                         (nxt.end_time - (current[0].start_time if current else nxt.start_time) + self.pullback + self.pullout) > max_chunk_span
@@ -982,9 +1022,13 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                                 "natural_break"
                                 if gap >= self.min_break
                                 else (
-                                    "mandatory_break"
-                                    if current_drive >= max_chunk_drive
-                                    else "meal_break" if current_drive >= meal_trigger else "work_limit"
+                                    "continuous_no_break"
+                                    if continuous_no_break >= self.mandatory_break_after
+                                    else (
+                                        "mandatory_break"
+                                        if current_drive >= max_chunk_drive
+                                        else "meal_break" if current_drive >= meal_trigger else "work_limit"
+                                    )
                                 )
                             )
                         )
@@ -993,6 +1037,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     relief_cuts += 1
                     current = []
                     current_drive = 0
+                    continuous_no_break = 0
+
 
         return tasks, {
             "task_count": len(tasks),

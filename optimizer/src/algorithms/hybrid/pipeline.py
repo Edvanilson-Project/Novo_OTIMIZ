@@ -62,6 +62,8 @@ class HybridPipeline(BaseAlgorithm):
             "strict_hard_validation",
             "meal_break_minutes",
             "mandatory_break_after_minutes",
+            "allow_relief_points",
+            "max_block_span_minutes",
         )
         for field in passthrough_fields:
             if field not in self.vsp_params and self.cct_params.get(field) is not None:
@@ -112,7 +114,7 @@ class HybridPipeline(BaseAlgorithm):
             return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
         # Pré-calcular preferred_pairs UMA vez — O(n²) evitado em cada _vsp_cost call
-        min_layover = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        min_layover = int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8)
         if bool(self.vsp_params.get("preserve_preferred_pairs", True)):
             cached_pairs = build_preferred_pairs(
                 trips,
@@ -621,11 +623,25 @@ class HybridPipeline(BaseAlgorithm):
             final_cost = evaluator.total_cost(current_result, vehicle_types)
             baseline_cost = baseline_metrics["total_cost"]
 
-            if final_cost > baseline_cost:
+            # BUG-PIPELINE-INFLATE fix: hard constraint — nunca inflar veículos.
+            # O joint_duty_vehicle_swap pode aumentar veículos (36→45) ao dividir
+            # blocos para acomodar tripulação. Isso é contra-produtivo: cada veículo
+            # extra custa mais do que qualquer economia de tripulação.
+            # Regra: se veículos aumentaram OU custo total piorou, reverter.
+            vehicles_inflated = len(vsp_sol.blocks) > baseline_metrics["vehicles"]
+            cost_regressed = final_cost > baseline_cost
+
+            if vehicles_inflated or cost_regressed:
+                reason = []
+                if vehicles_inflated:
+                    reason.append(
+                        f"veículos inflados {baseline_metrics['vehicles']}→{len(vsp_sol.blocks)}"
+                    )
+                if cost_regressed:
+                    reason.append(f"custo piorou {baseline_cost:.0f}→{final_cost:.0f}")
                 logger.warning(
-                    "[PIPELINE] Pós-otimização piorou o custo total (%.2f > %.2f). Revertendo para baseline.",
-                    final_cost,
-                    baseline_cost,
+                    "[PIPELINE] Pós-otimização revertida: %s",
+                    ", ".join(reason),
                 )
                 vsp_sol = baseline_result.vsp
                 csp_final = baseline_result.csp
@@ -648,7 +664,7 @@ class HybridPipeline(BaseAlgorithm):
                 "max_trips": max(block_sizes) if block_sizes else 0,
                 "std_dev_trips": (
                     round(
-                        sum((x - (sum(block_sizes) / len(block_sizes))) ** 2 for x in block_sizes) / len(block_sizes), 2
+                        (sum((x - (sum(block_sizes) / len(block_sizes))) ** 2 for x in block_sizes) / len(block_sizes)) ** 0.5, 2
                     )
                     if block_sizes
                     else 0
@@ -662,6 +678,8 @@ class HybridPipeline(BaseAlgorithm):
             algorithm=self.name,  # type: ignore[arg-type]
             total_elapsed_ms=self._elapsed_ms(),
         )
+        # BUG-PIPE-02 fix: garantir que evaluator tem set_costs para total_cost final
+        evaluator.set_costs(self.vsp_params)
         result.total_cost = evaluator.total_cost(result, vehicle_types)
         result.meta.setdefault("performance", {})
         result.meta["performance"].update(
@@ -728,7 +746,7 @@ def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
             if duration > crew_block_limit:
                 long_block_penalty += Decimal(duration - crew_block_limit) * Decimal("200.0")
 
-    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
+    min_layover = int(vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else 8)
     if bool(vsp_params.get("preserve_preferred_pairs", True)):
         preferred_pairs = (
             cached_pairs

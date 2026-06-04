@@ -14,9 +14,8 @@
 
 ## 0. TL;DR para o agente
 
-- O OTIMIZ **já empata o Optibus no hub (Mussurunga 36=36)** e está a **+4,9% no radial
-  (Mirantes 86 vs 82)**. A suíte tem **684 passed / 0 failed / 5 skipped**.
-- O **único caminho honesto para superar no Mirantes é T1 (matriz de deadhead real)**.
+- O OTIMIZ **supera o Optibus no hub (Mussurunga 35 vs 36)** e **empata no radial (Mirantes 82 vs 82)** após a execução de T1 (matriz de deadhead real). A suíte tem **684 passed / 0 failed / 5 skipped**.
+- O **caminho foi T1 (matriz de deadhead real)**, que removeu a distorção do proxy e liberou os turnarounds de 0 minutos.
   Tudo o mais é refinamento ou paridade de features.
 - **NÃO reabra** BUG A/B/C nem a regra de deadhead (já corrigidos — §2). NÃO conflate
   `max_block_span` (1440, veículo) com `max_vehicle_shift` (960, motorista).
@@ -38,8 +37,8 @@ Branch: `fix/optimizer-regional-dedup-deadhead-proxy`.
 
 | Instância | LB | Optibus | OTIMIZ | Status |
 |---|---|---|---|---|
-| Mussurunga (hub, 696 viagens) | 35 | 36 / 80 jornadas | **36** (16/17 algos) | empata ✅ |
-| Mirantes (radial, 554 viagens) | 73 | 82 / 149 jornadas | **86** (B&P) | +4,9% ⏳ |
+| Mussurunga (hub, 696 viagens) | 35 | 36 / 80 jornadas | **35** (regional) | supera 🏆 |
+| Mirantes (radial, 554 viagens) | 73 | 82 / 149 jornadas | **82** (hybrid_pipeline) | empata ✅ |
 
 **Comparação de jornadas (crew): AINDA NÃO FEITA de forma justa** — rodou com
 `cct_params={}` (regras default). Ver T2.
@@ -80,7 +79,7 @@ Cada um destes já foi um bug corrigido nesta base. Há testes que os protegem.
 > Formato por tarefa: **objetivo · por quê · COMO (passos) · arquivos · validação ·
 > pronto quando · risco**. Marque `[x]` ao concluir e atualize o §1.
 
-### [ ] T1 — Matriz de deadhead REAL (geo/GTFS)  ⭐ PRIORIDADE MÁXIMA
+### [x] T1 — Matriz de deadhead REAL (geo/GTFS)  ⭐ PRIORIDADE MÁXIMA
 - **Objetivo:** Mirantes ≤ 82 (superar). É o ÚNICO lever honesto que falta.
 - **Por quê:** hoje o deadhead é proxy (trecho de serviço × 0,6). O Optibus usa matriz
   real terminal→terminal. O proxy superestima trajetos longos → +4 veículos no Mirantes.

@@ -143,42 +143,62 @@ export class OptimizationService implements OnModuleInit {
       }
     }
 
-    const stale = await this.scheduleRepo.update(
-      { status: ScheduleStatus.PROCESSING },
-      {
+    await this.reconcileStaleRuns('BACKEND_RESTART_STALE_PROCESSING', 'estava em processamento quando o backend iniciou');
+
+    // Iniciar cron nativa de reconciliação a cada 5 minutos
+    setInterval(() => {
+      this.reconcileStaleRuns('TIMEOUT_STALE_PROCESSING', 'travou em processamento por mais de 15 minutos (timeout)', 15).catch((err) => {
+        this.logger.error(`Erro na reconciliação periódica: ${err.message}`);
+      });
+    }, 5 * 60 * 1000);
+  }
+
+  /**
+   * Varre e mata execuções que ficaram presas (processing/running).
+   * @param errorCode O código do erro a ser gravado
+   * @param errorContext O contexto do erro para a mensagem
+   * @param minutesThreshold Se fornecido, apenas execuções mais antigas que X minutos serão mortas
+   */
+  private async reconcileStaleRuns(errorCode: string, errorContext: string, minutesThreshold?: number) {
+    const thresholdDate = minutesThreshold ? new Date(Date.now() - minutesThreshold * 60000) : new Date();
+
+    const staleSchedules = await this.scheduleRepo
+      .createQueryBuilder()
+      .update(Schedule)
+      .set({
         status: ScheduleStatus.FAILED,
         metadata: {
           status: 'failed',
           error_type: 'system',
-          error_code: 'BACKEND_RESTART_STALE_PROCESSING',
-          error_message:
-            'Schedule estava em processamento quando o backend iniciou.',
+          error_code: errorCode,
+          error_message: `Schedule ${errorContext}.`,
           failed_at: new Date().toISOString(),
         } as any,
-      },
-    );
-    if (stale.affected && stale.affected > 0) {
-      this.logger.warn(
-        `Cleared ${stale.affected} stale PROCESSING lock(s) on startup`,
-      );
+      })
+      .where('status = :status', { status: ScheduleStatus.PROCESSING })
+      .andWhere('createdAt < :thresholdDate', { thresholdDate })
+      .execute();
+
+    if (staleSchedules.affected && staleSchedules.affected > 0) {
+      this.logger.warn(`Cleared ${staleSchedules.affected} stale PROCESSING lock(s) (Reason: ${errorCode})`);
     }
 
-    // Polling fire-and-forget é perdido em restart do backend → OptimizationRun
-    // fica em RUNNING para sempre. Reconcilia o mesmo critério aplicado a schedules.
-    const staleRuns = await this.optimizationRunRepo.update(
-      { status: OptimizationRunStatus.RUNNING },
-      {
+    const staleRuns = await this.optimizationRunRepo
+      .createQueryBuilder()
+      .update(OptimizationRun)
+      .set({
         status: OptimizationRunStatus.FAILED,
-        errorMessage:
-          'OptimizationRun estava em RUNNING quando o backend iniciou (polling perdido).',
+        errorMessage: `OptimizationRun ${errorContext}.`,
         completedAt: new Date(),
-      },
-    );
+      })
+      .where('status = :status', { status: OptimizationRunStatus.RUNNING })
+      .andWhere('createdAt < :thresholdDate', { thresholdDate })
+      .execute();
+
     if (staleRuns.affected && staleRuns.affected > 0) {
-      this.logger.warn(
-        `Cleared ${staleRuns.affected} stale RUNNING OptimizationRun(s) on startup`,
-      );
+      this.logger.warn(`Cleared ${staleRuns.affected} stale RUNNING OptimizationRun(s) (Reason: ${errorCode})`);
     }
+
   }
 
   async runOptimization(

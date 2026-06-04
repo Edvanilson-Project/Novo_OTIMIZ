@@ -229,7 +229,7 @@ def test_hard_validator_rejects_short_positive_vehicle_and_driver_intervals():
         result,
         trips,
         cct_params={"apply_cct": True, "enforce_min_interval": True, "min_break_minutes": 30},
-        vsp_params={"min_layover_minutes": 0},
+        vsp_params={"min_layover_minutes": 10},
     )
 
     assert report["ok"] is False

@@ -393,11 +393,12 @@ class BundleMethodSolver(BaseAlgorithm):
                 trial_lam, trips, vehicle_types, self.cct_params, self.vsp_params, self.evaluator
             )
 
-            # Adiciona ao bundle
-            new_cut = BundleCut(point=dict(trial_lam), value=L_trial, subgradient=dict(subgrad_trial))
-            state.cuts.append(new_cut)
+            # BUG-BM-02 fix: incrementar age ANTES de adicionar new_cut
+            # para que o cut recém-adicionado comece com age=0
             for cut in state.cuts:
                 cut.age += 1
+            new_cut = BundleCut(point=dict(trial_lam), value=L_trial, subgradient=dict(subgrad_trial))
+            state.cuts.append(new_cut)
 
             # Atualiza primal UB se melhor
             primal_vsp, primal_csp = _construct_primal_heuristic(
@@ -452,7 +453,7 @@ class BundleMethodSolver(BaseAlgorithm):
             else None
         )
         final_vsp.meta.update({
-            "bundle_iterations": len(state.cuts),
+            "bundle_iterations": k + 1,  # BUG-BM-03 fix: contagem real de iterações, não de cuts
             "bundle_lower_bound": round(state.center_value, 2) if state.center_value > -math.inf else None,
             "bundle_upper_bound": round(state.best_upper_bound, 2),
             "bundle_final_gap_pct": round(final_gap, 2) if final_gap is not None else None,

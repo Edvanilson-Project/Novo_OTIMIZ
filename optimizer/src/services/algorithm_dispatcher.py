@@ -392,10 +392,10 @@ def dispatch_algorithm(
       - Algoritmos greedy, SA, tabu, genetic tratam depot_id como filtro único;
         trips com depot_id diferente do bloco são descartadas (when same_depot_required=True).
     """
-    # Unifica parâmetros dinâmicos de otimização na base do VSP e CCT
+    # BUG-DISP-01 fix: NÃO mutar dicts do chamador — criar cópias locais
     if optimization_params:
-        vsp_params.update(optimization_params)
-        cct_params.update(optimization_params)
+        vsp_params = {**vsp_params, **optimization_params}
+        cct_params = {**cct_params, **optimization_params}
 
     # Guardrail multi-depot: se há trips de depots distintos e same_depot_required=True
     # com algoritmo não-MCNF, alertar que custo cross-depot não é otimizado.
@@ -430,7 +430,7 @@ def dispatch_algorithm(
         tso = TimetableSlackOptimizer(
             slack_minutes=slack_minutes,
             step_minutes=step,
-            min_layover=int(vsp_params.get("min_layover_minutes", 8) or 8),
+            min_layover=int(vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else 8),
         )
         trips, timetable_meta = tso.optimize(trips, vehicle_types, depot_id, vsp_params)
         logger.info(

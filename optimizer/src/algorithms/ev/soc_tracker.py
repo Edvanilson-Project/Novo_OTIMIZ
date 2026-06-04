@@ -32,6 +32,7 @@ class TripSoCEvent:
     energy_recharged_kwh: float  # energia recuperada no gap
     soc_after_kwh: float
     below_minimum: bool
+    soc_deficit_kwh: float = 0.0  # BUG-SOC-01: déficit de SoC (kwh_needed - soc quando soc < kwh_needed)
 
 
 @dataclass
@@ -164,7 +165,10 @@ class EVSoCTracker:
         for i, trip in enumerate(trips):
             kwh_needed = trip.distance_km * self.kwh_per_km
             soc_before = soc
-            soc_after_trip = soc - kwh_needed
+            soc_after_trip_raw = soc - kwh_needed
+            # BUG-SOC-01 fix: SoC não pode ficar negativo; registrar déficit
+            soc_deficit = max(0.0, kwh_needed - soc)
+            soc_after_trip = max(0.0, soc_after_trip_raw)
             below_min = soc_after_trip < self.minimum_soc_kwh
 
             # Gap para próxima trip → recarregamento
@@ -188,6 +192,8 @@ class EVSoCTracker:
                     recharged = max(0.0, recharged)
 
             soc_final = soc_after_trip + recharged
+            # BUG-SOC-02 fix: SoC não pode exceder capacidade da bateria
+            soc_final = min(self.battery_kwh, soc_final)
 
             events.append(
                 TripSoCEvent(
@@ -201,6 +207,7 @@ class EVSoCTracker:
                     energy_recharged_kwh=recharged,
                     soc_after_kwh=soc_final,
                     below_minimum=below_min,
+                    soc_deficit_kwh=soc_deficit,  # BUG-SOC-01
                 )
             )
 

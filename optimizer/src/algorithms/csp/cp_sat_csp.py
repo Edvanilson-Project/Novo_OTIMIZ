@@ -218,4 +218,5 @@ class CPSatCSP(SetPartitioningCSP):
                 **run_cut_meta,
             }
         )
-        return sol
+        # BUG-CPSAT-04 fix: rescore com evaluator para consistência com outros solvers
+        return self._rescore_csp_solution(sol)

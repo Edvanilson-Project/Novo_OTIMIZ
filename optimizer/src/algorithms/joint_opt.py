@@ -12,13 +12,20 @@ logger = logging.getLogger(__name__)
 evaluator = CostEvaluator()
 
 
+def _csp_cost_with_params(csp_sol, vsp_params):
+    """BUG-JOINT-01 fix: evaluator com set_costs para usar parâmetros reais."""
+    ev = CostEvaluator()
+    if vsp_params:
+        ev.set_costs(vsp_params)
+    return ev.csp_cost(csp_sol)
+
+
 def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> VSPSolution:
     """
     Tenta fundir blocos VSP adjacentes para reduzir veículos.
     Percorre APENAS pares adjacentes (por start_time) — O(B²) no pior caso
     vs O(B³) antigo que escaneava todos os j > i.
     """
-    ConstraintEngine(vsp_params)
 
     # Shallow copy: new Block objects with new trips lists, independent meta dicts
     blocks = [
@@ -334,7 +341,7 @@ def _build_post_opt_metrics(
         "fragmentation_score": fragmentation_score,
         "uncovered_blocks": len(csp_sol.uncovered_blocks or []),
         "unassigned_trips": len(vsp_sol.unassigned_trips or []),
-        "csp_cost": round(evaluator.csp_cost(csp_sol), 2),
+        "csp_cost": round(_csp_cost_with_params(csp_sol, vsp_params), 2),  # BUG-JOINT-01 fix: evaluator com set_costs
         "preferred_pair_count": preferred_pair_count,
         "preferred_pair_breaks": preferred_pair_breaks,
         "boundary_preferred_pair_breaks": boundary_preferred_pair_breaks,
@@ -459,10 +466,11 @@ def _generate_tail_relocation_candidates(
     if limit <= 0 or max_tail_trips <= 0:
         return [], {"considered": 0, "generated": 0, "reasons": {}}
 
-    base_blocks = sorted(copy.deepcopy(vsp_sol.blocks), key=lambda block: (block.start_time, block.id))
-    candidates: List[Dict[str, Any]] = []
+    base_blocks = sorted(vsp_sol.blocks, key=lambda block: (block.start_time, block.id))
     stats: Dict[str, Any] = {"considered": 0, "generated": 0, "reasons": {}}
-    seen_signatures: set[Tuple[Tuple[int, ...], ...]] = set()
+    
+    # Pre-calculate possible moves
+    possible_moves = []
 
     for recipient_idx, recipient in enumerate(base_blocks):
         for donor_idx, donor in enumerate(base_blocks):
@@ -482,48 +490,68 @@ def _generate_tail_relocation_candidates(
                     reason_counts = stats.setdefault("reasons", {})
                     reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
                     continue
-
-                candidate_blocks = copy.deepcopy(base_blocks)
-                candidate_recipient = candidate_blocks[recipient_idx]
-                candidate_donor = candidate_blocks[donor_idx]
-                suffix_trip_ids = {int(trip.id) for trip in suffix}
-                candidate_tail = [copy.deepcopy(trip) for trip in suffix]
-                candidate_recipient.trips.extend(candidate_tail)
-                candidate_recipient.trips.sort(key=lambda trip: (trip.start_time, trip.id))
-                candidate_donor.trips = [trip for trip in candidate_donor.trips if int(trip.id) not in suffix_trip_ids]
-                candidate_blocks = _renumber_blocks(candidate_blocks)
-
-                candidate_vsp = copy.deepcopy(vsp_sol)
-                candidate_vsp.blocks = candidate_blocks
-                signature = _vsp_signature(candidate_vsp)
-                if signature in seen_signatures:
-                    continue
-                seen_signatures.add(signature)
-
-                candidates.append(
-                    {
-                        "phase": "tail_relocation",
-                        "vsp": candidate_vsp,
-                        "details": {
-                            "recipient_block_id": int(recipient.id),
-                            "donor_block_id": int(donor.id),
-                            "tail_trip_ids": [int(trip.id) for trip in suffix],
-                            "tail_size": tail_size,
-                            "gap": int(data.get("gap", 0)),
-                        },
-                    }
-                )
+                
+                possible_moves.append({
+                    "recipient_idx": recipient_idx,
+                    "donor_idx": donor_idx,
+                    "tail_size": tail_size,
+                    "suffix": suffix,
+                    "gap": int(data.get("gap", 0)),
+                })
                 stats["generated"] = int(stats.get("generated", 0)) + 1
 
-    candidates.sort(
+    # Sort possible moves before deep copying anything!
+    possible_moves.sort(
         key=lambda item: (
-            int(item["details"].get("gap", 0)),
-            -int(item["details"].get("tail_size", 0)),
-            int(item["details"].get("recipient_block_id", 0)),
-            int(item["details"].get("donor_block_id", 0)),
+            item["gap"],
+            -item["tail_size"],
+            item["recipient_idx"],
+            item["donor_idx"],
         )
     )
-    return candidates[:limit], stats
+
+    candidates: List[Dict[str, Any]] = []
+    seen_signatures: set[Tuple[Tuple[int, ...], ...]] = set()
+
+    for move in possible_moves:
+        recipient_idx = move["recipient_idx"]
+        donor_idx = move["donor_idx"]
+        suffix = move["suffix"]
+        
+        candidate_blocks = copy.deepcopy(base_blocks)
+        candidate_recipient = candidate_blocks[recipient_idx]
+        candidate_donor = candidate_blocks[donor_idx]
+        suffix_trip_ids = {int(trip.id) for trip in suffix}
+        candidate_tail = [copy.deepcopy(trip) for trip in suffix]
+        candidate_recipient.trips.extend(candidate_tail)
+        candidate_recipient.trips.sort(key=lambda trip: (trip.start_time, trip.id))
+        candidate_donor.trips = [trip for trip in candidate_donor.trips if int(trip.id) not in suffix_trip_ids]
+        candidate_blocks = _renumber_blocks(candidate_blocks)
+
+        candidate_vsp = copy.deepcopy(vsp_sol)
+        candidate_vsp.blocks = candidate_blocks
+        signature = _vsp_signature(candidate_vsp)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+
+        candidates.append(
+            {
+                "phase": "tail_relocation",
+                "vsp": candidate_vsp,
+                "details": {
+                    "recipient_block_id": int(base_blocks[recipient_idx].id),
+                    "donor_block_id": int(base_blocks[donor_idx].id),
+                    "tail_trip_ids": [int(trip.id) for trip in suffix],
+                    "tail_size": move["tail_size"],
+                    "gap": move["gap"],
+                },
+            }
+        )
+        if len(candidates) >= limit:
+            break
+
+    return candidates, stats
 
 
 def _generate_split_pair_repair_candidates(
@@ -914,28 +942,34 @@ def _local_search_2opt(blocks: List[Block], vsp_params: Dict[str, Any]) -> List[
                     if not head1 or not head2:
                         continue
 
-                    temp_b1 = Block(
-                        id=b1.id, trips=list(head1), vehicle_type_id=b1.vehicle_type_id, warnings=[], meta=b1.meta
-                    )
-                    temp_b2 = Block(
-                        id=b2.id, trips=list(head2), vehicle_type_id=b2.vehicle_type_id, warnings=[], meta=b2.meta
-                    )
-
-                    ok1, _, data1 = _can_append_suffix(temp_b1, list(tail2), vsp_params)
-                    ok2, _, data2 = _can_append_suffix(temp_b2, list(tail1), vsp_params)
-
-                    # BUG 6: Validar o bloco inteiro após a troca
-                    if ok1 and ok2:
-                        if not (
-                            is_block_feasible(list(head1) + list(tail2), vsp_params)
-                            and is_block_feasible(list(head2) + list(tail1), vsp_params)
-                        ):
-                            continue
-                    else:
+                    raw_gap1 = tail2[0].start_time - head1[-1].end_time
+                    raw_gap2 = tail1[0].start_time - head2[-1].end_time
+                    if raw_gap1 < 0 or raw_gap2 < 0:
                         continue
 
                     cur_gap1 = tail1[0].start_time - head1[-1].end_time
                     cur_gap2 = tail2[0].start_time - head2[-1].end_time
+                    if raw_gap1 + raw_gap2 >= cur_gap1 + cur_gap2:
+                        continue
+
+                    ok1, _, data1 = _can_append_suffix(
+                        Block(id=0, trips=list(head1), vehicle_type_id=b1.vehicle_type_id), list(tail2), vsp_params
+                    )
+                    if ok1:
+                        ok2, _, data2 = _can_append_suffix(
+                            Block(id=0, trips=list(head2), vehicle_type_id=b2.vehicle_type_id), list(tail1), vsp_params
+                        )
+                        if ok2:
+                            if not (
+                                is_block_feasible(list(head1) + list(tail2), vsp_params)
+                                and is_block_feasible(list(head2) + list(tail1), vsp_params)
+                            ):
+                                continue
+                        else:
+                            continue
+                    else:
+                        continue
+
                     new_gap1 = int(data1.get("gap", 0))
                     new_gap2 = int(data2.get("gap", 0))
 
@@ -1111,7 +1145,9 @@ def joint_duty_vehicle_swap(
             if kwargs.get("vsp_params")
             else (dict(vsp_sol.meta) if vsp_sol.meta else {})
         )
-        ConstraintEngine(vsp_params)
+        # BUG-JOINT-03 fix: dead code removido — ConstraintEngine(vsp_params) era instanciado e descartado
+        # BUG-JOINT-01 fix: global evaluator precisa de set_costs com parâmetros reais
+        evaluator.set_costs(vsp_params)
         solver_kwargs = {key: value for key, value in kwargs.items() if key != "vsp_params"}
         min_work = int(solver_kwargs.get("min_work_minutes", cct_params.get("min_work_minutes", 0)) or 0)
         max_unpaid_break = int(cct_params.get("max_unpaid_break_minutes", cct_params.get("max_unpaid_break", 180)))

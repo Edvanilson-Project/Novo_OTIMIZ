@@ -56,7 +56,8 @@ def _collect_lbs_from_meta(meta: Dict[str, Any]) -> Dict[str, float]:
         ("bundle_lower_bound", "bundle"),
     ):
         value = meta.get(key)
-        if value is not None and value > 0:
+        # BUG-OC-02 fix: don't discard negative LBs — they can be valid
+        if value is not None:
             sources[source_name] = float(value)
     return sources
 
@@ -94,7 +95,7 @@ def certify_optimality(result: OptimizationResult) -> Dict[str, Any]:
 
         ub_value = len(result.vsp.blocks)
 
-        # Fonte 1: Bodin & Golden — sempre disponível
+        # Fonte 1: Bodin & Golden — sempre disponível (unidade: veículos)
         bodin_lb = _bodin_golden_lb(all_trips)
         lb_sources: Dict[str, float] = {"bodin_golden": float(bodin_lb)}
 
@@ -102,8 +103,17 @@ def certify_optimality(result: OptimizationResult) -> Dict[str, Any]:
         meta_lbs = _collect_lbs_from_meta(result.vsp.meta or {})
         lb_sources.update(meta_lbs)
 
-        # Best-of: maior LB válido
-        lb_method, lb_value = max(lb_sources.items(), key=lambda kv: kv[1])
+        # BUG-OC-03 fix: separate vehicle-count LBs from cost-unit LBs.
+        # Bodin-Golden is in vehicle units → compare with len(blocks).
+        # Lagrangean/Bundle are in cost units → should NOT be compared with len(blocks).
+        vehicle_count_sources = {"bodin_golden"}
+        vehicle_lbs = {k: v for k, v in lb_sources.items() if k in vehicle_count_sources}
+
+        # Best-of vehicle-count LBs for gap calculation
+        if vehicle_lbs:
+            lb_method, lb_value = max(vehicle_lbs.items(), key=lambda kv: kv[1])
+        else:
+            lb_method, lb_value = "none", 0.0
         lb_value_int = int(round(lb_value))
 
         # CHANGED: If lower bound is invalid (0 or negative), return unavailable
@@ -145,10 +155,11 @@ def certify_optimality(result: OptimizationResult) -> Dict[str, Any]:
 
 
 def _empty_certificate() -> Dict[str, Any]:
+    # BUG-OC-01 fix: 0/0.0 is misleading — use None to indicate "unknown"
     return {
-        "vsp_lower_bound": 0,
+        "vsp_lower_bound": None,
         "vsp_actual": 0,
-        "vsp_gap_pct": 0.0,
+        "vsp_gap_pct": None,
         "vsp_gap_explained": "Sem viagens — gap indefinido.",
         "lb_method": "none",
         "lb_sources": {},

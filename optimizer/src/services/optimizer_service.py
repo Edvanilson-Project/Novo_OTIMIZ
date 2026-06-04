@@ -1101,7 +1101,8 @@ class OptimizerService:
         if gap < 0:
             return "overlap", {"gap": gap}
 
-        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_layover_val = vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else cct_params.get("min_layover_minutes")
+        min_layover = int(min_layover_val if min_layover_val is not None else 8)
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
         enforce_min_interval = bool(
             vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False))
@@ -1139,7 +1140,8 @@ class OptimizerService:
     ) -> Dict[str, Any]:
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
         # min_connection = layover técnico do veículo (sem base legal — operacional, padrão 8-15min)
-        min_connection = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_conn_val = vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else cct_params.get("min_layover_minutes")
+        min_connection = int(min_conn_val if min_conn_val is not None else 8)
         # max_shift = spread/amplitude (CCT regional, ex: 560min=9h20) — NÃO é trabalho efetivo
         max_shift = int(cct_params.get("max_shift_minutes", 560) or 560)
         # max_driving = condução contínua — CTB Art. 67-C §1-A: 4h (pausa passageiros)
@@ -1686,7 +1688,8 @@ class OptimizerService:
         if len(group_trips) < 2:
             return issues
 
-        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_layover_val = vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else cct_params.get("min_layover_minutes")
+        min_layover = int(min_layover_val if min_layover_val is not None else 8)
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
         enforce_min_interval = bool(
             vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False))
@@ -2559,7 +2562,8 @@ class OptimizerService:
             max_vehicle_shift = int(
                 vsp_params.get("max_vehicle_shift_minutes", cct_params.get("max_vehicle_shift_minutes", 960)) or 960
             )
-        min_layover = int(vsp_params.get("min_layover_minutes", cct_params.get("min_layover_minutes", 8)) or 8)
+        min_layover_val = vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else cct_params.get("min_layover_minutes")
+        min_layover = int(min_layover_val if min_layover_val is not None else 8)
         min_break = int(cct_params.get("min_break_minutes", vsp_params.get("min_break_minutes", 30)) or 30)
         enforce_min_interval = bool(
             vsp_params.get("enforce_min_interval", cct_params.get("enforce_min_interval", False))

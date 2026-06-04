@@ -102,7 +102,7 @@ def _stitch_blocks(blocks: List[Block], vsp_params: dict) -> List[Block]:
     if len(real) <= 1:
         return blocks
 
-    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
+    min_layover = int(vsp_params.get("min_layover_minutes") if vsp_params.get("min_layover_minutes") is not None else 8)
     min_break = int(vsp_params.get("min_break_minutes", 30) or 30)
     # O span do BLOCO-VEÍCULO é limitado por max_block_span_minutes (default 1440,
     # como greedy/mcnf), NÃO por max_vehicle_shift_minutes (jornada do MOTORISTA, 960).

@@ -6,6 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual } from 'typeorm';
 import ExcelJS from 'exceljs';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TripRepository } from '../database/repositories/operations.repository';
 import { DriverRepository } from '../database/repositories/operations.repository';
 import { TenantContext } from '../../common/context/tenant-context';
@@ -164,6 +166,56 @@ export class OperationsService {
     private readonly scheduleRepository: Repository<Schedule>,
   ) {}
 
+  private stopsMap: Map<string, { lat: number; lon: number }> | null = null;
+
+  private getStopsMap(): Map<string, { lat: number; lon: number }> {
+    if (this.stopsMap) {
+      return this.stopsMap;
+    }
+    this.stopsMap = new Map();
+    try {
+      const stopsPath = path.resolve(__dirname, '../gtfs/fixtures/sunt_salvador/stops.txt');
+      if (fs.existsSync(stopsPath)) {
+        const content = fs.readFileSync(stopsPath, 'utf8');
+        const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+        if (lines.length > 1) {
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const parts: string[] = [];
+            let current = '';
+            let inQuotes = false;
+            for (let j = 0; j < line.length; j++) {
+              const char = line[j];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                parts.push(current);
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            parts.push(current);
+            
+            if (parts.length >= 5) {
+              const stopId = parts[0].trim().replace(/^"|"$/g, '');
+              const lat = parseFloat(parts[3].trim().replace(/^"|"$/g, ''));
+              const lon = parseFloat(parts[4].trim().replace(/^"|"$/g, ''));
+              if (!isNaN(lat) && !isNaN(lon)) {
+                this.stopsMap.set(stopId, { lat, lon });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao carregar stops.txt no OperationsService:', err);
+    }
+    return this.stopsMap;
+  }
+
   private parseCsvBuffer(buffer: Buffer): RawRow[] {
     const text = buffer
       .toString('utf-8')
@@ -289,6 +341,13 @@ export class OperationsService {
         ? safeInt(item.duration)
         : normalizedWindow.duration;
 
+      const originId = safeInt(item.originId);
+      const destId = safeInt(item.destinationId);
+
+      const stopsMap = this.getStopsMap();
+      const originCoords = stopsMap.get(String(originId));
+      const destCoords = stopsMap.get(String(destId));
+
       tripsToSave.push(
         this.tripRepository.create({
           companyId,
@@ -298,13 +357,17 @@ export class OperationsService {
           pairId: item.pairId ? String(item.pairId) : undefined,
           startTime: normalizedWindow.startTime,
           endTime: normalizedWindow.endTime,
-          originId: safeInt(item.originId),
-          destinationId: safeInt(item.destinationId),
+          originId,
+          destinationId: destId,
           distanceKm: safeFloat(item.distanceKm),
           duration,
           direction: item.direction
             ? String(item.direction).toUpperCase()
             : undefined,
+          originLatitude: originCoords ? originCoords.lat : undefined,
+          originLongitude: originCoords ? originCoords.lon : undefined,
+          destinationLatitude: destCoords ? destCoords.lat : undefined,
+          destinationLongitude: destCoords ? destCoords.lon : undefined,
         }),
       );
     });

@@ -387,7 +387,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
-                int(self.vsp_params.get("min_layover_minutes", 8) or 8),
+                int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8),
                 int(self.vsp_params.get("preferred_pair_window_minutes", 120) or 120),
             )
             if bool(self.vsp_params.get("preserve_preferred_pairs", True))
@@ -398,7 +398,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             if bool(self.vsp_params.get("hard_pairing_vehicle_level", False))
             else 0.0
         )
-        min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        min_gap = int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8)
 
         # Parâmetros de conexão do vsp_params
         min_break = int(self.vsp_params.get("min_break_minutes", 30) or 30)

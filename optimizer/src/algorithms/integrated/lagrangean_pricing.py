@@ -226,6 +226,7 @@ def _construct_primal_heuristic(
     trips: List[Trip],
     vehicle_types: List[VehicleType],
     vsp_params: Dict[str, Any],
+    cct_params: Optional[Dict[str, Any]] = None,  # BUG-LP-03 fix: added cct_params
 ) -> Tuple[VSPSolution, CSPSolution]:
     """Heurística primal: combina soluções dos subproblemas em uma solução feasível.
 
@@ -246,7 +247,8 @@ def _construct_primal_heuristic(
 
     expected_blocks = {b.id for b in vsp_solution.blocks}
     if covered_csp_blocks != expected_blocks:
-        csp_solution = GreedyCSP(vsp_params=vsp_params).solve(vsp_solution.blocks, trips)
+        # BUG-LP-03 fix: pass cct_params to GreedyCSP so CCT constraints are respected
+        csp_solution = GreedyCSP(vsp_params=vsp_params, **(cct_params or {})).solve(vsp_solution.blocks, trips)
 
     return vsp_solution, csp_solution
 
@@ -366,8 +368,10 @@ class LagrangeanJointSolver(BaseAlgorithm, IIntegratedSolver):
                 iters_no_improvement += 1
 
             # Heurística primal a partir dos subproblemas (UB)
+            # BUG-LP-03 fix: pass cct_params to primal heuristic
             primal_vsp, primal_csp = _construct_primal_heuristic(
-                vsp_sol, csp_sol, trips, vehicle_types, self.vsp_params
+                vsp_sol, csp_sol, trips, vehicle_types, self.vsp_params,
+                cct_params=self.cct_params,
             )
             primal_result = OptimizationResult(vsp=primal_vsp, csp=primal_csp)
             try:

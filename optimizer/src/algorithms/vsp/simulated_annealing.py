@@ -35,6 +35,43 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+def _block_is_feasible(
+    block: List[int],
+    trip_map: Dict[int, Trip],
+    min_gap: int = 8,
+    min_break: int = 30,
+    enforce_min_interval: bool = False,
+    connection_tolerance: int = 0,
+    strict_zero_gap_validation: bool = False,
+    strict_operational_mode: bool = False,
+    strict_hard_constraints: bool = False,
+    same_depot_required: bool = False,
+) -> bool:
+    """Verifica viabilidade de UM bloco usando trip_map."""
+    if not block:
+        return True
+
+    if same_depot_required:
+        depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
+        if len(depots) > 1:
+            return False
+
+    for i in range(len(block) - 1):
+        if not is_connection_feasible(
+            trip_map[block[i]],
+            trip_map[block[i + 1]],
+            min_layover=min_gap,
+            min_break=min_break,
+            enforce_min_interval=enforce_min_interval,
+            connection_tolerance=connection_tolerance,
+            strict_zero_gap_validation=strict_zero_gap_validation,
+            strict_operational_mode=strict_operational_mode,
+            strict_hard_constraints=strict_hard_constraints,
+        ):
+            return False
+
+    return True
+
 def _blocks_are_feasible(
     state: List[List[int]],
     trip_map: Dict[int, Trip],
@@ -49,28 +86,19 @@ def _blocks_are_feasible(
 ) -> bool:
     """Verifica viabilidade dos blocos usando trip_map (acesso O(1))."""
     for block in state:
-        if not block:
-            continue
-
-        if same_depot_required:
-            depots = {trip_map[tid].depot_id for tid in block if trip_map[tid].depot_id is not None}
-            if len(depots) > 1:
-                return False
-
-        for i in range(len(block) - 1):
-            if not is_connection_feasible(
-                trip_map[block[i]],
-                trip_map[block[i + 1]],
-                min_layover=min_gap,
-                min_break=min_break,
-                enforce_min_interval=enforce_min_interval,
-                connection_tolerance=connection_tolerance,
-                strict_zero_gap_validation=strict_zero_gap_validation,
-                strict_operational_mode=strict_operational_mode,
-                strict_hard_constraints=strict_hard_constraints,
-            ):
-                return False
-
+        if not _block_is_feasible(
+            block,
+            trip_map,
+            min_gap,
+            min_break,
+            enforce_min_interval,
+            connection_tolerance,
+            strict_zero_gap_validation,
+            strict_operational_mode,
+            strict_hard_constraints,
+            same_depot_required,
+        ):
+            return False
     return True
 
 
@@ -105,20 +133,22 @@ def _reloc(
     new_state[dst].append(trip_id)
     new_state[dst].sort(key=lambda tid: trip_map[tid].start_time)
 
-    new_state = [b for b in new_state if b]
+    mb = kwargs.get("min_break", 30)
+    ei = kwargs.get("enforce_min_interval", False)
+    ct = kwargs.get("connection_tolerance", 0)
+    sz = kwargs.get("strict_zero_gap_validation", False)
+    so = kwargs.get("strict_operational_mode", False)
+    sh = kwargs.get("strict_hard_constraints", False)
 
-    if not _blocks_are_feasible(
-        new_state,
-        trip_map,
-        min_gap,
-        kwargs.get("min_break", 30),
-        kwargs.get("enforce_min_interval", False),
-        kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix: redundante removido
-        kwargs.get("strict_operational_mode", False),
-        kwargs.get("strict_hard_constraints", False),
-    ):
-        return None  # retorna None — caller usa current_state inalterado
+    # BUG-SA-RELOC-STALE fix: verificar viabilidade ANTES de filtrar vazios.
+    # Após L136 (remoção de vazios), src e dst têm índices stale → IndexError
+    # ou verificação do bloco errado.
+    if not _block_is_feasible(new_state[dst], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+        return None
+    if new_state[src] and not _block_is_feasible(new_state[src], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+        return None
+
+    new_state = [b for b in new_state if b]
 
     return new_state
 
@@ -147,18 +177,18 @@ def _swap2(
     for block in new_state:
         block.sort(key=lambda tid: trip_map[tid].start_time)
 
-    if not _blocks_are_feasible(
-        new_state,
-        trip_map,
-        min_gap,
-        kwargs.get("min_break", 30),
-        kwargs.get("enforce_min_interval", False),
-        kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix
-        kwargs.get("strict_operational_mode", False),
-        kwargs.get("strict_hard_constraints", False),
-    ):
-        return None  # retorna None — caller usa current_state inalterado
+    mb = kwargs.get("min_break", 30)
+    ei = kwargs.get("enforce_min_interval", False)
+    ct = kwargs.get("connection_tolerance", 0)
+    sz = kwargs.get("strict_zero_gap_validation", False)
+    so = kwargs.get("strict_operational_mode", False)
+    sh = kwargs.get("strict_hard_constraints", False)
+
+    if not _block_is_feasible(new_state[i], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+        return None
+    if not _block_is_feasible(new_state[j], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+        return None
+
 
     return new_state
 
@@ -187,18 +217,18 @@ def _split(
     if new_block:
         state.append(new_block)
 
-    if trip_map is not None and not _blocks_are_feasible(
-        state,
-        trip_map,
-        min_gap,
-        kwargs.get("min_break", 30),
-        kwargs.get("enforce_min_interval", False),
-        kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", False),
-        kwargs.get("strict_operational_mode", False),
-        kwargs.get("strict_hard_constraints", False),
-    ):
-        return original
+    mb = kwargs.get("min_break", 30)
+    ei = kwargs.get("enforce_min_interval", False)
+    ct = kwargs.get("connection_tolerance", 0)
+    sz = kwargs.get("strict_zero_gap_validation", False)
+    so = kwargs.get("strict_operational_mode", False)
+    sh = kwargs.get("strict_hard_constraints", False)
+
+    if trip_map is not None:
+        if not _block_is_feasible(state[idx], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+            return original
+        if new_block and not _block_is_feasible(state[-1], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+            return original
 
     return state
 
@@ -222,18 +252,15 @@ def _merge(
     new_state[i] = merged_block
     new_state[i].sort(key=lambda tid: trip_map[tid].start_time)
 
-    if not _blocks_are_feasible(
-        new_state,
-        trip_map,
-        min_gap,
-        kwargs.get("min_break", 30),
-        kwargs.get("enforce_min_interval", False),
-        kwargs.get("connection_tolerance", 0),
-        kwargs.get("strict_zero_gap_validation", False),  # BUG-SA-04 fix
-        kwargs.get("strict_operational_mode", False),
-        kwargs.get("strict_hard_constraints", False),
-    ):
-        return None  # retorna None — caller usa current_state inalterado
+    mb = kwargs.get("min_break", 30)
+    ei = kwargs.get("enforce_min_interval", False)
+    ct = kwargs.get("connection_tolerance", 0)
+    sz = kwargs.get("strict_zero_gap_validation", False)
+    so = kwargs.get("strict_operational_mode", False)
+    sh = kwargs.get("strict_hard_constraints", False)
+
+    if not _block_is_feasible(new_state[i], trip_map, min_gap, mb, ei, ct, sz, so, sh):
+        return None
 
     return new_state
 
@@ -306,7 +333,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
         pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
         paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
-        min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        min_gap = int(self.vsp_params.get("min_layover_minutes") if self.vsp_params.get("min_layover_minutes") is not None else 8)
         min_break = self.vsp_params.get("min_break_minutes", 30)
         enforce_min_interval = bool(self.vsp_params.get("enforce_min_interval", False))
         connection_tolerance = int(self.vsp_params.get("connection_tolerance_minutes", 0))

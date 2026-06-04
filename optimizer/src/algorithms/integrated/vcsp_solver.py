@@ -245,8 +245,9 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                 elif data["crew_style"] == "relief":
                     # Rendição atestada matematicamente. Quebrou o trabalho em dois duties
                     split_idx = data["relief_idx"]
-                    b1 = Block(id=block.id, trips=data["trips"][:split_idx])
-                    b2 = Block(id=block.id, trips=data["trips"][split_idx:])
+                    # BUG-VCSP-03 fix: b1 and b2 must have unique IDs
+                    b1 = Block(id=block_id_counter, trips=data["trips"][:split_idx])
+                    b2 = Block(id=block_id_counter + 1, trips=data["trips"][split_idx:])
 
                     d1 = Duty(id=duty_id_counter)
                     d1.add_task(b1)
@@ -263,6 +264,10 @@ class VCSPJointSolver(BaseAlgorithm, IIntegratedSolver):
                     d2._recalculate()
                     duties.append(d2)
                     duty_id_counter += 1
+
+                    # BUG-VCSP-03 fix: increment by 2 since relief creates 2 blocks
+                    block_id_counter += 2
+                    continue  # skip the default increment below
 
                 block_id_counter += 1
 

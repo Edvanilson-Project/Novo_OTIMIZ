@@ -80,7 +80,8 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
             "sa": lambda: SimulatedAnnealingVSP(vsp_params=self.vsp_params),
             "tabu": lambda: TabuSearchVSP(vsp_params=self.vsp_params),
         }
-        factory = mapping.get(self.vsp_algorithm, TabuSearchVSP)
+        # BUG-JS-01 fix: fallback must pass vsp_params to TabuSearchVSP
+        factory = mapping.get(self.vsp_algorithm, lambda: TabuSearchVSP(vsp_params=self.vsp_params))
         return factory() if callable(factory) else factory()
 
     def _csp_solver(self):
@@ -150,7 +151,8 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
                 self.vsp_params["max_block_duration_minutes"] = reduced
 
                 # Feedback granular: penaliza viagens específicas que causaram violações
-                new_violated = csp_sol.meta.get("violated_trip_ids", set())
+                # BUG-JS-02 fix: new_violated may be list, convert to set before union
+                new_violated = set(csp_sol.meta.get("violated_trip_ids", []) or [])
                 if new_violated:
                     existing = set(self.vsp_params.get("penalize_trip_ids", []))
                     self.vsp_params["penalize_trip_ids"] = existing | new_violated
