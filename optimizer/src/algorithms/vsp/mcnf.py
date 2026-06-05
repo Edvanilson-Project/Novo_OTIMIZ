@@ -381,7 +381,10 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         # Do NOT inflate min_layover here — vehicle only needs technical
         # turnaround time (min_layover). The old code raised min_layover
         # from 10→30, adding ~10 extra vehicles.
-        max_shift = int(self._p("max_vehicle_shift_minutes", 960))
+        # BUG-MCNF-04 fix: O gap entre viagens no veículo deve ser limitado pelo
+        # max_block_span_minutes (limite diário do veículo, default 1440), NÃO pelo
+        # max_vehicle_shift_minutes (jornada do motorista, default 560 na CCT).
+        max_shift = int(self._p("max_block_span_minutes", self._p("max_vehicle_shift_minutes", 1440)))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
         preserve_preferred_pairs = bool(self._p("preserve_preferred_pairs", True))

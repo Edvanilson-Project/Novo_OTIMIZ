@@ -1,0 +1,221 @@
+{
+  "instance": "Mirantes-Base2-NovasRegrasIntervalo com Regra Antiga_full_schedule.xlsx",
+  "config": "fair",
+  "merged_trips": 554,
+  "concurrency_lb": 73,
+  "optibus": {
+    "vehicles": 82,
+    "duties": 149,
+    "service_trip_rows": 724,
+    "deadhead_events": 32,
+    "lines": [
+      "1633",
+      "1636",
+      "1637",
+      "1649",
+      "167401",
+      "167402",
+      "167403"
+    ]
+  },
+  "results": [
+    {
+      "algo": "greedy",
+      "elapsed_s": 14.28,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475208.8,
+      "status": "OK"
+    },
+    {
+      "algo": "genetic",
+      "elapsed_s": 24.57,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 471239.8,
+      "status": "OK"
+    },
+    {
+      "algo": "simulated_annealing",
+      "elapsed_s": 25.01,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 471239.8,
+      "status": "OK"
+    },
+    {
+      "algo": "tabu_search",
+      "elapsed_s": 25.01,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 471338.55,
+      "status": "OK"
+    },
+    {
+      "algo": "mcnf",
+      "elapsed_s": 16.42,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 152,
+      "cost": 475103.43,
+      "status": "OK"
+    },
+    {
+      "algo": "assignment_vsp",
+      "elapsed_s": 10.96,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475218.47,
+      "status": "OK"
+    },
+    {
+      "algo": "alns",
+      "elapsed_s": 43.03,
+      "vehicles": 86,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 151,
+      "cost": 466886.34,
+      "status": "OK"
+    },
+    {
+      "algo": "branch_and_price",
+      "elapsed_s": 24.0,
+      "vehicles": 87,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 152,
+      "cost": 467509.26,
+      "status": "OK"
+    },
+    {
+      "algo": "set_partitioning",
+      "elapsed_s": 55.94,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 233,
+      "cost": 648443.68,
+      "status": "OK"
+    },
+    {
+      "algo": "hybrid_pipeline",
+      "elapsed_s": 387.4,
+      "vehicles": 84,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 154,
+      "cost": 474318.97,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_solver",
+      "elapsed_s": 16.89,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 471239.8,
+      "status": "OK"
+    },
+    {
+      "algo": "vcsp_pulp",
+      "elapsed_s": 15.21,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475208.8,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_bp",
+      "elapsed_s": 26.17,
+      "vehicles": 87,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 151,
+      "cost": 465626.76,
+      "status": "OK"
+    },
+    {
+      "algo": "regional",
+      "elapsed_s": 17.77,
+      "vehicles": 101,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 485920.59,
+      "status": "OK"
+    },
+    {
+      "algo": "lagrangean_joint",
+      "elapsed_s": 15.79,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475208.8,
+      "status": "OK"
+    },
+    {
+      "algo": "bundle_method",
+      "elapsed_s": 15.38,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475208.8,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_timetable",
+      "elapsed_s": 15.29,
+      "vehicles": 88,
+      "covered": 554,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 153,
+      "cost": 475208.8,
+      "status": "OK"
+    }
+  ],
+  "best_feasible": {
+    "algo": "hybrid_pipeline",
+    "elapsed_s": 387.4,
+    "vehicles": 84,
+    "covered": 554,
+    "unassigned": 0,
+    "overlaps": 0,
+    "duties": 154,
+    "cost": 474318.97,
+    "status": "OK"
+  }
+}

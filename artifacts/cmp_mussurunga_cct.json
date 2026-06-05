@@ -1,0 +1,223 @@
+{
+  "instance": "Estação Mussurunga - Sábado - Nova_full_schedule.xlsx",
+  "config": "fair",
+  "merged_trips": 696,
+  "concurrency_lb": 35,
+  "optibus": {
+    "vehicles": 36,
+    "duties": 80,
+    "service_trip_rows": 2218,
+    "deadhead_events": 0,
+    "lines": [
+      "1025",
+      "1041",
+      "1046",
+      "1049",
+      "1053",
+      "1055",
+      "1077",
+      "1078",
+      "1079"
+    ]
+  },
+  "results": [
+    {
+      "algo": "greedy",
+      "elapsed_s": 14.82,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 199530.48,
+      "status": "OK"
+    },
+    {
+      "algo": "genetic",
+      "elapsed_s": 23.62,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 61,
+      "cost": 199615.82,
+      "status": "OK"
+    },
+    {
+      "algo": "simulated_annealing",
+      "elapsed_s": 22.76,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "tabu_search",
+      "elapsed_s": 22.9,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "mcnf",
+      "elapsed_s": 14.55,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 198276.69,
+      "status": "OK"
+    },
+    {
+      "algo": "assignment_vsp",
+      "elapsed_s": 13.06,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 61,
+      "cost": 200839.19,
+      "status": "OK"
+    },
+    {
+      "algo": "alns",
+      "elapsed_s": 125.3,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "branch_and_price",
+      "elapsed_s": 27.15,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "set_partitioning",
+      "elapsed_s": 72.13,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 298,
+      "cost": 719920.65,
+      "status": "OK"
+    },
+    {
+      "algo": "hybrid_pipeline",
+      "elapsed_s": 283.27,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 59,
+      "cost": 196084.4,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_solver",
+      "elapsed_s": 14.41,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "vcsp_pulp",
+      "elapsed_s": 13.49,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 199530.48,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_bp",
+      "elapsed_s": 22.94,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 197379.48,
+      "status": "OK"
+    },
+    {
+      "algo": "regional",
+      "elapsed_s": 22.0,
+      "vehicles": 35,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 64,
+      "cost": 205757.36,
+      "status": "OK"
+    },
+    {
+      "algo": "lagrangean_joint",
+      "elapsed_s": 13.37,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 199530.48,
+      "status": "OK"
+    },
+    {
+      "algo": "bundle_method",
+      "elapsed_s": 13.42,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 199530.48,
+      "status": "OK"
+    },
+    {
+      "algo": "joint_timetable",
+      "elapsed_s": 13.22,
+      "vehicles": 36,
+      "covered": 696,
+      "unassigned": 0,
+      "overlaps": 0,
+      "duties": 60,
+      "cost": 199530.48,
+      "status": "OK"
+    }
+  ],
+  "best_feasible": {
+    "algo": "regional",
+    "elapsed_s": 22.0,
+    "vehicles": 35,
+    "covered": 696,
+    "unassigned": 0,
+    "overlaps": 0,
+    "duties": 64,
+    "cost": 205757.36,
+    "status": "OK"
+  }
+}

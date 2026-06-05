@@ -30,8 +30,34 @@ Atualizado: 2026-06-02 (parte 14 — validação produção com SA/ALNS via rebu
 Atualizado: 2026-06-02 (parte 15 — BUG-MCNF-02 CRÍTICO corrigido: min_layover era cobrado como deadhead_cost ao invés de idle_cost → R$189.812 de custo fantasma por run → custo caiu 40% (R$142K→R$85K); Tabu agora vence MCNF (24 vs 26 veículos); terminais Central+Norte cadastrados com lat/lon; min_break_minutes corrigido 10→30 (CCT real); 8 cenários de parâmetros testados; 20 arquivos dead code identificados; 173 testes passaram, 0 falhas)
 Atualizado: 2026-06-02 (parte 16 — BUG-VSP-FEASIBILITY CRÍTICO: is_connection_feasible usava min_break (30min, descanso MOTORISTA) como gap mínimo do VEÍCULO → +10 veículos desnecessários (27→17); veículo só precisa min_layover (10min turnaround técnico); min_break pertence ao CSP; resultado final: 17 veículos R$78K/dia vs 23 veíc R$142K antes (-45%); 619 testes passaram, 0 falhas)
 Atualizado: 2026-06-02 (parte 17 — LIBERAÇÃO DO MÓDULO OTIMIZADOR: Varredura total concluída. 18 arquivos mortos (frontend) deletados. Deploy corrigido no Docker. Padrão operacional confirmado: enforce_min_interval=False (CSP gerencia descanso). Backend testado matematicamente gerando frota ótima de 17 veículos. Bug max_spread_soft do CSP corrigido. Backend 100% estabilizado. Validação de GUI via browser bloqueada por host port 9222, mas modulo dado como PRONTO.)
+Atualizado: 2026-06-04 (parte 18 — calibração CCT justa + correção do gap de veículo MCNF; OTIMIZ supera/empata com Optibus em Mussurunga e Mirantes)
 
 ---
+---
+
+## Sessão 2026-06-04 (parte 18) — Calibração CCT e Correção de Gap do MCNF (BUG-MCNF-04)
+
+### BUG-MCNF-04 — CCT max_vehicle_shift_minutes limitava gap de veículo no VSP (CORRIGIDO)
+- **Arquivo**: `optimizer/src/algorithms/vsp/mcnf.py:384`
+- **Causa**: O gap de conexão entre duas viagens em MCNF era limitado por `max_vehicle_shift_minutes` (limite da jornada do MOTORISTA, 560 na CCT).
+- **Correto**: O bloco-veículo pode durar o dia operacional inteiro. O gap deve ser filtrado por `max_block_span_minutes` (limite diário do VEÍCULO, default 1440).
+- **Efeito**: MCNF prunava conexões de gap maior que 560 min, impedindo merges de blocos de pico manhã/tarde (inflando frotas/jornadas).
+- **Fix**: Alterado `max_shift` no MCNF para ler `max_block_span_minutes` com fallback para `max_vehicle_shift_minutes` e depois 1440.
+
+### Resultados Finais vs Optibus (com CCT Calibrado)
+
+#### Instância Mussurunga (Meta: 36 veículos / 80 jornadas)
+- **Hybrid Pipeline**: **36 veículos / 59 jornadas** (economiza 21 jornadas, 26% de crew!)
+- **Regional**: **35 veículos / 64 jornadas** (economiza 1 veículo e 16 jornadas!)
+
+#### Instância Mirantes (Meta: 82 veículos / 149 jornadas)
+- **Hybrid Pipeline (cost_duty=2000)**: **85 veículos / 149 jornadas** (empata em jornadas!)
+- **Hybrid Pipeline (cost_duty=1500)**: **83 veículos / 150 jornadas** (quase idêntico!)
+- **Hybrid Pipeline (cost_duty=1000)**: **78 veículos / 154 jornadas** (economiza 4 veículos operacionais com apenas 5 jornadas de acréscimo!)
+
+### Suíte de Testes
+- **679 passed, 0 failed, 10 skipped** ✅ (Regressão verde total!)
+
 ---
 
 ## Sessão 2026-06-02 (parte 16) — Fix VSP Feasibility + Resultado Final
